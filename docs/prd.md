@@ -16,6 +16,8 @@ The existing orchestrator and project-orchestrator agents are good at their job.
 1. **Replace the I/O, keep the intelligence.** Swap local spec files for GitHub Issues, swap local logs for PR comments, keep agent-driven orchestration.
 2. **Add just enough deterministic scaffolding** — a state file for crash recovery, a watchdog for stall detection, a reconciliation step on startup — without replacing agent judgment with a rigid state machine.
 3. **Validate the workflow before hardening it.** Get end-to-end working first, discover what the right workflow actually is, then decide what (if anything) needs to move into deterministic code.
+4. **Respect compound reliability.** Each agent handoff is a failure point. At 95% per-step reliability across 10 sequential steps, end-to-end reliability drops to ~60%. Keep the sequential chain short (≤5 agent steps per issue), define typed contracts at every agent boundary, insert verification checkpoints between phases, and treat budget exhaustion as a stop signal — not a retry trigger.
+5. **Automate execution, not judgment.** Planning (Phase 1) stays human-driven because it requires judgment about priorities, scope, and context that agents lack. Execution (Phase 2) is agent-driven because it's structured, repeatable work where agents excel. This split is deliberate — the productivity gains come from autonomous execution of well-defined tasks, not from replacing human decision-making at the planning layer.
 
 ## Target Workflow
 
@@ -99,6 +101,223 @@ PRs flagged `agendev:needs-human-review` have:
          ▼                    ▼
    GitHub API (via gh)   Target Project Codebase
 ```
+
+## Communication Diagram
+
+Shows every actor, what they send/store, where it goes, and what's in it.
+
+```
+┌─────────┐
+│  Human  │
+└────┬────┘
+     │ (1) "use plan-to-issues on docs/plan.md"
+     │ (14) reviews PRs labeled needs-human-review
+     ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        github-orchestrator                                  │
+│                                                                             │
+│  READS FROM:                                                                │
+│  ├─ GitHub Issues ◄── issue queue (via issue-queue skill)                   │
+│  ├─ config/agendev.json ◄── max rounds, token budget, labels               │
+│  └─ .agendev/state/*.json ◄── orphaned breadcrumbs (startup reconciliation)│
+│                                                                             │
+│  WRITES TO:                                                                 │
+│  ├─ GitHub Issues ──► labels (ready/in-progress/done/blocked/needs-review)  │
+│  │                    comments (blocked reason, skip reason, stale reset)    │
+│  ├─ GitHub PRs ────► create draft PR                                        │
+│  │                    comment: dispatch payload (orchestrator contract)      │
+│  │                    comment: return payload (orchestrator result)          │
+│  │                    comment: finalize verdict + reason                     │
+│  │                    update PR body: summary, review table, attention areas │
+│  │                    set ready-for-review, enable auto-merge or assign      │
+│  ├─ .agendev/state/<N>.json ──► breadcrumb (phase, round, tokens, SHAs)     │
+│  ├─ git ──► create branch, create/remove worktree, checkout main            │
+│  └─ local log ──► operational log (backup, not primary)                     │
+│                                                                             │
+│  DISPATCHES:                                                                │
+│  │                                                                          │
+│  │  (2) dispatch payload ──────────────────────────────────┐                │
+│  │  { issue_number, issue_title, issue_body_summary,       │                │
+│  │    branch, pr_number, repo, worktree,                   │                │
+│  │    max_rounds, max_token_budget }                       │                │
+│  │                                                         ▼                │
+│  │  ┌──────────────────────────────────────────────────────────────────┐     │
+│  │  │                       orchestrator                               │     │
+│  │  │                                                                  │     │
+│  │  │  READS FROM:                                                     │     │
+│  │  │  ├─ dispatch payload (from github-orchestrator)                  │     │
+│  │  │  ├─ AGENTS.md (from target project worktree)                     │     │
+│  │  │  └─ Codex return payloads (after each dev round)                 │     │
+│  │  │                                                                  │     │
+│  │  │  WRITES TO:                                                      │     │
+│  │  │  ├─ GitHub PRs ──► comment: dev round dispatch payload           │     │
+│  │  │  │                 comment: Codex return payload (per round)      │     │
+│  │  │  │                 comment: diff-review result (verdict, score,   │     │
+│  │  │  │                          checklist)                            │     │
+│  │  │  │                 comment: verification checkpoint failure       │     │
+│  │  │  │                 comment: token budget exhausted                │     │
+│  │  │  │                 update PR body: summary + attention areas      │     │
+│  │  │  ├─ .agendev/state/<N>.json ──► breadcrumb updates               │     │
+│  │  │  │   (phase, round, tokens_used, Codex return payload)           │     │
+│  │  │  └─ local log ──► operational log                                │     │
+│  │  │                                                                  │     │
+│  │  │  DISPATCHES (per round):                                         │     │
+│  │  │  │                                                               │     │
+│  │  │  │  (3) dispatch payload ────────────────────┐                   │     │
+│  │  │  │  { task, checklist, branch,               │                   │     │
+│  │  │  │    worktree, round }                      │                   │     │
+│  │  │  │                                           ▼                   │     │
+│  │  │  │  ┌────────────────────────────────────────────────────┐       │     │
+│  │  │  │  │                  Codex (dev agent)                  │       │     │
+│  │  │  │  │                                                     │       │     │
+│  │  │  │  │  READS FROM:                                        │       │     │
+│  │  │  │  │  ├─ dispatch payload (from orchestrator)            │       │     │
+│  │  │  │  │  └─ target project source code (in worktree)        │       │     │
+│  │  │  │  │                                                     │       │     │
+│  │  │  │  │  WRITES TO:                                         │       │     │
+│  │  │  │  │  ├─ target project source code (in worktree)        │       │     │
+│  │  │  │  │  ├─ git ──► commits + push to remote                │       │     │
+│  │  │  │  │  └─ return payload (to orchestrator on exit)        │       │     │
+│  │  │  │  │                                                     │       │     │
+│  │  │  │  │  DOES NOT WRITE TO:                                 │       │     │
+│  │  │  │  │  ├─ GitHub Issues (no direct access)                │       │     │
+│  │  │  │  │  ├─ GitHub PRs (no direct access)                   │       │     │
+│  │  │  │  │  └─ .agendev/state/ (orchestrator's responsibility) │       │     │
+│  │  │  │  └────────────────────────────────────────────────────┘       │     │
+│  │  │  │                         │                                     │     │
+│  │  │  │  (4) return payload ◄───┘                                     │     │
+│  │  │  │  { status, commits_pushed, commit_range,                      │     │
+│  │  │  │    files_changed/added/deleted,                               │     │
+│  │  │  │    tests_run, tests_passed, test_summary,                     │     │
+│  │  │  │    build_passed, blockers, notes }                            │     │
+│  │  │  │                                                               │     │
+│  │  │  │  (5) orchestrator posts Codex payload as PR comment           │     │
+│  │  │  │  (6) orchestrator runs verification checkpoint                │     │
+│  │  │  │  (7) if verified: orchestrator runs diff-review               │     │
+│  │  │  │  (8) orchestrator posts review result as PR comment           │     │
+│  │  │  │  (9) DECIDE: iterate (goto 3) or finish                      │     │
+│  │  │  │                                                               │     │
+│  │  └──┼───────────────────────────────────────────────────────────────┘     │
+│  │     │                                                                     │
+│  │  (10) return payload ◄──┘                                                │
+│  │  { verdict, rounds_used, final_score,                                    │
+│  │    summary, caveats, tokens_used }                                       │
+│  │                                                                          │
+│  │  (11) github-orchestrator posts orchestrator payload as PR comment       │
+│  │  (12) github-orchestrator finalizes PR (auto-merge or assign reviewer)   │
+│  │  (13) github-orchestrator updates issue labels                           │
+│  │                                                                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+STORAGE LOCATIONS SUMMARY:
+
+  GitHub Issues          GitHub PRs               Local State              Git
+  ──────────────         ──────────────           ──────────────           ──────────────
+  • labels (state)       • draft → ready          • .agendev/state/       • worktree per
+  • metadata block       • body: summary,           <N>.json:               issue
+    (dependencies,         review table,            phase, round,         • branch per
+    priority)              attention areas           tokens, round           issue
+  • comments:            • comments:                history, Codex        • commits from
+    blocked reason,        ALL dispatch/return      payloads                Codex only
+    skip reason,           payloads (full JSON    • local log             • push from
+    stale reset            in collapsible block)    (backup)                worktree only
+                           review verdicts
+                           verification failures
+                           stall/crash events
+                           finalize decisions
+                           worktree cleanup
+```
+
+**Key invariants:**
+- Codex writes only to the codebase (commits + push) and its return payload. It never touches GitHub Issues, PRs, or state files.
+- The orchestrator is the only actor that posts per-round PR comments (Codex payloads, review results, verification failures).
+- The github-orchestrator is the only actor that manages issue labels, creates/finalizes PRs, and posts dispatch/completion-level PR comments.
+- Every payload that crosses an agent boundary appears as a PR comment. The PR thread is a complete replayable log.
+- Local state (`.agendev/state/`) is a recovery mechanism, not the audit trail. GitHub is the audit trail.
+
+## Inter-Agent Contracts
+
+Every agent boundary has a typed contract defining exactly what is passed and what is returned. Ambiguous handoffs are the #1 failure mode in multi-agent systems (36.9% of all failures per the MAST study). These contracts prevent two agents from interpreting the same data differently.
+
+**Logging rule:** Every dispatch and return payload at every agent boundary must be posted as a PR comment immediately when it is sent or received. This is a hard requirement — the PR comment thread is the single source of truth for what each agent was told and what it reported back. See Operational Audit Trail for the comment format.
+
+### github-orchestrator → orchestrator
+
+**Dispatch payload:**
+```json
+{
+  "issue_number": 42,
+  "issue_title": "Fix auth token refresh",
+  "issue_body_summary": "≤500 token summary of issue body + acceptance criteria",
+  "branch": "agendev/42-fix-auth-refresh",
+  "pr_number": 87,
+  "repo": "owner/repo",
+  "worktree": "../agendev-wt-42",
+  "max_rounds": 5,
+  "max_token_budget": 500000
+}
+```
+
+**Return payload:**
+```json
+{
+  "verdict": "PASS | PASS_WITH_CAVEATS | FAIL",
+  "rounds_used": 3,
+  "final_score": 40,
+  "summary": "What was done, key decisions made",
+  "caveats": ["Optional list of areas needing human attention"],
+  "tokens_used": 287000
+}
+```
+
+### orchestrator → Codex (dev agent)
+
+**Dispatch payload:**
+```json
+{
+  "task": "Issue description + acceptance criteria (summarized)",
+  "checklist": ["Review feedback items from previous round, if any"],
+  "branch": "agendev/42-fix-auth-refresh",
+  "worktree": "../agendev-wt-42",
+  "round": 2
+}
+```
+
+**Return payload:**
+```json
+{
+  "status": "completed | failed | stuck",
+  "commits_pushed": ["abc1234", "def5678"],
+  "commit_range": "abc1234..def5678",
+  "files_changed": ["src/auth/refresh.ts", "src/auth/refresh.test.ts"],
+  "files_added": ["src/auth/token-store.ts"],
+  "files_deleted": [],
+  "tests_run": true,
+  "tests_passed": true,
+  "test_summary": "14 passed, 0 failed",
+  "build_passed": true,
+  "blockers": ["Optional: description of anything that prevented completion"],
+  "notes": "Optional: key decisions, assumptions, or deviations from the task"
+}
+```
+
+**Field semantics:**
+- `status`: `completed` = all checklist items addressed; `failed` = hit an unrecoverable error (build broken in ways unrelated to the task, missing dependencies, etc.); `stuck` = made partial progress but couldn't finish (unclear requirements, needs human clarification).
+- `commits_pushed`: SHA list of commits pushed this round. **Empty array is the critical signal** — it means no work was produced. The orchestrator must not proceed to review if this is empty.
+- `files_changed` / `files_added` / `files_deleted`: lets the orchestrator scope the diff-review to only touched files, keeping review tokens low.
+- `tests_run` / `tests_passed` / `test_summary`: if the agent ran tests, report results. Orchestrator can skip review entirely on test failure and feed errors directly back.
+- `build_passed`: whether a build/compile step succeeded. Same skip-review logic as test failure.
+- `blockers`: anything that prevented full completion. Surfaces to the orchestrator for inclusion in PR comments and human escalation decisions.
+- `notes`: design decisions or deviations the orchestrator should know about when evaluating review results.
+
+### Verification checkpoints
+
+The orchestrator validates the Codex return payload before proceeding to review:
+1. **Commits exist** — `commits_pushed` is non-empty. If empty and status is `completed`, treat as `failed` (contract violation).
+2. **Tests/build green** — if `tests_passed` or `build_passed` is false, skip review. Feed the failure details directly back to the next dev round as a checklist item — don't waste review tokens on code that doesn't compile or pass tests.
+3. **Status check** — if `stuck`, the orchestrator includes `blockers` in a PR comment and may escalate to `needs-human-review` rather than burning rounds on something the dev agent already flagged as unclear.
+
+This catches silent failures and partial completions before spending tokens on review.
 
 ## Components
 
@@ -198,9 +417,11 @@ Events that must be commented:
 
 | Event | Comment on | Content |
 |-------|-----------|---------|
-| Issue picked up for development | PR (after creation) | "Started development. Branch: `agendev/42-...`, Round 1." |
-| Dev round completed | PR | "Development round N complete. Commits: `abc..def`." |
+| Orchestrator dispatched | PR | Full dispatch payload JSON (github-orchestrator → orchestrator contract). |
+| Dev round dispatched | PR | Codex dispatch payload JSON (orchestrator → Codex contract) for this round. |
+| Dev round completed | PR | Full Codex return payload JSON. Human-readable summary line above the JSON block: "Development round N: status=completed, commits=2, tests=14 passed." |
 | Diff-review result | PR | Round number, verdict, checklist (existing behavior). |
+| Orchestrator completed | PR | Full orchestrator return payload JSON (orchestrator → github-orchestrator contract). |
 | Agent stalled (watchdog killed) | PR + Issue | "Agent stalled after N minutes of inactivity. Process terminated. State preserved for resume." |
 | Agent crashed / non-zero exit | PR + Issue | "Agent exited unexpectedly (exit code N). Last phase: DEVELOP, round 2." |
 | Max rounds exhausted | PR | "Reached maximum iteration rounds (N). Final verdict: ITERATE. Escalating to human review." |
@@ -213,8 +434,29 @@ Events that must be commented:
 | Worktree cleanup | PR | "Worktree `../agendev-wt-42` removed." |
 | PR finalized (auto-merge) | PR | "All checks passed. Auto-merge enabled." |
 | PR finalized (needs-review) | PR | "Assigned to @reviewer for human review. Reason: [caveats/failure/max rounds]." |
+| Token budget exhausted | PR + Issue | "Token budget exhausted (N/M tokens used) during phase DEVELOP round 3. Escalating to human review." |
+| Verification checkpoint failed | PR | "Post-dev verification failed: [no new commits / build failure / push missing]. Feeding errors to next dev round." |
 
-**Format:** Comments are prefixed with `<!-- agendev:event -->` so they can be distinguished from human comments and parsed programmatically if needed.
+**Format:** Comments are prefixed with `<!-- agendev:event -->` so they can be distinguished from human comments and parsed programmatically if needed. Payload comments use `<!-- agendev:payload:<type> -->` (e.g., `<!-- agendev:payload:codex-return -->`) so they can be extracted programmatically for analysis.
+
+**Payload comment format:**
+
+Every dispatch and return payload is logged as a PR comment with a human-readable summary line followed by the full JSON in a collapsible details block:
+
+```markdown
+<!-- agendev:payload:codex-return -->
+**Dev round 2 complete:** status=completed, 2 commits, 3 files changed, tests 14/14 passed
+
+<details>
+<summary>Full payload</summary>
+
+\```json
+{ ... full return payload ... }
+\```
+</details>
+```
+
+This serves three purposes: (1) the PR comment thread is a complete replay of every agent interaction for debugging, (2) payloads are machine-parseable for future tooling that analyzes agent performance across issues, (3) human reviewers can skim the summary lines and expand details only when investigating problems.
 
 **Failure to comment is not fatal.** If the `gh` call to post a comment fails (rate limit, network), log locally and continue. The comment is best-effort — the operation itself should not be blocked by a failed audit write.
 
@@ -232,8 +474,9 @@ Before each phase transition, the orchestrator writes a JSON breadcrumb to `.age
   "phase": "REVIEW",
   "round": 2,
   "rounds": [
-    { "round": 1, "score": 28, "verdict": "ITERATE", "commit_range": "abc..def" }
+    { "round": 1, "score": 28, "verdict": "ITERATE", "commit_range": "abc..def", "tokens_used": 142000 }
   ],
+  "tokens_used": 287000,
   "started_at": "2026-03-15T10:00:00Z",
   "updated_at": "2026-03-15T10:45:00Z",
   "main_sha": "abc123"
@@ -241,6 +484,13 @@ Before each phase transition, the orchestrator writes a JSON breadcrumb to `.age
 ```
 
 **Phases:** `INIT`, `DEVELOP`, `REVIEW`, `DECIDE`, `FINALIZE`, `DONE`, `FAILED`
+
+**State transition invariants:**
+- Transitions follow the happy path: `INIT → DEVELOP → REVIEW → DECIDE → FINALIZE → DONE`.
+- `FAILED` is a terminal state. No transition from `FAILED` back to `DEVELOP`, `REVIEW`, or any earlier phase. Resuming a failed issue requires human intervention (clearing the state file or starting a new run).
+- `DONE` is terminal. A completed issue is never re-entered by the orchestrator.
+- Backward transitions within the loop (`DECIDE → DEVELOP` for another round) are allowed only via `DECIDE` and only when the round counter has not hit `maxRounds`.
+- These invariants are enforced by `state.sh save`, which rejects invalid transitions. This is a structural guarantee, not a prompt-level instruction — the script refuses to write a state file that violates the rules.
 
 On crash/restart, the agent reads the state file *first*, then cross-references GitHub state (PR exists? labels correct? last comment?) to determine where to resume. The state file is the primary recovery signal; GitHub state is the validation.
 
@@ -376,13 +626,14 @@ Replaces `project-orchestrator.md`. Project-level dispatcher that pulls work fro
 4. Create feature branch from main.
 5. Create draft PR (via pr-lifecycle skill).
 6. Write initial state breadcrumb.
-7. Dispatch to orchestrator agent (via Task) with: issue details, branch, PR number, config.
+7. Dispatch to orchestrator agent (via Task) with dispatch payload (see Inter-Agent Contracts).
    The orchestrator reads AGENTS.md files itself from the project root — no need to pass them downstream.
-8. Wait for completion. Parse result.
+8. Wait for completion. Parse return payload.
 9. Based on result:
    - Clean PASS (diff-review passed, zero critical issues) → finalize with auto-merge.
    - PASS with caveats → finalize with needs-review.
    - FAIL → finalize with needs-review, comment explaining failure.
+   - Token budget exhausted → finalize with needs-review, comment with usage and last phase reached.
 10. Update issue status.
 11. Update state breadcrumb to DONE.
 12. `git checkout main && git pull`.
@@ -402,8 +653,15 @@ The existing `orchestrator.md` gains GitHub awareness. The core dev-review loop 
 **Additions:**
 
 After each development round:
-- The implementing agent (Codex) pushes its own commits to remote as part of its dev work. The orchestrator does not push on its behalf.
-- Update state breadcrumb with current phase and round.
+- Codex returns a structured payload (see Inter-Agent Contracts: orchestrator → Codex return payload). The orchestrator **must parse this before doing anything else**.
+- **Run verification checkpoint** using the Codex return payload (see Inter-Agent Contracts: Verification checkpoints). Key signals:
+  - `commits_pushed` empty → no work produced, do not review.
+  - `tests_passed: false` or `build_passed: false` → skip review, feed failures back as checklist items for next round.
+  - `status: stuck` → evaluate `blockers`; may escalate to human review instead of burning another round.
+- Use `files_changed` / `files_added` / `files_deleted` from the Codex payload to scope the diff-review to only touched files, reducing review token usage.
+- Include `notes` from the Codex payload in context for the review — design decisions and deviations inform whether the review should flag them or accept them.
+- Update state breadcrumb with current phase, round, cumulative `tokens_used`, and the Codex return payload for auditability.
+- **Check token budget.** If cumulative usage exceeds `maxTokenBudget`, stop immediately — return `FAIL` with budget exhaustion reason. Do not start another round.
 
 After each review round:
 - Post diff-review results as PR comment via pr-lifecycle skill (round number, verdict, checklist).
@@ -441,6 +699,7 @@ The only truly project-specific value is the repository (`owner/repo`), which is
     "blocked": "agendev:blocked"
   },
   "maxRounds": 5,
+  "maxTokenBudget": 500000,
   "autoMerge": {
     "enabled": true,
     "requireCI": true,
@@ -537,8 +796,11 @@ When Claude Code is invoked with `--add-dir /path/to/agendev`, it discovers agen
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
+| Compound reliability decay across agent chain | High | Verification checkpoints between dev and review phases; typed inter-agent contracts (see Inter-Agent Contracts); hard token budget per issue; max 5 sequential agent steps before a verification gate |
 | Agent misinterprets GitHub state and makes wrong decision | High | Skills return structured JSON; agent prompts include explicit decision rules with examples |
 | Agent forgets to push or post review (skips skill usage) | Medium | Agent prompt uses CRITICAL markers; review checklist includes "PR updated?" |
+| Runaway token costs from retry loops or long issues | High | Per-issue `maxTokenBudget` enforced by orchestrator; budget exhaustion is a stop signal, not a retry trigger; cumulative usage tracked in state file |
+| Coordination breakdown from ambiguous agent handoffs | High | Typed dispatch/return contracts at every agent boundary (see Inter-Agent Contracts); no implicit shared state between agents |
 | Stall during long dev round with no output | Medium | Watchdog kills after configurable timeout; state file enables resume |
 | Crash mid-run leaves orphaned PR/branch/labels | Medium | Startup reconciliation checks for inconsistent state before dispatching |
 | `gh` CLI output format changes between versions | Medium | Scripts parse JSON output (`--json` flag) not human-readable; pin minimum gh version |
@@ -562,5 +824,6 @@ If this workflow proves the concept but hits scaling or reliability limits, the 
 - Need for concurrent issue processing (multiple issues in parallel).
 - Shell script complexity exceeds maintainability threshold.
 - Need for proper unit testing of orchestration logic.
+- Compound reliability math shows end-to-end success rate below 70% (track via state file round/failure data).
 
 The deterministic CLI would move orchestration logic from LLM agents into TypeScript code — keeping LLMs only for tasks that genuinely require intelligence (writing code, reviewing code). The state machine would formalize the phases (INIT → DEVELOP → REVIEW → DECIDE → FINALIZE) with typed state transitions, Octokit for GitHub operations, and full unit testability. This is a product-grade evolution, not a rewrite — every component maps 1:1 from the agent-driven version.
