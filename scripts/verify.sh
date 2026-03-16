@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+source "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  verify.sh round <worktree> <branch> <base-sha> <payload-file>
+EOF
+}
+
+ground_truth_json() {
+  local worktree="$1"
+  local base_sha="$2"
+  local commits_json diff_json
+  commits_json="$(git -C "$worktree" rev-list --reverse "${base_sha}..HEAD" | jq -Rsc 'split("\n") | map(select(length > 0))')"
+  diff_json="$(git -C "$worktree" diff --name-status "${base_sha}..HEAD" | jq -Rsc '
+    split("\n")
+    | map(select(length > 0))
+    | map(split("\t"))
+    | {
+        files_changed: [ .[] | select(.[0] != "A" and .[0] != "D") | .[-1] ],
+        files_added: [ .[] | select(.[0] == "A") | .[-1] ],
+        files_deleted: [ .[] | select(.[0] == "D") | .[-1] ]
+      }
+  ')"
+
+  jq -n \
+    --argjson commits "$commits_json" \
+    --argjson diff "$diff_json" '
+      {
+        commits_pushed: $commits,
+        files_changed: $diff.files_changed,
+        files_added: $diff.files_added,
+        files_deleted: $diff.files_deleted
+      }
+    '
+}
+
+run_check_command() {
+  local worktree="$1"
+  local command="$2"
+  bash -lc "cd \"$worktree\" && $command"
+}
+
+verify_round() {
+  local worktree="$1"
+  local branch="$2"
+  local base_sha="$3"
+  local payload_file="$4"
+  local truth_file failures_file remote_sha local_sha test_command build_command
+  truth_file="$(mktemp "${TMPDIR:-/tmp}/agendev-verify-truth.XXXXXX")"
+  failures_file="$(mktemp "${TMPDIR:-/tmp}/agendev-verify-failures.XXXXXX")"
+  printf '[]\n' >"$failures_file"
+
+  ground_truth_json "$worktree" "$base_sha" >"$truth_file"
+
+  while IFS= read -r sha; do
+    [[ -z "$sha" ]] && continue
+    if ! git -C "$worktree" rev-parse --verify "$sha^{commit}" >/dev/null 2>&1; then
+      jq --arg failure "missing commit $sha" '. + [$failure]' "$failures_file" >"${failures_file}.tmp"
+      mv "${failures_file}.tmp" "$failures_file"
+    fi
+  done < <(jq -r '.commits_pushed[]?' "$payload_file")
+
+  if ! jq -en --slurpfile payload "$payload_file" --slurpfile truth "$truth_file" '
+    ($payload[0].files_changed == $truth[0].files_changed) and
+    ($payload[0].files_added == $truth[0].files_added) and
+    ($payload[0].files_deleted == $truth[0].files_deleted)
+  ' >/dev/null; then
+    jq '. + ["file lists do not match ground truth"]' "$failures_file" >"${failures_file}.tmp"
+    mv "${failures_file}.tmp" "$failures_file"
+  fi
+
+  local_sha="$(git -C "$worktree" rev-parse HEAD)"
+  remote_sha="$(git -C "$worktree" ls-remote origin "$branch" | awk '{print $1}')"
+  if [[ -z "$remote_sha" || "$remote_sha" != "$local_sha" ]]; then
+    jq '. + ["branch tip is not pushed to origin"]' "$failures_file" >"${failures_file}.tmp"
+    mv "${failures_file}.tmp" "$failures_file"
+  fi
+
+  test_command="$(agendev::config_get '.verification.testCommand')"
+  build_command="$(agendev::config_get '.verification.buildCommand')"
+  [[ -n "$test_command" && "$test_command" != "null" ]] || agendev::die "verification.testCommand is not configured"
+  [[ -n "$build_command" && "$build_command" != "null" ]] || agendev::die "verification.buildCommand is not configured"
+
+  if ! run_check_command "$worktree" "$test_command" >/dev/null 2>&1; then
+    jq '. + ["test command failed"]' "$failures_file" >"${failures_file}.tmp"
+    mv "${failures_file}.tmp" "$failures_file"
+  fi
+
+  if ! run_check_command "$worktree" "$build_command" >/dev/null 2>&1; then
+    jq '. + ["build command failed"]' "$failures_file" >"${failures_file}.tmp"
+    mv "${failures_file}.tmp" "$failures_file"
+  fi
+
+  if [[ "$(jq -r '.tests_passed' "$payload_file")" != "true" ]]; then
+    jq '. + ["payload reported failing tests"]' "$failures_file" >"${failures_file}.tmp"
+    mv "${failures_file}.tmp" "$failures_file"
+  fi
+
+  if [[ "$(jq -r '.build_passed' "$payload_file")" != "true" ]]; then
+    jq '. + ["payload reported failing build"]' "$failures_file" >"${failures_file}.tmp"
+    mv "${failures_file}.tmp" "$failures_file"
+  fi
+
+  jq -n \
+    --slurpfile truth "$truth_file" \
+    --slurpfile failures "$failures_file" '
+    {
+      ok: (($failures[0] | length) == 0),
+      review_allowed: (($failures[0] | length) == 0),
+      failures: $failures[0],
+      actual: $truth[0]
+    }
+  '
+
+  rm -f "$truth_file" "$failures_file"
+}
+
+case "${1:-}" in
+  round)
+    [[ $# -eq 5 ]] || { usage >&2; exit 1; }
+    verify_round "$2" "$3" "$4" "$5"
+    ;;
+  *)
+    usage >&2
+    exit 1
+    ;;
+esac
