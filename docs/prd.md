@@ -76,7 +76,7 @@ A full PERFECT-D codebase review that runs independently of the per-issue loop. 
 
 #### Trigger
 
-- **On-demand**: Human invokes explicitly (e.g. `agendev maintenance-review`).
+- **On-demand**: Human invokes explicitly (e.g. `agendev maintenance`).
 - **Queue-idle**: Optionally triggered when the issue queue has been empty for a configurable duration.
 - **Precondition**: Runs against a clean `main` branch. All in-flight PRs must be merged or parked — no point reviewing code that's about to change.
 - **Concurrency**: Mutex with the per-issue loop. Either pause the queue during maintenance review, or run read-only in a temporary worktree off `main`.
@@ -391,9 +391,47 @@ All other comment types (`<!-- agendev:payload:* -->`, `<!-- agendev:event -->`)
 - `blockers`: anything that prevented full completion. Surfaces to the orchestrator for inclusion in PR comments and human escalation decisions.
 - `notes`: design decisions or deviations the orchestrator should know about when evaluating review results.
 
+### Payload extraction & validation
+
+The Codex return payload is extracted and validated before any verification logic runs. This is the first thing the orchestrator does after Codex exits — before parsing fields, checking commits, or updating state.
+
+**Extraction:** The orchestrator instructs Codex to emit its return payload as the final message, fenced with a `<!-- agendev:payload:codex-return -->` marker. The orchestrator extracts JSON from the last fenced code block in Codex's output. If Codex exits without producing a parseable JSON block, extraction has failed.
+
+**Schema validation:** The extracted JSON is validated against required fields and types:
+
+| Field | Type | Required |
+|-------|------|----------|
+| `status` | `"completed" \| "failed" \| "stuck"` | yes |
+| `commits_pushed` | `string[]` | yes |
+| `commit_range` | `string` | yes (empty string if no commits) |
+| `files_changed` | `string[]` | yes |
+| `files_added` | `string[]` | yes |
+| `files_deleted` | `string[]` | yes |
+| `tests_run` | `boolean` | yes |
+| `tests_passed` | `boolean` | yes |
+| `test_summary` | `string` | yes |
+| `build_passed` | `boolean` | yes |
+| `blockers` | `string[]` | no (default `[]`) |
+| `notes` | `string` | no (default `""`) |
+
+Validation is a deterministic `jq` check in `state.sh validate-payload`, not an LLM judgment call. Unknown fields are ignored (forward-compatible). Missing optional fields get defaults.
+
+**Failure modes and recovery:**
+
+| Failure | Action |
+|---------|--------|
+| No JSON block in output | Synthesize a minimal `failed` payload: `{ "status": "failed", "commits_pushed": [], ... }`. Populate `files_changed`/`files_added`/`files_deleted` from `git diff --stat` (ground truth). Set `blockers: ["Codex did not return a structured payload"]`. Proceed to verification with the synthetic payload. |
+| JSON is present but malformed (parse error) | Same as above — synthesize from ground truth. |
+| JSON parses but fails schema validation (missing required field, wrong type) | Patch the payload: fill missing required fields from ground truth where possible (`commits_pushed` from `git log`, file lists from `git diff --stat`), default booleans to `false`, default strings to `""`. Log every patched field as a verification discrepancy. Proceed with the patched payload. |
+| `status` field has an unrecognized value | Treat as `"failed"`. |
+
+The key principle: **a broken payload never stops the pipeline**. Ground-truth verification (next section) already validates every claim Codex makes, so a synthetic or patched payload simply means the orchestrator relies entirely on ground truth rather than partially trusting self-report. The distinction between "Codex said X" and "we observed X" is already built into verification — payload validation just ensures there's always *something* to feed into that process.
+
+Post a verification discrepancy comment on the PR whenever synthesis or patching occurs, so the audit trail shows exactly what Codex reported vs. what was reconstructed.
+
 ### Verification checkpoints
 
-The orchestrator validates the Codex return payload before proceeding to review. Validation has two layers: **payload consistency** (does the payload make internal sense?) and **ground-truth verification** (do the claims match reality?).
+After payload extraction and validation (see above), the orchestrator runs verification checks before proceeding to review. Verification has two layers: **payload consistency** (does the validated payload make internal sense?) and **ground-truth verification** (do the claims match reality?). If the payload was synthesized or patched, some consistency checks are redundant (the synthetic values came from ground truth), but they still run — uniform code path, no special cases.
 
 **Payload consistency checks:**
 1. **Commits claimed** — `commits_pushed` is non-empty. If empty and status is `completed`, treat as `failed` (contract violation).
@@ -1150,23 +1188,90 @@ The init script is idempotent — safe to re-run at any time to auto-heal broken
 
 No agent/skill files are copied to the target project.
 
+**CLI wrapper: `bin/agendev`**
+
+A shell script that bridges "user runs `agendev run` from a target project" to "Claude Code launches with the right agents, skills, and context." It handles three problems: finding itself, finding the target project, and assembling the Claude Code invocation.
+
+**Self-resolution (finding the agendev repo):**
+
+The script resolves its own real path (following symlinks) to locate the agendev repo root:
+
+```bash
+AGENDEV_ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+```
+
+This works whether invoked via the `/usr/local/bin/agendev` symlink or directly from the repo. All agent, skill, script, and config paths are derived from `$AGENDEV_ROOT`. The `AGENDEV_ROOT` env var is exported so child processes (scripts, agents) can reference agendev assets without re-resolving.
+
+**Target project resolution (finding the repo to work on):**
+
+The script assumes the user's current working directory is inside the target project. It validates:
+
+1. `pwd` is inside a git repository (`git rev-parse --show-toplevel`). Fail with an actionable error if not.
+2. The git remote resolves to a GitHub repo (`git remote get-url origin`, parsed for `owner/repo`). Fail if no `origin` remote or not a GitHub URL.
+
+The target project root (`git rev-parse --show-toplevel`) is stored as `$TARGET_ROOT`. The repo slug (`owner/repo`) is stored as `$REPO`.
+
+**`--add-dir` interaction with target project's `.claude/`:**
+
+Claude Code loads agents and skills from its own `.claude/` directory automatically. The `--add-dir $AGENDEV_ROOT` flag *additionally* loads agendev's agents and skills. Both sets are available — they don't conflict because they have different names. If a target project has its own `.claude/agents/orchestrator.md`, it would conflict with agendev's — but the agendev orchestrator is named `github-orchestrator.md` and `orchestrator-github.md` specifically to avoid this. The `--add-dir` mechanism is additive, not overriding.
+
+**Subcommand routing:**
+
+```bash
+agendev <subcommand> [options]
+```
+
+| Subcommand | Claude Code invocation | Notes |
+|------------|----------------------|-------|
+| `run` | `claude --agent github-orchestrator --add-dir $AGENDEV_ROOT` | Append `-- --issue N` if `--issue N` is passed. Append `--dry-run` passthrough. |
+| `plan <file>` | `claude --skill plan-to-issues --add-dir $AGENDEV_ROOT -- <file>` | The plan file path is resolved to absolute before passing. |
+| `init` | `bash $AGENDEV_ROOT/scripts/setup.sh` | Pure shell — no Claude Code invocation. |
+| `report [...]` | `bash $AGENDEV_ROOT/scripts/report.sh "$@"` | Pure shell — no Claude Code invocation. |
+| `maintenance` | `claude --agent maintenance-reviewer --add-dir $AGENDEV_ROOT` | Phase 4 entry point. |
+
+**Environment setup (before Claude Code launch):**
+
+1. **Auth:** Source `$AGENDEV_ROOT/scripts/gh-auth.sh` to mint/refresh the GitHub App installation token and export `GH_TOKEN`. If auth fails (no `identity.json`, bad key, app not installed), fail with a specific error suggesting `agendev init`.
+2. **Config:** Export `AGENDEV_CONFIG=$AGENDEV_ROOT/config/agendev.json`. Scripts read this rather than accepting config paths as arguments.
+3. **PATH:** Prepend `$AGENDEV_ROOT/scripts/` to `PATH` so agents can invoke `gh-issue-queue.sh`, `state.sh`, etc. by name without absolute paths.
+4. **Target context:** Export `TARGET_ROOT` and `REPO` so agents and scripts can reference the target project without re-deriving.
+
+**Error handling:**
+
+The wrapper fails fast with human-readable errors for common problems:
+
+- Not in a git repo → "Run agendev from inside a git repository."
+- No origin remote → "No 'origin' remote found. agendev requires a GitHub-hosted repo."
+- agendev not initialized → "No .agendev/identity.json found. Run 'agendev init' first."
+- Unknown subcommand → Print usage summary.
+
 **Usage:**
 
 ```bash
+# From inside the target project directory:
+
 # Plan and create issues
 agendev plan docs/my-plan.md
 
 # Run the queue
 agendev run
 
-# Run a specific issue (bypasses queue ordering, still runs reconciliation and eligibility checks)
+# Run a specific issue
 agendev run --issue 42
 
 # Dry run — show queue and planned execution order
 agendev run --dry-run
-```
 
-The `bin/agendev` wrapper script resolves its own install location to find the agendev repo, passes `--add-dir` automatically, and routes subcommands: `run` dispatches to `--agent github-orchestrator`, `plan` dispatches to the plan-to-issues skill.
+# One-time setup
+agendev init
+
+# Cost/performance reports
+agendev report summary --last 10
+agendev report cost
+
+# Maintenance workflow
+agendev maintenance
+```
 
 No per-project configuration needed — repo is detected from `git remote`, agents and skills are loaded from the agendev repo, everything else uses centralized defaults.
 
