@@ -553,7 +553,7 @@ Dependencies:
 
 ---
 id: T25
-status: todo
+status: done
 priority: high
 depends_on:
   - T20
