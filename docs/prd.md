@@ -26,7 +26,7 @@ The existing orchestrator and project-orchestrator agents are good at their job.
 The user does local planning and thinking — in conversation with Claude Desktop, Claude Code, or on paper. When ready, they instruct their LLM to slice the plan into GitHub Issues:
 
 ```
-"use plan-to-issues skill on docs/my-plan.md"
+agendev plan docs/my-plan.md
 ```
 
 The skill creates issues with structured metadata (dependencies, priority, acceptance criteria) and the `agendev:ready` label.
@@ -36,7 +36,7 @@ The skill creates issues with structured metadata (dependencies, priority, accep
 The user starts the github-orchestrator agent:
 
 ```
-claude --add-dir /path/to/agendev --agent github-orchestrator "run"
+agendev run
 ```
 
 For each issue in the queue:
@@ -48,7 +48,7 @@ For each issue in the queue:
 5. **Push & Report**: The implementing agent (Codex) pushes its commits when done with a dev round. After each review round, orchestrator posts review results as a PR comment (round number, scorecard, checklist).
 6. **Iterate**: Orchestrator feeds review checklist back to dev agent. Repeat until PASS or max rounds.
 7. **Finalize**: Update PR description with work summary and areas needing human attention. Mark PR ready for review.
-8. **Merge or Assign**: If orchestrator has high confidence (diff-review passed cleanly, zero critical issues, CI green) — enable auto-merge. Otherwise, assign human reviewer and leave PR open.
+8. **Merge or Assign**: If orchestrator has high confidence (diff-review passed cleanly, zero critical issues, verification step confirms tests and build pass) — merge the PR. Otherwise, assign human reviewer and leave PR open.
 9. **Update Issue**: Label as `agendev:done` or `agendev:needs-human-review`.
 10. **Next**: Return to step 1.
 
@@ -332,6 +332,7 @@ The orchestrator validates the Codex return payload before proceeding to review.
 4. **Commits actually exist** — run `git log` in the worktree and confirm every SHA in `commits_pushed` is present on the branch. Agents can hallucinate SHAs.
 5. **Files match** — run `git diff --stat` against the pre-round HEAD to get the actual list of changed/added/deleted files. Compare against `files_changed` / `files_added` / `files_deleted`. Log discrepancies (use the ground-truth list for review scoping, not the claimed list).
 6. **Push verified** — confirm the branch tip on the remote matches the local branch tip (`git ls-remote origin <branch>` vs. `git rev-parse HEAD`). If the agent claims commits but didn't push, the review would be against stale code.
+7. **Tests/build independently verified** — run the configured `verification.testCommand` and `verification.buildCommand` (see Configuration) from the worktree. This is the ground-truth check for Codex's `tests_passed` and `build_passed` claims. If either command fails, treat as a verification failure regardless of what Codex reported. If no commands are configured, treat as a setup error — refuse to proceed and log the misconfiguration.
 
 If any ground-truth check fails, treat as a verification failure: post details to the PR, feed corrected information to the next dev round. Do not proceed to review with unverified claims.
 
@@ -461,7 +462,7 @@ Events that must be commented:
 | Issue marked as blocked | Issue | "Marked as blocked. Dependency #N has status: needs-human-review." |
 | Dispatch eligibility skip | Issue | "Skipped: [reason — e.g., 'missing acceptance criteria', 'branch has unresolved conflicts']." |
 | Worktree cleanup | PR | "Worktree `../agendev-wt-42` removed." |
-| PR finalized (auto-merge) | PR | "All checks passed. Auto-merge enabled." |
+| PR finalized (auto-merge) | PR | "Diff-review passed, zero critical issues, verification step confirms tests/build pass. Merging." |
 | PR finalized (needs-review) | PR | "Assigned to @reviewer for human review. Reason: [caveats/failure/max rounds]." |
 | Token budget exhausted | PR + Issue | "Token budget exhausted (N/M tokens used) during phase DEVELOP round 3. Escalating to human review." |
 | Verification checkpoint failed | PR | "Post-dev verification failed: [no new commits / build failure / push missing]. Feeding errors to next dev round." |
@@ -692,7 +693,7 @@ Replaces `project-orchestrator.md`. Project-level dispatcher that pulls work fro
 - If the orchestrator fails on an issue, don't retry. Mark as needs-review, **comment on the PR and issue** with failure details, and continue.
 - If main has diverged and the branch needs updating, rebase onto `origin/main` before the next dev round. **Comment on the PR** with the rebase result. Only auto-rebase when `origin/main` has diverged by ≤10 commits **and** the divergent commits do not touch any files in the issue's `files_changed` set. If either threshold is exceeded, mark as needs-review with the divergence details rather than risking a bad merge resolution.
 - If the queue is empty, check for blocked issues and report what's blocking them.
-- **Circuit breaker:** Track consecutive failures across issues. If `consecutiveFailureLimit` (default: 3) issues in a row result in FAIL or token budget exhaustion, **stop the queue**, post a summary comment on the most recent PR listing all failed issues, and exit. Consecutive failures often signal a systemic problem (broken CI, bad base state, missing dependency) that burning through more issues won't fix.
+- **Circuit breaker:** Track consecutive failures across issues. If `consecutiveFailureLimit` (default: 3) issues in a row result in FAIL or token budget exhaustion, **stop the queue**, post a summary comment on the most recent PR listing all failed issues, and exit. Consecutive failures often signal a systemic problem (bad base state, missing dependency, flawed issue specs) that burning through more issues won't fix.
 - **All operational decisions must be recorded** — see Operational Audit Trail (section 3).
 
 ### 9. Modified Orchestrator Agent
@@ -778,7 +779,7 @@ The only truly project-specific value is the repository (`owner/repo`), which is
   "maxTokenBudget": 500000,
   "autoMerge": {
     "enabled": true,
-    "requireCI": true,
+    "requireVerification": true,
     "requireZeroCritical": true,
     "maxComplexity": "low"
   },
@@ -786,6 +787,10 @@ The only truly project-specific value is the repository (`owner/repo`), which is
   "branchPrefix": "agendev/",
   "worktreePrefix": "agendev-wt-",
   "consecutiveFailureLimit": 3,
+  "verification": {
+    "testCommand": "npm test",
+    "buildCommand": "npm run build"
+  },
   "stall": {
     "timeoutSeconds": 600
   }
@@ -798,41 +803,39 @@ The only truly project-specific value is the repository (`owner/repo`), which is
 
 Agent and skill definitions live in the agendev repository and are loaded at runtime via `--add-dir`. Nothing is copied to target projects — agendev is the single source of truth.
 
-**Setup (one-time per project):**
+**Setup:**
 
 ```bash
 # From the target project directory
 /path/to/agendev/scripts/setup.sh
 ```
 
-This creates `.agendev/state/` for breadcrumb files and ensures required GitHub labels exist. No agent/skill files are copied.
+The setup script is idempotent — safe to re-run at any time to auto-heal broken state without overwriting things that aren't broken. It performs:
+
+1. **`.agendev/state/`** — create directory if missing.
+2. **GitHub labels** — ensure required `agendev:*` labels exist (skip any already present).
+3. **`package.json`** — create with `test` and `build` scripts if missing. If present, leave untouched.
+4. **CLI symlink** — ensure `/usr/local/bin/agendev` points to `bin/agendev` in this repo. If the symlink exists and already points to the right target, skip. If it points elsewhere or is broken, update it.
+
+No agent/skill files are copied to the target project.
 
 **Usage:**
 
-All invocations use `--add-dir` to load agendev's agents and skills from the agendev repo:
-
 ```bash
 # Plan and create issues
-claude --add-dir /path/to/agendev "use plan-to-issues skill on docs/my-plan.md"
+agendev plan docs/my-plan.md
 
 # Run the queue
-claude --add-dir /path/to/agendev --agent github-orchestrator "run"
+agendev run
 
 # Run a specific issue (bypasses queue ordering, still runs reconciliation and eligibility checks)
-claude --add-dir /path/to/agendev --agent github-orchestrator "run --issue 42"
+agendev run --issue 42
 
 # Dry run — show queue and planned execution order
-claude --add-dir /path/to/agendev --agent github-orchestrator "run --dry-run"
+agendev run --dry-run
 ```
 
-To avoid typing `--add-dir` every time, set a shell alias:
-
-```bash
-alias agendev='claude --add-dir /path/to/agendev'
-
-# Then:
-agendev --agent github-orchestrator "run"
-```
+The `bin/agendev` wrapper script resolves its own install location to find the agendev repo, passes `--add-dir` automatically, and routes subcommands: `run` dispatches to `--agent github-orchestrator`, `plan` dispatches to the plan-to-issues skill.
 
 No per-project configuration needed — repo is detected from `git remote`, agents and skills are loaded from the agendev repo, everything else uses centralized defaults.
 
@@ -851,6 +854,8 @@ agendev/
 │       │   └── SKILL.md
 │       └── plan-to-issues/
 │           └── SKILL.md
+├── bin/
+│   └── agendev                      # CLI wrapper (symlink to /usr/local/bin)
 ├── scripts/
 │   ├── gh-issue-queue.sh          # Issue queue operations (gh wrapper)
 │   ├── gh-pr-lifecycle.sh         # PR lifecycle operations (gh wrapper)
