@@ -105,6 +105,185 @@ load_state() {
   load_state_raw "$issue"
 }
 
+extract_payload_block() {
+  local source_file="$1"
+  awk '
+    /^```/ {
+      if (in_block) {
+        last_block = block
+        block = ""
+        in_block = 0
+      } else {
+        in_block = 1
+        block = ""
+      }
+      next
+    }
+    in_block {
+      block = block $0 ORS
+    }
+    END {
+      printf "%s", last_block
+    }
+  ' "$source_file"
+}
+
+ground_truth_json() {
+  local worktree="$1"
+  local base_sha="$2"
+  local commits_json diff_json
+  commits_json="$(git -C "$worktree" rev-list --reverse "${base_sha}..HEAD" | jq -Rsc 'split("\n") | map(select(length > 0))')"
+  diff_json="$(git -C "$worktree" diff --name-status "${base_sha}..HEAD" | jq -Rsc '
+    split("\n")
+    | map(select(length > 0))
+    | map(split("\t"))
+    | {
+        files_changed: [ .[] | select(.[0] != "A" and .[0] != "D") | .[-1] ],
+        files_added: [ .[] | select(.[0] == "A") | .[-1] ],
+        files_deleted: [ .[] | select(.[0] == "D") | .[-1] ]
+      }
+  ')"
+
+  jq -n \
+    --argjson commits "$commits_json" \
+    --argjson diff "$diff_json" '
+      {
+        commits_pushed: $commits,
+        commit_range: (
+          if ($commits | length) == 0 then ""
+          else ($commits[0] + ".." + $commits[-1])
+          end
+        ),
+        files_changed: $diff.files_changed,
+        files_added: $diff.files_added,
+        files_deleted: $diff.files_deleted
+      }
+    '
+}
+
+normalize_payload() {
+  local payload_file="$1"
+  local ground_truth_file="$2"
+
+  jq -n \
+    --slurpfile payload "$payload_file" \
+    --slurpfile truth "$ground_truth_file" '
+      def truth: $truth[0];
+      def p: $payload[0];
+      def string_array_or($value; $fallback):
+        if ($value | type) == "array" and all($value[]?; type == "string") then $value else $fallback end;
+      def string_or($value; $fallback):
+        if ($value | type) == "string" then $value else $fallback end;
+      def bool_or($value; $fallback):
+        if ($value | type) == "boolean" then $value else $fallback end;
+      def valid_status($value):
+        if ($value | type) == "string" and ($value == "completed" or $value == "failed" or $value == "stuck") then $value else "failed" end;
+
+      {
+        status: valid_status(p.status),
+        commits_pushed: string_array_or(p.commits_pushed; truth.commits_pushed),
+        commit_range: string_or(p.commit_range; truth.commit_range),
+        files_changed: string_array_or(p.files_changed; truth.files_changed),
+        files_added: string_array_or(p.files_added; truth.files_added),
+        files_deleted: string_array_or(p.files_deleted; truth.files_deleted),
+        tests_run: bool_or(p.tests_run; false),
+        tests_passed: bool_or(p.tests_passed; false),
+        test_summary: string_or(p.test_summary; ""),
+        build_passed: bool_or(p.build_passed; false),
+        blockers: string_array_or(p.blockers; []),
+        notes: string_or(p.notes; ""),
+        payload_source: "patched",
+        patched_fields: [
+          if (p.status | type != "string") or (p.status != "completed" and p.status != "failed" and p.status != "stuck") then "status" else empty end,
+          if (p.commits_pushed | type != "array") then "commits_pushed" else empty end,
+          if (p.commit_range | type != "string") then "commit_range" else empty end,
+          if (p.files_changed | type != "array") then "files_changed" else empty end,
+          if (p.files_added | type != "array") then "files_added" else empty end,
+          if (p.files_deleted | type != "array") then "files_deleted" else empty end,
+          if (p.tests_run | type != "boolean") then "tests_run" else empty end,
+          if (p.tests_passed | type != "boolean") then "tests_passed" else empty end,
+          if (p.test_summary | type != "string") then "test_summary" else empty end,
+          if (p.build_passed | type != "boolean") then "build_passed" else empty end,
+          if ((p | has("blockers")) and (p.blockers | type != "array")) then "blockers" else empty end,
+          if ((p | has("notes")) and (p.notes | type != "string")) then "notes" else empty end,
+          if ((p | has("blockers") | not)) then "blockers" else empty end,
+          if ((p | has("notes") | not)) then "notes" else empty end
+        ] | unique | sort,
+        discrepancies: []
+      }
+    '
+}
+
+synthesize_payload() {
+  local ground_truth_file="$1"
+  jq -n --slurpfile truth "$ground_truth_file" '
+    {
+      status: "failed",
+      commits_pushed: $truth[0].commits_pushed,
+      commit_range: $truth[0].commit_range,
+      files_changed: $truth[0].files_changed,
+      files_added: $truth[0].files_added,
+      files_deleted: $truth[0].files_deleted,
+      tests_run: false,
+      tests_passed: false,
+      test_summary: "",
+      build_passed: false,
+      blockers: ["Codex did not return a structured payload"],
+      notes: "",
+      payload_source: "synthetic",
+      patched_fields: [
+        "status",
+        "commits_pushed",
+        "commit_range",
+        "files_changed",
+        "files_added",
+        "files_deleted",
+        "tests_run",
+        "tests_passed",
+        "test_summary",
+        "build_passed",
+        "blockers",
+        "notes"
+      ],
+      discrepancies: ["payload_missing_or_malformed"]
+    }
+  '
+}
+
+extract_payload() {
+  local source_file="$1"
+  local block
+  block="$(extract_payload_block "$source_file")"
+  [[ -n "$block" ]] || agendev::die "No fenced payload block found"
+  printf '%s' "$block"
+}
+
+validate_payload() {
+  local worktree="$1"
+  local base_sha="$2"
+  local source_file="$3"
+  local extracted_file truth_file
+
+  extracted_file="$(mktemp "${TMPDIR:-/tmp}/agendev-payload.XXXXXX.json")"
+  truth_file="$(mktemp "${TMPDIR:-/tmp}/agendev-truth.XXXXXX.json")"
+  ground_truth_json "$worktree" "$base_sha" >"$truth_file"
+
+  if ! extract_payload_block "$source_file" >"$extracted_file" || [[ ! -s "$extracted_file" ]]; then
+    synthesize_payload "$truth_file"
+    rm -f "$extracted_file" "$truth_file"
+    return
+  fi
+
+  if ! jq -e '.' "$extracted_file" >/dev/null 2>&1; then
+    synthesize_payload "$truth_file"
+    rm -f "$extracted_file" "$truth_file"
+    return
+  fi
+
+  normalize_payload "$extracted_file" "$truth_file"
+  rm -f "$extracted_file" "$truth_file"
+}
+
 mentions_file() {
   printf '%s/processed-mentions.json\n' "$(state_dir_resolved)"
 }
@@ -186,6 +365,16 @@ case "${1:-}" in
     set -- $remaining
     [[ $# -eq 0 ]] || { usage >&2; exit 1; }
     has_mention "$comment_id"
+    ;;
+  extract-payload)
+    shift
+    [[ $# -eq 1 ]] || { usage >&2; exit 1; }
+    extract_payload "$1"
+    ;;
+  validate-payload)
+    shift
+    [[ $# -eq 3 ]] || { usage >&2; exit 1; }
+    validate_payload "$1" "$2" "$3"
     ;;
   *)
     usage >&2
