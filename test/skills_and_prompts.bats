@@ -74,4 +74,16 @@ load test_helper
   [ "$status" -eq 0 ]
   run grep -n "maxTokenBudget" "$AGENDEV_ROOT/.claude/agents/orchestrator-github.md"
   [ "$status" -eq 0 ]
+  run grep -n "direct importers" "$AGENDEV_ROOT/.claude/agents/orchestrator-github.md"
+  [ "$status" -eq 0 ]
+  run grep -n "gh-pr-lifecycle.sh read-actionable" "$AGENDEV_ROOT/.claude/agents/orchestrator-github.md"
+  [ "$status" -eq 0 ]
+  run grep -n "Scenario: iterate" "$AGENDEV_ROOT/.claude/agents/orchestrator-github.md"
+  [ "$status" -eq 0 ]
+  run grep -n "Scenario: stuck" "$AGENDEV_ROOT/.claude/agents/orchestrator-github.md"
+  [ "$status" -eq 0 ]
+  run grep -n "Scenario: verification failure" "$AGENDEV_ROOT/.claude/agents/orchestrator-github.md"
+  [ "$status" -eq 0 ]
+  run grep -n "Scenario: final PASS" "$AGENDEV_ROOT/.claude/agents/orchestrator-github.md"
+  [ "$status" -eq 0 ]
 }
