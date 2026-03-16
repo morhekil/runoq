@@ -100,10 +100,89 @@ list_issues() {
   done < <(printf '%s' "$raw" | jq -c '.[]') | jq -s '.'
 }
 
+dependency_status() {
+  local repo="$1"
+  local dependency="$2"
+  local done_label output
+  done_label="$(agendev::config_get '.labels.done')"
+
+  if ! output="$(agendev::gh issue view "$dependency" --repo "$repo" --json number,labels 2>/dev/null)"; then
+    jq -n --argjson dependency "$dependency" '{
+      dependency: $dependency,
+      done: false,
+      reason: ("missing dependency issue #" + ($dependency | tostring))
+    }'
+    return
+  fi
+
+  jq -n \
+    --argjson dependency "$dependency" \
+    --argjson issue "$output" \
+    --arg done_label "$done_label" '
+    if ($issue.labels | map(.name) | index($done_label)) then
+      { dependency: $dependency, done: true, reason: null }
+    else
+      {
+        dependency: $dependency,
+        done: false,
+        reason: ("dependency #" + ($dependency | tostring) + " is not agendev:done")
+      }
+    end
+  '
+}
+
+next_issue() {
+  local repo="$1"
+  local ready_label="$2"
+  local issues issue dependency dep_status blocked issue_with_status skipped
+  issues="$(list_issues "$repo" "$ready_label")"
+  skipped='[]'
+
+  while IFS= read -r issue; do
+    [[ -z "$issue" ]] && continue
+    blocked='[]'
+    while IFS= read -r dependency; do
+      [[ -z "$dependency" ]] && continue
+      dep_status="$(dependency_status "$repo" "$dependency")"
+      if [[ "$(printf '%s' "$dep_status" | jq -r '.done')" != "true" ]]; then
+        blocked="$(jq -n --argjson blocked "$blocked" --argjson status "$dep_status" '$blocked + [$status.reason]')"
+      fi
+    done < <(printf '%s' "$issue" | jq -r '.depends_on[]?')
+
+    issue_with_status="$(jq -n \
+      --argjson issue "$issue" \
+      --argjson blocked "$blocked" '
+      $issue + {
+        actionable: ($blocked | length == 0),
+        blocked_reasons: $blocked
+      }
+    ')"
+
+    if [[ "$(printf '%s' "$issue_with_status" | jq -r '.actionable')" == "true" ]]; then
+      jq -n --argjson issue "$issue_with_status" --argjson skipped "$skipped" '{
+        issue: $issue,
+        skipped: $skipped
+      }'
+      return
+    fi
+
+    skipped="$(jq -n --argjson skipped "$skipped" --argjson issue "$issue_with_status" '$skipped + [$issue]')"
+  done < <(printf '%s' "$issues" | jq -c 'sort_by((.priority // 999999), .number)[]')
+
+  jq -n --argjson skipped "$skipped" '{
+    issue: null,
+    skipped: $skipped
+  }'
+}
+
 case "${1:-}" in
   list)
     [[ $# -eq 3 ]] || { usage >&2; exit 1; }
     list_issues "$2" "$3"
+    ;;
+  next)
+    [[ $# -eq 3 ]] || { usage >&2; exit 1; }
+    next_issue "$2" "$3"
     ;;
   *)
     usage >&2
