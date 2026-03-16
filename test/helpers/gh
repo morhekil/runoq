@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+scenario="${FAKE_GH_SCENARIO:-}"
+state_file="${FAKE_GH_STATE:-}"
+log_file="${FAKE_GH_LOG:-}"
+
+[[ -n "$scenario" ]] || { echo "fake-gh: FAKE_GH_SCENARIO is required" >&2; exit 1; }
+[[ -f "$scenario" ]] || { echo "fake-gh: scenario file not found: $scenario" >&2; exit 1; }
+[[ -n "$state_file" ]] || { echo "fake-gh: FAKE_GH_STATE is required" >&2; exit 1; }
+
+index=0
+if [[ -f "$state_file" ]]; then
+  index="$(cat "$state_file")"
+fi
+
+full_cmd="$*"
+if [[ -n "$log_file" ]]; then
+  printf '%s\n' "$full_cmd" >>"$log_file"
+fi
+
+rule="$(jq -cer --argjson index "$index" '.[$index]' "$scenario" 2>/dev/null || true)"
+[[ -n "$rule" ]] || { echo "fake-gh: no rule for call index $index: $full_cmd" >&2; exit 1; }
+
+while IFS= read -r expected; do
+  [[ -z "$expected" ]] && continue
+  if [[ "$full_cmd" != *"$expected"* ]]; then
+    echo "fake-gh: expected '$expected' in command '$full_cmd'" >&2
+    exit 1
+  fi
+done < <(printf '%s' "$rule" | jq -r '.contains[]?')
+
+printf '%s' "$((index + 1))" >"$state_file"
+
+stdout="$(printf '%s' "$rule" | jq -r '.stdout // empty')"
+stdout_file="$(printf '%s' "$rule" | jq -r '.stdout_file // empty')"
+stderr="$(printf '%s' "$rule" | jq -r '.stderr // empty')"
+exit_code="$(printf '%s' "$rule" | jq -r '.exit_code // 0')"
+
+if [[ -n "$stdout_file" && "$stdout_file" != "null" ]]; then
+  cat "$stdout_file"
+elif [[ -n "$stdout" && "$stdout" != "null" ]]; then
+  printf '%s' "$stdout"
+fi
+
+if [[ -n "$stderr" && "$stderr" != "null" ]]; then
+  printf '%s' "$stderr" >&2
+fi
+
+exit "$exit_code"

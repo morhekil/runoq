@@ -3,6 +3,7 @@ setup() {
   export AGENDEV_CONFIG="$AGENDEV_ROOT/config/agendev.json"
   export TEST_TMPDIR
   TEST_TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/agendev-test.XXXXXX")"
+  export PATH="$AGENDEV_ROOT/test/helpers:$PATH"
 }
 
 teardown() {
@@ -25,4 +26,24 @@ make_git_repo() {
 
 run_bash() {
   run bash -lc "$1"
+}
+
+fixture_path() {
+  printf '%s/test/fixtures/%s\n' "$AGENDEV_ROOT" "$1"
+}
+
+load_fixture() {
+  cat "$(fixture_path "$1")"
+}
+
+write_fake_gh_scenario() {
+  local path="$1"
+  cat >"$path"
+}
+
+use_fake_gh() {
+  export FAKE_GH_SCENARIO="$1"
+  export FAKE_GH_STATE="${2:-$TEST_TMPDIR/fake-gh.state}"
+  export FAKE_GH_LOG="${3:-$TEST_TMPDIR/fake-gh.log}"
+  export GH_BIN="$AGENDEV_ROOT/test/helpers/gh"
 }
