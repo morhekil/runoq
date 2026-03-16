@@ -47,7 +47,7 @@ claude_exec() {
 run_subcommand() {
   prepare_target_context
   prepare_auth
-  claude_exec --agent github-orchestrator --add-dir "$AGENDEV_ROOT" -- "$@"
+  "$AGENDEV_ROOT/scripts/run.sh" "$@"
 }
 
 plan_subcommand() {
