@@ -243,7 +243,7 @@ Every agent boundary has a typed contract defining exactly what is passed and wh
 
 **Comment read isolation:** Agents must not read the full PR comment history back as input — doing so pulls the entire audit trail (payload dumps, event markers) into the context window, wasting tokens on data the agent already has in memory. Agents selectively read only two kinds of comments:
 
-1. **@-mentioned comments.** Comments containing `@agendev` (or a configured agent handle) are actionable feedback directed at the agent. Human reviewers use this to flag concerns, request changes, or provide clarification.
+1. **@-mentioned comments.** Comments containing `@agendev` (the GitHub App's handle, configurable via `identity.handle` in `agendev.json`) are actionable feedback directed at the agent. Human reviewers use this to flag concerns, request changes, or provide clarification. The agent only processes mentions from authorized users (see Agent Identity, Addressability & Authorization).
 2. **Line-level review comments.** GitHub review comments attached to specific code lines are inherently actionable and always read.
 
 All other comment types (`<!-- agendev:payload:* -->`, `<!-- agendev:event -->`) are write-only audit artifacts — posted for human debugging and post-hoc analysis, never consumed by agents. The `gh-pr-lifecycle.sh` script provides a `read-actionable` subcommand that filters comments by these criteria, so agents never see the raw comment stream.
@@ -399,6 +399,17 @@ gh-pr-lifecycle.sh read-actionable <repo> <pr-number> <agent-handle>
 # 1. PR-level comments containing @<agent-handle>
 # 2. All line-level review comments (inherently actionable)
 # Filters out agendev:payload and agendev:event audit comments
+
+gh-pr-lifecycle.sh poll-mentions <repo> <agent-handle> [--since <timestamp>]
+# Returns JSON array of unprocessed @-mentions across open PRs and issues:
+# { comment_id, author, body, pr_number/issue_number, created_at, context_type }
+# Used by github-orchestrator's mention polling cycle
+
+gh-pr-lifecycle.sh check-permission <repo> <username> <required-level>
+# Checks commenter's repository permission via GitHub API
+# required-level: "read" | "write" | "admin"
+# Returns exit 0 if user has >= required-level, exit 1 otherwise
+# Used by authorization layer before processing any @-mention
 ```
 
 ### 2. Git Worktree Isolation
@@ -775,6 +786,14 @@ The only truly project-specific value is the repository (`owner/repo`), which is
     "needsReview": "agendev:needs-human-review",
     "blocked": "agendev:blocked"
   },
+  "identity": {
+    "appSlug": "agendev",
+    "handle": "agendev"
+  },
+  "authorization": {
+    "minimumPermission": "write",
+    "denyResponse": "comment"
+  },
   "maxRounds": 5,
   "maxTokenBudget": 500000,
   "autoMerge": {
@@ -799,6 +818,215 @@ The only truly project-specific value is the repository (`owner/repo`), which is
 
 **Repository detection:** Scripts run `git remote get-url origin` and parse `owner/repo` from the SSH or HTTPS URL. This works for any GitHub-hosted repo without configuration.
 
+## Agent Identity, Addressability & Authorization
+
+Agents that post comments, manage labels, and create PRs must be clearly distinguishable from human contributors. Humans must be able to address agents directly in comments. And agents must only respond to authorized users.
+
+### Identity: GitHub App
+
+A custom GitHub App ("agendev") provides a distinct, unfakeable identity for all agent actions on GitHub.
+
+When the app authenticates via an installation token, every API action is attributed to `agendev[bot]` — a separate actor with:
+- A **`[bot]` badge** on all comments (cannot be faked by human users).
+- Its own avatar, profile page, and description.
+- A distinct actor in the GitHub timeline and audit log — no ambiguity with any human contributor.
+
+**Why a GitHub App, not a machine user or comment markers:**
+- Machine user accounts have no `[bot]` badge, consume org seats, require long-lived PATs, and sit in a gray area of GitHub ToS for automation.
+- Comment markers (HTML comments, emoji prefixes) leave all actions attributed to the human whose `gh` token is used — fundamentally confusing in multi-person projects and impossible to distinguish in the GitHub audit log.
+- GitHub Apps are the platform-intended mechanism for automation. They get rotating short-lived tokens (not long-lived PATs), native @-mentionability, and clean identity separation.
+
+**App permissions required:**
+- **Issues:** Read & Write (labels, comments, metadata)
+- **Pull Requests:** Read & Write (create, comment, review, merge)
+- **Contents:** Read (branch verification, file checks)
+
+**App creation** is a one-time manual step (github.com → Settings → Developer Settings → GitHub Apps → New). The app is owned by the user or org. A single app serves all repos.
+
+**App installation** onto each target repo is scripted as part of `agendev init` (see Setup below), with the exception of the initial authorization click — GitHub requires a human to approve app installation on their repo/org. This is one-time per repo (or once per org for org-wide installation).
+
+### Credentials & Per-Project Binding
+
+The GitHub App has two credential components:
+
+1. **Private key** (global, shared across all repos): Downloaded once when the app is created. Standard path: `~/.agendev/app-key.pem`. The init script and `gh-auth.sh` auto-detect this path without prompting. Override via `AGENDEV_APP_KEY` env var for CI or non-standard setups. Never committed to any repo.
+
+2. **Installation binding** (per-project): After the app is installed on a repo, the installation ID and app ID are stored in the target project's `.agendev/identity.json`:
+
+```json
+{
+  "appId": 123456,
+  "installationId": 789012,
+  "privateKeyPath": "~/.agendev/app-key.pem"
+}
+```
+
+`.agendev/` is already gitignored. The `privateKeyPath` supports `~` expansion and can be overridden via the `AGENDEV_APP_KEY` environment variable for CI or shared-machine scenarios.
+
+**Token lifecycle:** At runtime, `scripts/gh-auth.sh` reads `identity.json`, signs a JWT with the private key, exchanges it for a short-lived installation token (expires in 1 hour), and exports `GH_TOKEN`. All existing `gh` commands in the scripts work unchanged — they pick up `GH_TOKEN` from the environment. The auth script is called once at the start of each `agendev run` or `agendev plan` invocation; the token is refreshed if it expires mid-run.
+
+### Addressability
+
+GitHub Apps are @-mentionable natively. When the app is installed on a repo, any user can write `@agendev` in a comment (PR or issue) and it functions as a real GitHub mention — the app receives a notification.
+
+The `read-actionable` subcommand in `gh-pr-lifecycle.sh` already filters for `@<agent-handle>` mentions. With the GitHub App approach, this becomes a first-class GitHub mechanism rather than plain text matching.
+
+**Inbound command processing:** The github-orchestrator gains a second event source alongside the issue queue. Between issue dispatches (and during idle periods), it polls for unprocessed `@agendev` mentions across open PRs and issues in the repo:
+
+```bash
+gh-pr-lifecycle.sh poll-mentions <repo> <agent-handle> [--since <timestamp>]
+# Returns: JSON array of unprocessed @-mentions with:
+#   comment_id, author, body, pr_number/issue_number, created_at, author_permission
+```
+
+Each mention is processed once (tracked by comment ID in `.agendev/state/processed-mentions.json` to avoid duplicates across polling cycles).
+
+**Mention types and responses:**
+- **Question on a PR** (`@agendev why did you change X?`): Agent reads the PR context and referenced code, posts a reply explaining the rationale from the review/dev round that produced the change.
+- **Action request on a PR** (`@agendev please also add tests for the edge case`): Agent treats this as an additional checklist item. If the PR is still in-progress, it's folded into the next dev round. If the PR is finalized, a comment is posted explaining that the PR is closed for agent work and suggesting a follow-up issue.
+- **Action request on an issue** (`@agendev pick this up next`): Agent re-prioritizes or immediately dispatches the issue (subject to eligibility checks).
+
+### Authorization
+
+Agents must not act on commands from unauthorized users. A drive-by `@agendev merge this` from a random contributor must be ignored.
+
+**Permission check:** Before processing any `@agendev` mention, the agent resolves the commenter's repository permission:
+
+```bash
+gh-pr-lifecycle.sh check-permission <repo> <username> <required-level>
+# Calls: gh api repos/{owner}/{repo}/collaborators/{username}/permission
+# Returns: exit 0 if authorized, exit 1 if not
+```
+
+**Authorization config** (in `agendev.json`):
+
+```json
+{
+  "authorization": {
+    "minimumPermission": "write",
+    "denyResponse": "comment"
+  }
+}
+```
+
+- **`minimumPermission`**: The minimum repo permission level required to command the agent. Default `"write"` — any collaborator with `write` or `admin` permission can address the agent. Can be set to `"admin"` to restrict further.
+
+**`denyResponse`** controls behavior when an unauthorized user @-mentions the agent:
+- `"comment"`: Post a reply: "I can only respond to users with write access to this repository."
+- `"silent"`: No response. The mention is logged locally but not acknowledged on GitHub.
+
+**Authorization applies only to commands** (mentions that request action). Informational audit comments posted by the agent (payload dumps, event markers) are write-only and don't involve any inbound authorization.
+
+### C3 Component Diagrams
+
+#### Agent Identity & Auth Infrastructure
+
+Shows how the GitHub App identity layer integrates with the existing agendev runtime.
+
+```
+┌─ GitHub App: agendev ─────────────────────────────────────────────────────┐
+│  Registered once at github.com/settings/apps                              │
+│  Permissions: Issues (RW), Pull Requests (RW), Contents (R)              │
+│  Installed per-repo (or per-org)                                          │
+│                                                                           │
+│  Identity: "agendev[bot]" with [bot] badge                               │
+│  @-mentionable as @agendev on any installed repo                         │
+└───────────────────────────────────────────────────────────────────────────┘
+         │                                          ▲
+         │ installation token (1hr TTL)             │ @agendev mentions
+         │                                          │ (comments on PRs/issues)
+         ▼                                          │
+┌─ agendev runtime ─────────────────────────────────┼───────────────────────┐
+│                                                    │                       │
+│  ┌──────────────┐    ┌────────────────────────────┐│                       │
+│  │ gh-auth.sh   │    │ Target Project             ││                       │
+│  │              │    │ .agendev/                   ││                       │
+│  │ Reads:       │    │   identity.json ───────────┘│                       │
+│  │  identity.json    │     appId: 123456           │                       │
+│  │  app-key.pem │    │     installationId: 789012  │                       │
+│  │              │    │     privateKeyPath: ~/.../   │                       │
+│  │ Produces:    │    │   state/                    │                       │
+│  │  GH_TOKEN    │    │     processed-mentions.json │                       │
+│  │  (exported)  │    │                             │                       │
+│  └──────┬───────┘    └─────────────────────────────┘                       │
+│         │                                                                  │
+│         │  GH_TOKEN env var picked up by all gh commands                  │
+│         ▼                                                                  │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │                    GitHub Utility Scripts                             │  │
+│  │                                                                      │  │
+│  │  gh-issue-queue.sh          All API calls authenticated as           │  │
+│  │  gh-pr-lifecycle.sh    ◄──  agendev[bot] via installation token      │  │
+│  │  gh-auth.sh                                                          │  │
+│  │                                                                      │  │
+│  │  New subcommands:                                                    │  │
+│  │  • poll-mentions ── find unprocessed @agendev mentions               │  │
+│  │  • check-permission ── verify commenter authorization                │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌─ GitHub API ──────────────────────────────────────────────────────────────┐
+│  All mutations (comments, labels, PRs) attributed to agendev[bot]        │
+│  Permission checks: GET /repos/{owner}/{repo}/collaborators/{user}/perm  │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Inbound Mention Processing Flow
+
+Shows how an @agendev mention moves from a GitHub comment through authorization to agent action.
+
+```
+┌──────────┐
+│  Human   │  writes "@agendev please add error handling"
+│  (on PR) │  on PR #87, comment ID 1234
+└────┬─────┘
+     │
+     ▼
+┌─ github-orchestrator ──────────────────────────────────────────────────────┐
+│                                                                            │
+│  ┌─ Poll Cycle ─────────────────────────────────────────────────────────┐  │
+│  │                                                                      │  │
+│  │  (1) poll-mentions                                                   │  │
+│  │      gh-pr-lifecycle.sh poll-mentions owner/repo agendev             │  │
+│  │      Returns: [{ id: 1234, author: "Saruman", body: "...",          │  │
+│  │                   pr_number: 87 }]                                   │  │
+│  │                                                                      │  │
+│  │  (2) Deduplicate                                                     │  │
+│  │      Check comment ID against .agendev/state/processed-mentions.json │  │
+│  │      Skip if already processed                                       │  │
+│  │                                                                      │  │
+│  │  (3) Authorize                                                       │  │
+│  │      gh-pr-lifecycle.sh check-permission owner/repo Saruman write    │  │
+│  │      ┌─────────┐                                                     │  │
+│  │      │ Allowed? │──── NO ──► Post denial comment (if denyResponse    │  │
+│  │      └────┬─────┘           = "comment") or silently skip            │  │
+│  │           │ YES                                                      │  │
+│  │           ▼                                                          │  │
+│  │  (4) Classify mention                                                │  │
+│  │      ┌─────────────┬────────────────┬──────────────────┐             │  │
+│  │      │ Question    │ Action (PR)    │ Action (Issue)   │             │  │
+│  │      │ on PR       │                │                  │             │  │
+│  │      ▼             ▼                ▼                  │             │  │
+│  │   Read PR context  If in-progress:  Re-prioritize or   │             │  │
+│  │   + diff, post     fold into next   dispatch issue     │             │  │
+│  │   explanatory      dev round.       (eligibility       │             │  │
+│  │   reply            If finalized:    checks apply)      │             │  │
+│  │                    suggest follow-                      │             │  │
+│  │                    up issue                             │             │  │
+│  │                                                                      │  │
+│  │  (5) Record comment ID in processed-mentions.json                    │  │
+│  │                                                                      │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                                                            │
+│  ┌─ Issue Queue (existing) ─────────────────────────────────────────────┐  │
+│  │  Continues as before — poll cycle runs between issue dispatches      │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
 ## Integration with Target Projects
 
 Agent and skill definitions live in the agendev repository and are loaded at runtime via `--add-dir`. Nothing is copied to target projects — agendev is the single source of truth.
@@ -806,16 +1034,32 @@ Agent and skill definitions live in the agendev repository and are loaded at run
 **Setup:**
 
 ```bash
-# From the target project directory
-/path/to/agendev/scripts/setup.sh
+# First-time setup (includes GitHub App installation)
+agendev init
+
+# Re-run to auto-heal broken state (skips app installation if already bound)
+agendev init
 ```
 
-The setup script is idempotent — safe to re-run at any time to auto-heal broken state without overwriting things that aren't broken. It performs:
+The init script is idempotent — safe to re-run at any time to auto-heal broken state without overwriting things that aren't broken. It performs:
 
 1. **`.agendev/state/`** — create directory if missing.
-2. **GitHub labels** — ensure required `agendev:*` labels exist (skip any already present).
-3. **`package.json`** — create with `test` and `build` scripts if missing. If present, leave untouched.
-4. **CLI symlink** — ensure `/usr/local/bin/agendev` points to `bin/agendev` in this repo. If the symlink exists and already points to the right target, skip. If it points elsewhere or is broken, update it.
+2. **`.agendev/identity.json`** — bind the GitHub App to this repo:
+   a. Check if `identity.json` already exists and is valid (app installed, token works). If so, skip.
+   b. Locate the private key. Resolution order: `AGENDEV_APP_KEY` env var → `~/.agendev/app-key.pem` (standard path) → prompt. If found at the standard path, use it silently.
+   c. Resolve the app ID automatically from the configured slug: `gh api /apps/<identity.appSlug> --jq '.id'`. No prompt or global storage needed.
+   c. Check if the app is already installed on this repo (`gh api /repos/{owner}/{repo}/installation`).
+   d. If not installed, print the installation URL and wait for the user to approve in-browser:
+      ```
+      GitHub App "agendev" is not installed on owner/repo.
+      Install it here: https://github.com/apps/agendev/installations/new/permissions?target_id=<id>
+      Press Enter when done...
+      ```
+   e. Fetch the installation ID, write `identity.json`.
+   f. Mint a test token and validate access (list repo labels as a smoke test).
+3. **GitHub labels** — ensure required `agendev:*` labels exist (skip any already present).
+4. **`package.json`** — create with `test` and `build` scripts if missing. If present, leave untouched.
+5. **CLI symlink** — ensure `/usr/local/bin/agendev` points to `bin/agendev` in this repo. If the symlink exists and already points to the right target, skip. If it points elsewhere or is broken, update it.
 
 No agent/skill files are copied to the target project.
 
@@ -858,11 +1102,12 @@ agendev/
 │   └── agendev                      # CLI wrapper (symlink to /usr/local/bin)
 ├── scripts/
 │   ├── gh-issue-queue.sh          # Issue queue operations (gh wrapper)
-│   ├── gh-pr-lifecycle.sh         # PR lifecycle operations (gh wrapper)
+│   ├── gh-pr-lifecycle.sh         # PR lifecycle + mention polling + permission checks
+│   ├── gh-auth.sh                 # GitHub App JWT → installation token exchange
 │   ├── state.sh                   # State breadcrumb read/write
 │   ├── watchdog.sh                # Stall detection wrapper
 │   ├── report.sh                  # Cost & performance reporting
-│   └── setup.sh                   # One-time setup for target projects
+│   └── setup.sh                   # One-time setup for target projects (agendev init)
 ├── config/
 │   └── agendev.json               # Centralized configuration (all projects)
 ├── templates/
@@ -894,6 +1139,10 @@ When Claude Code is invoked with `--add-dir /path/to/agendev`, it discovers agen
 | Context window pressure from issue bodies + review history | Medium | Skills summarize rather than passing raw content; only last review checklist goes to dev agent |
 | Agent tries to read source code (violating role separation) | Low | Explicit NEVER rules in agent prompt (proven pattern from existing orchestrator) |
 | Rate limiting from many `gh` calls | Low | `gh` handles retry; runs are sequential; batch where possible |
+| Unauthorized user triggers agent action via @-mention | High | Authorization check before processing any mention; `check-permission` verifies repo-level write access before acting |
+| Installation token expires mid-run (1hr TTL) | Low | `gh-auth.sh` checks token expiry and refreshes transparently; all scripts call through `gh-auth.sh` |
+| Private key compromised | High | Key stored outside project repos; never committed; supports env var override for secret managers; rotating the key is a single re-download from GitHub App settings |
+| GitHub App not installed on target repo | Low | `agendev init` validates installation; `gh-auth.sh` fails fast with actionable error message if token exchange fails |
 
 ## Future Work: Deterministic CLI
 
