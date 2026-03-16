@@ -21,6 +21,25 @@ load test_helper
   [ "$status" -eq 0 ]
   run grep -n "dependency graph" "$AGENDEV_ROOT/.claude/skills/plan-to-issues/SKILL.md"
   [ "$status" -eq 0 ]
+  run grep -n "gh-issue-queue.sh create" "$AGENDEV_ROOT/.claude/skills/plan-to-issues/SKILL.md"
+  [ "$status" -eq 0 ]
+  run grep -n "templates/issue-template.md" "$AGENDEV_ROOT/.claude/skills/plan-to-issues/SKILL.md"
+  [ "$status" -eq 0 ]
+  run grep -n "broad-example.md" "$AGENDEV_ROOT/.claude/skills/plan-to-issues/SKILL.md"
+  [ "$status" -eq 0 ]
+  run grep -n "narrow-example.md" "$AGENDEV_ROOT/.claude/skills/plan-to-issues/SKILL.md"
+  [ "$status" -eq 0 ]
+  run grep -n "untestable-example.md" "$AGENDEV_ROOT/.claude/skills/plan-to-issues/SKILL.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "plan slicing fixtures cover broad narrow and untestable examples" {
+  run test -f "$AGENDEV_ROOT/test/fixtures/plans/broad-example.md"
+  [ "$status" -eq 0 ]
+  run test -f "$AGENDEV_ROOT/test/fixtures/plans/narrow-example.md"
+  [ "$status" -eq 0 ]
+  run test -f "$AGENDEV_ROOT/test/fixtures/plans/untestable-example.md"
+  [ "$status" -eq 0 ]
 }
 
 @test "github orchestrator prompt follows the dispatch loop and avoids source edits" {

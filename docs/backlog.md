@@ -532,7 +532,7 @@ Dependencies:
 
 ---
 id: T24
-status: todo
+status: done
 priority: medium
 depends_on:
   - T10
