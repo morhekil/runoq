@@ -1,0 +1,22 @@
+{
+  "status": "completed",
+  "commits_pushed": [
+    "abc1234",
+    "def5678"
+  ],
+  "commit_range": "abc1234..def5678",
+  "files_changed": [
+    "src/auth/refresh.ts",
+    "src/auth/refresh.test.ts"
+  ],
+  "files_added": [
+    "src/auth/token-store.ts"
+  ],
+  "files_deleted": [],
+  "tests_run": true,
+  "tests_passed": true,
+  "test_summary": "14 passed, 0 failed",
+  "build_passed": true,
+  "blockers": [],
+  "notes": "Refresh retries now share the token cache."
+}

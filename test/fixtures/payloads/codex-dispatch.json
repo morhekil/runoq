@@ -1,0 +1,9 @@
+{
+  "task": "Implement the queue selector and add tests.",
+  "checklist": [
+    "Address failing dependency handling"
+  ],
+  "branch": "agendev/42-fix-auth-refresh",
+  "worktree": "../agendev-wt-42",
+  "round": 2
+}
