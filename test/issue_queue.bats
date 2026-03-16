@@ -112,3 +112,56 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(jq -r '.issue.number' "$result_file")" = "31" ]
 }
+
+@test "issue queue set-status removes old agendev labels and applies exactly one new state label" {
+  scenario="$TEST_TMPDIR/scenario.json"
+  write_fake_gh_scenario "$scenario" <<EOF
+[
+  {
+    "contains": ["issue", "view", "42", "--repo owner/repo", "--json labels"],
+    "stdout": "{\"labels\":[{\"name\":\"agendev:ready\"},{\"name\":\"bug\"}]}"
+  },
+  {
+    "contains": ["issue", "edit", "42", "--repo owner/repo", "--remove-label agendev:ready", "--add-label agendev:in-progress"],
+    "stdout": ""
+  }
+]
+EOF
+  use_fake_gh "$scenario"
+
+  run "$AGENDEV_ROOT/scripts/gh-issue-queue.sh" set-status owner/repo 42 in-progress
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"label": "agendev:in-progress"'* ]]
+}
+
+@test "issue queue create writes metadata block and ready label" {
+  scenario="$TEST_TMPDIR/scenario.json"
+  write_fake_gh_scenario "$scenario" <<EOF
+[
+  {
+    "contains": ["issue", "create", "--repo owner/repo", "--title Implement queue", "--label agendev:ready"],
+    "stdout": "https://github.com/owner/repo/issues/99"
+  }
+]
+EOF
+  use_fake_gh "$scenario"
+
+  run "$AGENDEV_ROOT/scripts/gh-issue-queue.sh" create owner/repo "Implement queue" "## Acceptance Criteria\n\n- [ ] Happy path works." --depends-on 12,14 --priority 1 --estimated-complexity low
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"url": "https://github.com/owner/repo/issues/99"'* ]]
+  run grep -n "depends_on: \\[12,14\\]" "$FAKE_GH_CAPTURE_DIR/0.body"
+  [ "$status" -eq 0 ]
+  run grep -n "priority: 1" "$FAKE_GH_CAPTURE_DIR/0.body"
+  [ "$status" -eq 0 ]
+  run grep -n "estimated_complexity: low" "$FAKE_GH_CAPTURE_DIR/0.body"
+  [ "$status" -eq 0 ]
+}
+
+@test "issue queue set-status fails cleanly for unknown statuses" {
+  run "$AGENDEV_ROOT/scripts/gh-issue-queue.sh" set-status owner/repo 42 impossible
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Unknown status: impossible"* ]]
+}

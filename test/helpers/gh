@@ -5,6 +5,7 @@ set -euo pipefail
 scenario="${FAKE_GH_SCENARIO:-}"
 state_file="${FAKE_GH_STATE:-}"
 log_file="${FAKE_GH_LOG:-}"
+capture_dir="${FAKE_GH_CAPTURE_DIR:-}"
 
 [[ -n "$scenario" ]] || { echo "fake-gh: FAKE_GH_SCENARIO is required" >&2; exit 1; }
 [[ -f "$scenario" ]] || { echo "fake-gh: scenario file not found: $scenario" >&2; exit 1; }
@@ -18,6 +19,16 @@ fi
 full_cmd="$*"
 if [[ -n "$log_file" ]]; then
   printf '%s\n' "$full_cmd" >>"$log_file"
+fi
+
+if [[ -n "$capture_dir" ]]; then
+  mkdir -p "$capture_dir"
+  args=("$@")
+  for ((i = 0; i < ${#args[@]}; i++)); do
+    if [[ "${args[$i]}" == "--body-file" && $((i + 1)) -lt ${#args[@]} ]]; then
+      cp "${args[$((i + 1))]}" "$capture_dir/${index}.body"
+    fi
+  done
 fi
 
 rule="$(jq -cer --argjson index "$index" '.[$index]' "$scenario" 2>/dev/null || true)"

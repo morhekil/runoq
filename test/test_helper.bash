@@ -45,5 +45,6 @@ use_fake_gh() {
   export FAKE_GH_SCENARIO="$1"
   export FAKE_GH_STATE="${2:-$TEST_TMPDIR/fake-gh.state}"
   export FAKE_GH_LOG="${3:-$TEST_TMPDIR/fake-gh.log}"
+  export FAKE_GH_CAPTURE_DIR="${4:-$TEST_TMPDIR/fake-gh-capture}"
   export GH_BIN="$AGENDEV_ROOT/test/helpers/gh"
 }

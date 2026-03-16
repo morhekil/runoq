@@ -184,6 +184,74 @@ case "${1:-}" in
     [[ $# -eq 3 ]] || { usage >&2; exit 1; }
     next_issue "$2" "$3"
     ;;
+  set-status)
+    [[ $# -eq 4 ]] || { usage >&2; exit 1; }
+    repo="$2"
+    issue_number="$3"
+    status="$4"
+    new_label="$(agendev::label_for_status "$status")"
+    current_labels="$(agendev::gh issue view "$issue_number" --repo "$repo" --json labels | jq -r '.labels[].name')"
+    edit_args=()
+    while IFS= read -r label; do
+      [[ -z "$label" ]] && continue
+      if [[ "$label" == agendev:* ]]; then
+        edit_args+=(--remove-label "$label")
+      fi
+    done <<<"$current_labels"
+    edit_args+=(--add-label "$new_label")
+    agendev::gh issue edit "$issue_number" --repo "$repo" "${edit_args[@]}" >/dev/null
+    jq -n --argjson issue "$issue_number" --arg status "$status" --arg label "$new_label" '{
+      issue: $issue,
+      status: $status,
+      label: $label
+    }'
+    ;;
+  create)
+    [[ $# -ge 4 ]] || { usage >&2; exit 1; }
+    repo="$2"
+    title="$3"
+    body="$4"
+    shift 4
+    depends_on='[]'
+    priority='3'
+    estimated_complexity='medium'
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --depends-on)
+          depends_on="$(jq -cn --arg raw "${2:-}" '$raw | split(",") | map(select(length > 0) | tonumber)')"
+          shift 2
+          ;;
+        --priority)
+          priority="${2:-3}"
+          shift 2
+          ;;
+        --estimated-complexity)
+          estimated_complexity="${2:-medium}"
+          shift 2
+          ;;
+        *)
+          usage >&2
+          exit 1
+          ;;
+      esac
+    done
+
+    body_file="$(mktemp "${TMPDIR:-/tmp}/agendev-issue-create.XXXXXX.md")"
+    {
+      echo "<!-- agendev:meta"
+      printf 'depends_on: %s\n' "$(printf '%s' "$depends_on" | jq -c '.')"
+      printf 'priority: %s\n' "$priority"
+      printf 'estimated_complexity: %s\n' "$estimated_complexity"
+      echo "-->"
+      echo
+      printf '%s\n' "$body"
+    } >"$body_file"
+
+    ready_label="$(agendev::config_get '.labels.ready')"
+    result="$(agendev::gh issue create --repo "$repo" --title "$title" --body-file "$body_file" --label "$ready_label")"
+    rm -f "$body_file"
+    jq -n --arg title "$title" --arg url "$result" '{title:$title, url:$url}'
+    ;;
   *)
     usage >&2
     exit 1
