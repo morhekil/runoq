@@ -790,7 +790,7 @@ Implementation notes:
 
 ---
 id: T34
-status: todo
+status: done
 priority: low
 depends_on:
   - T14
@@ -808,6 +808,9 @@ Dependencies:
 - Task 14.
 - Task 15.
 - Task 27.
+
+Implementation notes:
+- Added `scripts/live-smoke.sh` with a JSON preflight gate plus an opt-in sandbox run that validates GitHub App auth, label provisioning, issue/PR creation, bot-authored comments, collaborator permission checks, and cleanup; `test/live_smoke.bats` covers the guard path and `test/live_smoke_sandbox.bats` stays skipped unless explicit sandbox credentials are provided.
 
 ## Suggested MVP Cut
 
