@@ -48,7 +48,7 @@ Each task includes a small YAML block for tracking.
 
 ---
 id: T01
-status: todo
+status: done
 priority: high
 depends_on: []
 ---
@@ -66,7 +66,7 @@ Dependencies:
 
 ---
 id: T02
-status: todo
+status: done
 priority: high
 depends_on:
   - T01
@@ -85,7 +85,7 @@ Dependencies:
 
 ---
 id: T03
-status: todo
+status: done
 priority: high
 depends_on:
   - T02
@@ -106,7 +106,7 @@ Dependencies:
 
 ---
 id: T04
-status: todo
+status: done
 priority: high
 depends_on:
   - T01
@@ -144,7 +144,7 @@ Dependencies:
 
 ---
 id: T06
-status: todo
+status: done
 priority: high
 depends_on:
   - T01
@@ -165,7 +165,7 @@ Dependencies:
 
 ---
 id: T07
-status: todo
+status: done
 priority: medium
 depends_on:
   - T06
@@ -186,7 +186,7 @@ Dependencies:
 
 ---
 id: T08
-status: todo
+status: done
 priority: high
 depends_on:
   - T01
@@ -209,7 +209,7 @@ Dependencies:
 
 ---
 id: T09
-status: todo
+status: done
 priority: high
 depends_on:
   - T08
@@ -228,7 +228,7 @@ Dependencies:
 
 ---
 id: T10
-status: todo
+status: done
 priority: high
 depends_on:
   - T08
@@ -247,7 +247,7 @@ Dependencies:
 
 ---
 id: T11
-status: todo
+status: done
 priority: high
 depends_on:
   - T01
@@ -271,7 +271,7 @@ Dependencies:
 
 ---
 id: T12
-status: todo
+status: done
 priority: medium
 depends_on:
   - T11
@@ -295,7 +295,7 @@ Dependencies:
 
 ---
 id: T13
-status: todo
+status: done
 priority: medium
 depends_on:
   - T04
@@ -316,7 +316,7 @@ Dependencies:
 
 ---
 id: T14
-status: todo
+status: done
 priority: medium
 depends_on:
   - T10
@@ -339,7 +339,7 @@ Dependencies:
 
 ---
 id: T15
-status: todo
+status: done
 priority: high
 depends_on:
   - T05
@@ -364,7 +364,7 @@ Dependencies:
 
 ---
 id: T16
-status: todo
+status: done
 priority: high
 depends_on:
   - T04
@@ -404,7 +404,7 @@ Dependencies:
 
 ---
 id: T18
-status: todo
+status: done
 priority: high
 depends_on:
   - T03
@@ -425,7 +425,7 @@ Dependencies:
 
 ---
 id: T19
-status: todo
+status: done
 priority: high
 depends_on:
   - T16
@@ -471,7 +471,7 @@ Dependencies:
 
 ---
 id: T21
-status: todo
+status: done
 priority: low
 depends_on:
   - T06
@@ -494,7 +494,7 @@ Dependencies:
 
 ---
 id: T22
-status: todo
+status: done
 priority: medium
 depends_on:
   - T10
@@ -513,7 +513,7 @@ Dependencies:
 
 ---
 id: T23
-status: todo
+status: done
 priority: medium
 depends_on:
   - T12
