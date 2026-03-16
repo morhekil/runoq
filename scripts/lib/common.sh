@@ -8,7 +8,7 @@ agendev::die() {
 }
 
 agendev::script_dir() {
-  cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd
+  cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd
 }
 
 agendev::root() {

@@ -125,7 +125,7 @@ Dependencies:
 
 ---
 id: T05
-status: todo
+status: done
 priority: high
 depends_on:
   - T01
