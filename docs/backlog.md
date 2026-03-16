@@ -716,7 +716,7 @@ Implementation notes:
 
 ---
 id: T31
-status: todo
+status: done
 priority: low
 depends_on:
   - T15
@@ -732,6 +732,9 @@ Acceptance criteria:
 Dependencies:
 - Task 15.
 - Task 23.
+
+Implementation notes:
+- `scripts/maintenance.sh` now derives review partitions from `.gitignore` and `tsconfig.json`, creates maintenance tracking issues, posts partition progress comments, and persists a maintenance breadcrumb in `.agendev/state/maintenance.json`.
 
 #### Task 32: Implement maintenance triage loop
 
