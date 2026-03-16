@@ -688,7 +688,7 @@ Implementation notes:
 
 ---
 id: T30
-status: todo
+status: done
 priority: medium
 depends_on:
   - T07
@@ -706,6 +706,9 @@ Dependencies:
 - Task 7.
 - Task 12.
 - Task 25.
+
+Implementation notes:
+- `scripts/mentions.sh` now drains mention polling through the existing PR lifecycle and state helpers, records processed IDs for both authorized and unauthorized mentions, and emits deny comments when config requires them.
 
 ### Milestone 8: Maintenance Review
 
