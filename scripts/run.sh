@@ -125,6 +125,21 @@ first_reviewer() {
   jq -r '.reviewers[0] // empty' "$(agendev::config_path)" 2>/dev/null || true
 }
 
+fixture_env_value() {
+  local base="$1"
+  local issue="$2"
+  local issue_key="${base}_${issue}"
+  if [[ -n "${!issue_key:-}" ]]; then
+    printf '%s\n' "${!issue_key}"
+    return
+  fi
+  printf '%s\n' "${!base:-}"
+}
+
+ready_label() {
+  agendev::config_get '.labels.ready'
+}
+
 write_dispatch_comment() {
   local pr_number="$1"
   local payload_file="$2"
@@ -321,12 +336,25 @@ run_dev_command() {
   local issue="$2"
   local timeout dev_command
   timeout="$(agendev::config_get '.stall.timeoutSeconds')"
-  dev_command="${AGENDEV_TEST_DEV_COMMAND:-true}"
+  dev_command="$(fixture_env_value "AGENDEV_TEST_DEV_COMMAND" "$issue")"
+  [[ -n "$dev_command" ]] || dev_command="true"
   "$(agendev::root)/scripts/watchdog.sh" \
     --timeout "$timeout" \
     --issue "$issue" \
     --state-dir "$(agendev::state_dir)" \
-    -- bash -lc "cd \"$worktree\" && ${dev_command}"
+    -- env AGENDEV_TEST_CURRENT_ISSUE="$issue" bash -lc "cd \"$worktree\" && ${dev_command}"
+}
+
+post_circuit_breaker_event() {
+  local pr_number="$1"
+  local issue="$2"
+  local limit="$3"
+  local failed_issues_json="$4"
+  local failed_list message
+  failed_list="$(printf '%s' "$failed_issues_json" | jq -r 'map("#" + tostring) | join(", ")')"
+  message="Queue halted after ${limit} consecutive failures. Failed issues: ${failed_list}. Investigate before resuming."
+  post_pr_event "$pr_number" "$message"
+  post_issue_event "$issue" "$message"
 }
 
 generate_fixture_codex_output() {
@@ -384,38 +412,31 @@ generate_fixture_codex_output() {
   rm -f "${output_file}.json"
 }
 
-fixture_mode_run() {
-  local reconcile_output issue_data body_file title worktree_json branch_name worktree_path pr_json pr_number base_sha
+fixture_run_issue() {
+  local current_issue="$1"
+  local issue_data body_file title worktree_json branch_name worktree_path pr_json pr_number base_sha
   local dispatch_payload_file codex_output_file payload_file verification_file orchestrator_file summary_path verdict complexity
-  local dev_exit timeout_seconds failure_reason
+  local dev_exit timeout_seconds failure_reason codex_output_source orchestrator_result_source
 
-  reconcile_output="$("$(agendev::root)/scripts/dispatch-safety.sh" reconcile "$REPO")"
-  if [[ "$dry_run" == "true" ]]; then
-    jq -n --argjson reconciliation "$reconcile_output" '{mode:"dry-run", reconciliation:$reconciliation}'
-    return
-  fi
-
-  [[ -n "$issue_number" ]] || agendev::die "fixture mode currently requires --issue"
-
-  issue_data="$(issue_json "$issue_number")"
+  issue_data="$(issue_json "$current_issue")"
   body_file="$(issue_body_file)"
   printf '%s' "$issue_data" | jq -r '.body // ""' >"$body_file"
   title="$(printf '%s' "$issue_data" | jq -r '.title')"
   complexity="$(metadata_complexity "$body_file")"
   [[ -n "$complexity" ]] || complexity="medium"
 
-  "$(agendev::root)/scripts/dispatch-safety.sh" eligibility "$REPO" "$issue_number" >/dev/null
-  "$(agendev::root)/scripts/gh-issue-queue.sh" set-status "$REPO" "$issue_number" in-progress >/dev/null
+  "$(agendev::root)/scripts/dispatch-safety.sh" eligibility "$REPO" "$current_issue" >/dev/null
+  "$(agendev::root)/scripts/gh-issue-queue.sh" set-status "$REPO" "$current_issue" in-progress >/dev/null
 
-  worktree_json="$("$(agendev::root)/scripts/worktree.sh" create "$issue_number" "$title")"
+  worktree_json="$("$(agendev::root)/scripts/worktree.sh" create "$current_issue" "$title")"
   branch_name="$(printf '%s' "$worktree_json" | jq -r '.branch')"
   worktree_path="$(printf '%s' "$worktree_json" | jq -r '.worktree')"
 
-  pr_json="$("$(agendev::root)/scripts/gh-pr-lifecycle.sh" create "$REPO" "$branch_name" "$issue_number" "$title")"
+  pr_json="$("$(agendev::root)/scripts/gh-pr-lifecycle.sh" create "$REPO" "$branch_name" "$current_issue" "$title")"
   pr_number="$(printf '%s' "$pr_json" | jq -r '.number')"
   base_sha="$(git -C "$worktree_path" rev-parse HEAD)"
 
-  save_state_json "$issue_number" "$(jq -n \
+  save_state_json "$current_issue" "$(jq -n \
     --arg phase "INIT" \
     --arg branch "$branch_name" \
     --arg worktree "$worktree_path" \
@@ -425,7 +446,7 @@ fixture_mode_run() {
 
   dispatch_payload_file="$(mktemp "${TMPDIR:-/tmp}/agendev-dispatch.XXXXXX")"
   jq -n \
-    --argjson issue_number "$issue_number" \
+    --argjson issue_number "$current_issue" \
     --arg issue_title "$title" \
     --arg issue_body_summary "$(body_summary "$body_file")" \
     --arg branch "$branch_name" \
@@ -448,7 +469,7 @@ fixture_mode_run() {
   ' >"$dispatch_payload_file"
   write_dispatch_comment "$pr_number" "$dispatch_payload_file"
 
-  save_state_json "$issue_number" "$(jq -n \
+  save_state_json "$current_issue" "$(jq -n \
     --arg phase "DEVELOP" \
     --arg branch "$branch_name" \
     --arg worktree "$worktree_path" \
@@ -457,7 +478,7 @@ fixture_mode_run() {
   ')"
 
   set +e
-  run_dev_command "$worktree_path" "$issue_number"
+  run_dev_command "$worktree_path" "$current_issue"
   dev_exit="$?"
   set -e
   if [[ "$dev_exit" -ne 0 ]]; then
@@ -468,14 +489,15 @@ fixture_mode_run() {
       failure_reason="Agent exited unexpectedly (exit code ${dev_exit}). Last phase: DEVELOP, round 1."
     fi
     post_pr_event "$pr_number" "$failure_reason"
-    post_issue_event "$issue_number" "$failure_reason"
+    post_issue_event "$current_issue" "$failure_reason"
     rm -f "$body_file" "$dispatch_payload_file"
     exit "$dev_exit"
   fi
 
   codex_output_file="$(mktemp "${TMPDIR:-/tmp}/agendev-codex-output.XXXXXX")"
-  if [[ -n "${AGENDEV_TEST_CODEX_OUTPUT_FILE:-}" ]]; then
-    cp "$AGENDEV_TEST_CODEX_OUTPUT_FILE" "$codex_output_file"
+  codex_output_source="$(fixture_env_value "AGENDEV_TEST_CODEX_OUTPUT_FILE" "$current_issue")"
+  if [[ -n "$codex_output_source" ]]; then
+    cp "$codex_output_source" "$codex_output_file"
   else
     generate_fixture_codex_output "$worktree_path" "$base_sha" "$codex_output_file"
   fi
@@ -492,12 +514,12 @@ fixture_mode_run() {
   if [[ "$(jq -r '.ok' "$verification_file")" != "true" ]]; then
     write_verification_failure_comment "$pr_number" "$verification_file"
     failure_reason="post-dev verification failed: $(jq -r '.failures | join(", ")' "$verification_file")"
-    finalize_needs_review "$issue_number" "$branch_name" "$worktree_path" "$pr_number" "$failure_reason" "Escalated to human review after verification failure."
+    finalize_needs_review "$current_issue" "$branch_name" "$worktree_path" "$pr_number" "$failure_reason" "Escalated to human review after verification failure."
     rm -f "$body_file" "$dispatch_payload_file" "$codex_output_file" "$payload_file" "$verification_file"
     return
   fi
 
-  save_state_json "$issue_number" "$(jq -n \
+  save_state_json "$current_issue" "$(jq -n \
     --arg phase "REVIEW" \
     --arg branch "$branch_name" \
     --arg worktree "$worktree_path" \
@@ -505,7 +527,7 @@ fixture_mode_run() {
     {phase:$phase, round:1, branch:$branch, worktree:$worktree, pr_number:$pr_number}
   ')"
 
-  save_state_json "$issue_number" "$(jq -n \
+  save_state_json "$current_issue" "$(jq -n \
     --arg phase "DECIDE" \
     --arg branch "$branch_name" \
     --arg worktree "$worktree_path" \
@@ -513,7 +535,7 @@ fixture_mode_run() {
     {phase:$phase, round:1, branch:$branch, worktree:$worktree, pr_number:$pr_number}
   ')"
 
-  save_state_json "$issue_number" "$(jq -n \
+  save_state_json "$current_issue" "$(jq -n \
     --arg phase "FINALIZE" \
     --arg branch "$branch_name" \
     --arg worktree "$worktree_path" \
@@ -522,8 +544,9 @@ fixture_mode_run() {
   ')"
 
   orchestrator_file="$(mktemp "${TMPDIR:-/tmp}/agendev-orchestrator.XXXXXX")"
-  if [[ -n "${AGENDEV_TEST_ORCHESTRATOR_RETURN_FILE:-}" ]]; then
-    cp "$AGENDEV_TEST_ORCHESTRATOR_RETURN_FILE" "$orchestrator_file"
+  orchestrator_result_source="$(fixture_env_value "AGENDEV_TEST_ORCHESTRATOR_RETURN_FILE" "$current_issue")"
+  if [[ -n "$orchestrator_result_source" ]]; then
+    cp "$orchestrator_result_source" "$orchestrator_file"
   else
     jq -n '{verdict:"PASS", rounds_used:1, final_score:42, summary:"Completed successfully.", caveats:[], tokens_used:0}' >"$orchestrator_file"
   fi
@@ -535,8 +558,8 @@ fixture_mode_run() {
 
   if [[ "$verdict" == "PASS" && "$complexity" == "low" && "$(jq -r '.caveats | length' "$orchestrator_file")" -eq 0 ]]; then
     "$(agendev::root)/scripts/gh-pr-lifecycle.sh" finalize "$REPO" "$pr_number" auto-merge >/dev/null
-    "$(agendev::root)/scripts/gh-issue-queue.sh" set-status "$REPO" "$issue_number" "done" >/dev/null
-    save_state_json "$issue_number" "$(jq -n \
+    "$(agendev::root)/scripts/gh-issue-queue.sh" set-status "$REPO" "$current_issue" "done" >/dev/null
+    save_state_json "$current_issue" "$(jq -n \
       --arg phase "DONE" \
       --arg branch "$branch_name" \
       --arg worktree "$worktree_path" \
@@ -544,7 +567,7 @@ fixture_mode_run() {
       --slurpfile outcome "$orchestrator_file" '
       {phase:$phase, round:1, branch:$branch, worktree:$worktree, pr_number:$pr_number, outcome:$outcome[0]}
     ')"
-    "$(agendev::root)/scripts/worktree.sh" remove "$issue_number" >/dev/null
+    "$(agendev::root)/scripts/worktree.sh" remove "$current_issue" >/dev/null
   else
     if [[ "$verdict" != "PASS" ]]; then
       failure_reason="orchestrator returned ${verdict}: $(jq -r '.summary' "$orchestrator_file")"
@@ -553,13 +576,13 @@ fixture_mode_run() {
     else
       failure_reason="issue complexity ${complexity} requires human review"
     fi
-    finalize_needs_review "$issue_number" "$branch_name" "$worktree_path" "$pr_number" "$failure_reason" "$(jq -r '.summary' "$orchestrator_file")" "$orchestrator_file"
+    finalize_needs_review "$current_issue" "$branch_name" "$worktree_path" "$pr_number" "$failure_reason" "$(jq -r '.summary' "$orchestrator_file")" "$orchestrator_file"
     rm -f "$body_file" "$dispatch_payload_file" "$codex_output_file" "$payload_file" "$verification_file" "$orchestrator_file" "$summary_path"
     return
   fi
 
   jq -n \
-    --argjson issue "$issue_number" \
+    --argjson issue "$current_issue" \
     --argjson pr_number "$pr_number" \
     --arg worktree "$worktree_path" '
     {
@@ -571,6 +594,104 @@ fixture_mode_run() {
   '
 
   rm -f "$body_file" "$dispatch_payload_file" "$codex_output_file" "$payload_file" "$verification_file" "$orchestrator_file" "$summary_path"
+}
+
+fixture_mode_run() {
+  local reconcile_output queue_listing selection current_issue result status runs
+  local consecutive_failures failure_limit failed_streak latest_pr latest_issue
+
+  reconcile_output="$("$(agendev::root)/scripts/dispatch-safety.sh" reconcile "$REPO")"
+
+  if [[ "$dry_run" == "true" && -n "$issue_number" ]]; then
+    jq -n \
+      --argjson reconciliation "$reconcile_output" \
+      --argjson issue "$issue_number" '
+      {
+        mode: "dry-run",
+        reconciliation: $reconciliation,
+        issue: $issue
+      }
+    '
+    return
+  fi
+
+  if [[ "$dry_run" == "true" ]]; then
+    queue_listing="$("$(agendev::root)/scripts/gh-issue-queue.sh" list "$REPO" "$(ready_label)")"
+    selection="$("$(agendev::root)/scripts/gh-issue-queue.sh" next "$REPO" "$(ready_label)")"
+    jq -n \
+      --argjson reconciliation "$reconcile_output" \
+      --argjson queue "$queue_listing" \
+      --argjson selection "$selection" '
+      {
+        mode: "dry-run",
+        reconciliation: $reconciliation,
+        queue: $queue,
+        selection: $selection
+      }
+    '
+    return
+  fi
+
+  if [[ -n "$issue_number" ]]; then
+    fixture_run_issue "$issue_number"
+    return
+  fi
+
+  runs='[]'
+  consecutive_failures=0
+  failure_limit="$(agendev::config_get '.consecutiveFailureLimit')"
+  failed_streak='[]'
+  latest_pr=""
+  latest_issue=""
+
+  while true; do
+    selection="$("$(agendev::root)/scripts/gh-issue-queue.sh" next "$REPO" "$(ready_label)")"
+    current_issue="$(printf '%s' "$selection" | jq -r '.issue.number // empty')"
+    if [[ -z "$current_issue" ]]; then
+      jq -n \
+        --argjson reconciliation "$reconcile_output" \
+        --argjson runs "$runs" \
+        --argjson skipped "$(printf '%s' "$selection" | jq '.skipped')" '
+        {
+          status: "completed",
+          reconciliation: $reconciliation,
+          runs: $runs,
+          skipped: $skipped
+        }
+      '
+      return
+    fi
+
+    result="$(fixture_run_issue "$current_issue")"
+    runs="$(jq -n --argjson runs "$runs" --argjson result "$result" '$runs + [$result]')"
+    status="$(printf '%s' "$result" | jq -r '.status')"
+    if [[ "$status" == "completed" ]]; then
+      consecutive_failures=0
+      failed_streak='[]'
+      continue
+    fi
+
+    consecutive_failures=$((consecutive_failures + 1))
+    failed_streak="$(jq -n --argjson failed "$failed_streak" --argjson issue "$current_issue" '$failed + [$issue]')"
+    latest_pr="$(printf '%s' "$result" | jq -r '.pr_number')"
+    latest_issue="$current_issue"
+
+    if (( consecutive_failures >= failure_limit )); then
+      post_circuit_breaker_event "$latest_pr" "$latest_issue" "$failure_limit" "$failed_streak"
+      jq -n \
+        --argjson reconciliation "$reconcile_output" \
+        --argjson runs "$runs" \
+        --argjson failed_issues "$failed_streak" '
+        {
+          status: "halted",
+          reconciliation: $reconciliation,
+          runs: $runs,
+          failed_issues: $failed_issues
+        }
+      '
+      return
+    fi
+  done
 }
 
 main() {

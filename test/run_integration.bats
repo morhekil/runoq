@@ -64,6 +64,22 @@ estimated_complexity: low
 EOF
 }
 
+queue_issue_body() {
+  local depends_on="$1"
+  local priority="$2"
+  cat <<EOF
+<!-- agendev:meta
+depends_on: $depends_on
+priority: $priority
+estimated_complexity: low
+-->
+
+## Acceptance Criteria
+
+- [ ] Queue task succeeds.
+EOF
+}
+
 write_issue_view_scenario_rules() {
   local issue_body="$1"
   cat <<EOF
@@ -645,4 +661,456 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.mode')" = "dry-run" ]
   [ "$(printf '%s' "$output" | jq -r '.reconciliation[0].action')" = "resume" ]
+}
+
+@test "agendev run processes multiple queue issues in dependency order" {
+  remote_dir="$TEST_TMPDIR/remote.git"
+  local_dir="$TEST_TMPDIR/local"
+  make_remote_backed_repo "$remote_dir" "$local_dir"
+  git -C "$local_dir" remote set-url origin "$remote_dir"
+  setup_run_fixture_env "$local_dir"
+  export AGENDEV_TEST_DEV_COMMAND='mkdir -p src && printf "export const queue = true;\n" > "src/task-${AGENDEV_TEST_CURRENT_ISSUE}.ts" && git add src && git commit -m "Add queue implementation" >/dev/null && git push -u origin HEAD >/dev/null 2>&1'
+  export AGENDEV_TEST_DEV_COMMAND_42='mkdir -p src && printf "export const alpha = true;\n" > src/task-42.ts && git add src/task-42.ts && git commit -m "Add task 42" >/dev/null && git push -u origin HEAD >/dev/null 2>&1'
+  export AGENDEV_TEST_DEV_COMMAND_43='mkdir -p src && printf "export const beta = true;\n" > src/task-43.ts && git add src/task-43.ts && git commit -m "Add task 43" >/dev/null && git push -u origin HEAD >/dev/null 2>&1'
+  export AGENDEV_TEST_ORCHESTRATOR_RETURN_FILE="$TEST_TMPDIR/orchestrator-return.json"
+  cat >"$AGENDEV_TEST_ORCHESTRATOR_RETURN_FILE" <<'EOF'
+{
+  "verdict": "PASS",
+  "rounds_used": 1,
+  "final_score": 42,
+  "summary": "Queue task completed cleanly.",
+  "caveats": [],
+  "tokens_used": 1234
+}
+EOF
+
+  issue_42_body="$(queue_issue_body "[]" 1)"
+  issue_43_body="$(queue_issue_body "[42]" 2)"
+  ready_both="$(jq -n --arg body42 "$issue_42_body" --arg body43 "$issue_43_body" '[
+    {number: 42, title: "Implement alpha", body: $body42, labels: [{name:"agendev:ready"}], url: "https://example.test/issues/42"},
+    {number: 43, title: "Implement beta", body: $body43, labels: [{name:"agendev:ready"}], url: "https://example.test/issues/43"}
+  ]')"
+  ready_second="$(jq -n --arg body43 "$issue_43_body" '[
+    {number: 43, title: "Implement beta", body: $body43, labels: [{name:"agendev:ready"}], url: "https://example.test/issues/43"}
+  ]')"
+
+  scenario="$TEST_TMPDIR/scenario.json"
+  write_fake_gh_scenario "$scenario" <<EOF
+[
+  {
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:in-progress"],
+    "stdout": "[]"
+  },
+  {
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:ready"],
+    "stdout": $(printf '%s' "$ready_both")
+  },
+  {
+    "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
+    "stdout": $(jq -Rn --arg body "$issue_42_body" '{"number":42,"title":"Implement alpha","body":$body,"labels":[{"name":"agendev:ready"}],"url":"https://example.test/issues/42"}')
+  },
+  {
+    "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
+    "stdout": $(jq -Rn --arg body "$issue_42_body" '{"number":42,"title":"Implement alpha","body":$body,"labels":[{"name":"agendev:ready"}],"url":"https://example.test/issues/42"}')
+  },
+  {
+    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "agendev/42-implement-alpha"],
+    "stdout": "[]"
+  },
+  {
+    "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "labels"],
+    "stdout": "{\"labels\":[{\"name\":\"agendev:ready\"}]}"
+  },
+  {
+    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "agendev:ready", "--add-label", "agendev:in-progress"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "create", "--repo", "owner/repo", "--draft", "--title", "Implement alpha", "--head", "agendev/42-implement-alpha"],
+    "stdout": "https://example.test/pull/87"
+  },
+  {
+    "contains": ["pr", "comment", "87", "--repo", "owner/repo", "--body-file"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "comment", "87", "--repo", "owner/repo", "--body-file"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "comment", "87", "--repo", "owner/repo", "--body-file"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "view", "87", "--repo", "owner/repo", "--json", "body"],
+    "stdout_file": "$AGENDEV_ROOT/test/fixtures/comments/pr-view-body.json"
+  },
+  {
+    "contains": ["pr", "edit", "87", "--repo", "owner/repo", "--body-file"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "ready", "87", "--repo", "owner/repo"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "merge", "87", "--repo", "owner/repo", "--auto", "--squash"],
+    "stdout": ""
+  },
+  {
+    "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "labels"],
+    "stdout": "{\"labels\":[{\"name\":\"agendev:in-progress\"}]}"
+  },
+  {
+    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "agendev:in-progress", "--add-label", "agendev:done"],
+    "stdout": ""
+  },
+  {
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:ready"],
+    "stdout": $(printf '%s' "$ready_second")
+  },
+  {
+    "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "number,labels"],
+    "stdout": "{\"number\":42,\"labels\":[{\"name\":\"agendev:done\"}]}"
+  },
+  {
+    "contains": ["issue", "view", "43", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
+    "stdout": $(jq -Rn --arg body "$issue_43_body" '{"number":43,"title":"Implement beta","body":$body,"labels":[{"name":"agendev:ready"}],"url":"https://example.test/issues/43"}')
+  },
+  {
+    "contains": ["issue", "view", "43", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
+    "stdout": $(jq -Rn --arg body "$issue_43_body" '{"number":43,"title":"Implement beta","body":$body,"labels":[{"name":"agendev:ready"}],"url":"https://example.test/issues/43"}')
+  },
+  {
+    "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "labels"],
+    "stdout": "{\"number\":42,\"labels\":[{\"name\":\"agendev:done\"}]}"
+  },
+  {
+    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "agendev/43-implement-beta"],
+    "stdout": "[]"
+  },
+  {
+    "contains": ["issue", "view", "43", "--repo", "owner/repo", "--json", "labels"],
+    "stdout": "{\"labels\":[{\"name\":\"agendev:ready\"}]}"
+  },
+  {
+    "contains": ["issue", "edit", "43", "--repo", "owner/repo", "--remove-label", "agendev:ready", "--add-label", "agendev:in-progress"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "create", "--repo", "owner/repo", "--draft", "--title", "Implement beta", "--head", "agendev/43-implement-beta"],
+    "stdout": "https://example.test/pull/88"
+  },
+  {
+    "contains": ["pr", "comment", "88", "--repo", "owner/repo", "--body-file"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "comment", "88", "--repo", "owner/repo", "--body-file"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "comment", "88", "--repo", "owner/repo", "--body-file"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "view", "88", "--repo", "owner/repo", "--json", "body"],
+    "stdout_file": "$AGENDEV_ROOT/test/fixtures/comments/pr-view-body.json"
+  },
+  {
+    "contains": ["pr", "edit", "88", "--repo", "owner/repo", "--body-file"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "ready", "88", "--repo", "owner/repo"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "merge", "88", "--repo", "owner/repo", "--auto", "--squash"],
+    "stdout": ""
+  },
+  {
+    "contains": ["issue", "view", "43", "--repo", "owner/repo", "--json", "labels"],
+    "stdout": "{\"labels\":[{\"name\":\"agendev:in-progress\"}]}"
+  },
+  {
+    "contains": ["issue", "edit", "43", "--repo", "owner/repo", "--remove-label", "agendev:in-progress", "--add-label", "agendev:done"],
+    "stdout": ""
+  },
+  {
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:ready"],
+    "stdout": "[]"
+  }
+]
+EOF
+  use_fake_gh "$scenario"
+
+  run bash -lc 'cd "'"$local_dir"'" && "'"$AGENDEV_ROOT"'/bin/agendev" run'
+
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | jq -r '.status')" = "completed" ]
+  [ "$(printf '%s' "$output" | jq -r '.runs | length')" = "2" ]
+
+  run cat "$FAKE_GH_LOG"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"issue view 42 --repo owner/repo --json number,labels"* ]]
+  [[ "$output" == *"issue edit 42 --repo owner/repo --remove-label agendev:in-progress --add-label agendev:done"* ]]
+  [[ "$output" == *"issue edit 43 --repo owner/repo --remove-label agendev:in-progress --add-label agendev:done"* ]]
+}
+
+@test "agendev run halts the queue when the consecutive failure limit is reached" {
+  remote_dir="$TEST_TMPDIR/remote.git"
+  local_dir="$TEST_TMPDIR/local"
+  make_remote_backed_repo "$remote_dir" "$local_dir"
+  git -C "$local_dir" remote set-url origin "$remote_dir"
+  setup_run_fixture_env "$local_dir"
+  jq '.consecutiveFailureLimit = 2' "$AGENDEV_CONFIG" >"$TEST_TMPDIR/config-circuit.json"
+  export AGENDEV_CONFIG="$TEST_TMPDIR/config-circuit.json"
+  export AGENDEV_TEST_DEV_COMMAND='true'
+
+  issue_42_body="$(queue_issue_body "[]" 1)"
+  issue_43_body="$(queue_issue_body "[]" 2)"
+  issue_44_body="$(queue_issue_body "[]" 3)"
+  ready_first="$(jq -n --arg body42 "$issue_42_body" --arg body43 "$issue_43_body" --arg body44 "$issue_44_body" '[
+    {number: 42, title: "Fail alpha", body: $body42, labels: [{name:"agendev:ready"}], url: "https://example.test/issues/42"},
+    {number: 43, title: "Fail beta", body: $body43, labels: [{name:"agendev:ready"}], url: "https://example.test/issues/43"},
+    {number: 44, title: "Fail gamma", body: $body44, labels: [{name:"agendev:ready"}], url: "https://example.test/issues/44"}
+  ]')"
+  ready_second="$(jq -n --arg body43 "$issue_43_body" --arg body44 "$issue_44_body" '[
+    {number: 43, title: "Fail beta", body: $body43, labels: [{name:"agendev:ready"}], url: "https://example.test/issues/43"},
+    {number: 44, title: "Fail gamma", body: $body44, labels: [{name:"agendev:ready"}], url: "https://example.test/issues/44"}
+  ]')"
+
+  scenario="$TEST_TMPDIR/scenario.json"
+  write_fake_gh_scenario "$scenario" <<EOF
+[
+  {
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:in-progress"],
+    "stdout": "[]"
+  },
+  {
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:ready"],
+    "stdout": $(printf '%s' "$ready_first")
+  },
+  {
+    "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
+    "stdout": $(jq -Rn --arg body "$issue_42_body" '{"number":42,"title":"Fail alpha","body":$body,"labels":[{"name":"agendev:ready"}],"url":"https://example.test/issues/42"}')
+  },
+  {
+    "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
+    "stdout": $(jq -Rn --arg body "$issue_42_body" '{"number":42,"title":"Fail alpha","body":$body,"labels":[{"name":"agendev:ready"}],"url":"https://example.test/issues/42"}')
+  },
+  {
+    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "agendev/42-fail-alpha"],
+    "stdout": "[]"
+  },
+  {
+    "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "labels"],
+    "stdout": "{\"labels\":[{\"name\":\"agendev:ready\"}]}"
+  },
+  {
+    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "agendev:ready", "--add-label", "agendev:in-progress"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "create", "--repo", "owner/repo", "--draft", "--title", "Fail alpha", "--head", "agendev/42-fail-alpha"],
+    "stdout": "https://example.test/pull/87"
+  },
+  {
+    "contains": ["pr", "comment", "87", "--repo", "owner/repo", "--body-file"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "comment", "87", "--repo", "owner/repo", "--body-file"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "comment", "87", "--repo", "owner/repo", "--body-file"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "comment", "87", "--repo", "owner/repo", "--body-file"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "view", "87", "--repo", "owner/repo", "--json", "body"],
+    "stdout_file": "$AGENDEV_ROOT/test/fixtures/comments/pr-view-body.json"
+  },
+  {
+    "contains": ["pr", "edit", "87", "--repo", "owner/repo", "--body-file"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "comment", "87", "--repo", "owner/repo", "--body-file"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "ready", "87", "--repo", "owner/repo"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "edit", "87", "--repo", "owner/repo", "--add-reviewer", "username", "--add-assignee", "username"],
+    "stdout": ""
+  },
+  {
+    "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "labels"],
+    "stdout": "{\"labels\":[{\"name\":\"agendev:in-progress\"}]}"
+  },
+  {
+    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "agendev:in-progress", "--add-label", "agendev:needs-human-review"],
+    "stdout": ""
+  },
+  {
+    "contains": ["issue", "comment", "42", "--repo", "owner/repo", "--body", "Escalated to human review: post-dev verification failed: no new commits were created, branch tip is not pushed to origin."],
+    "stdout": ""
+  },
+  {
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:ready"],
+    "stdout": $(printf '%s' "$ready_second")
+  },
+  {
+    "contains": ["issue", "view", "43", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
+    "stdout": $(jq -Rn --arg body "$issue_43_body" '{"number":43,"title":"Fail beta","body":$body,"labels":[{"name":"agendev:ready"}],"url":"https://example.test/issues/43"}')
+  },
+  {
+    "contains": ["issue", "view", "43", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
+    "stdout": $(jq -Rn --arg body "$issue_43_body" '{"number":43,"title":"Fail beta","body":$body,"labels":[{"name":"agendev:ready"}],"url":"https://example.test/issues/43"}')
+  },
+  {
+    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "agendev/43-fail-beta"],
+    "stdout": "[]"
+  },
+  {
+    "contains": ["issue", "view", "43", "--repo", "owner/repo", "--json", "labels"],
+    "stdout": "{\"labels\":[{\"name\":\"agendev:ready\"}]}"
+  },
+  {
+    "contains": ["issue", "edit", "43", "--repo", "owner/repo", "--remove-label", "agendev:ready", "--add-label", "agendev:in-progress"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "create", "--repo", "owner/repo", "--draft", "--title", "Fail beta", "--head", "agendev/43-fail-beta"],
+    "stdout": "https://example.test/pull/88"
+  },
+  {
+    "contains": ["pr", "comment", "88", "--repo", "owner/repo", "--body-file"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "comment", "88", "--repo", "owner/repo", "--body-file"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "comment", "88", "--repo", "owner/repo", "--body-file"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "comment", "88", "--repo", "owner/repo", "--body-file"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "view", "88", "--repo", "owner/repo", "--json", "body"],
+    "stdout_file": "$AGENDEV_ROOT/test/fixtures/comments/pr-view-body.json"
+  },
+  {
+    "contains": ["pr", "edit", "88", "--repo", "owner/repo", "--body-file"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "comment", "88", "--repo", "owner/repo", "--body-file"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "ready", "88", "--repo", "owner/repo"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "edit", "88", "--repo", "owner/repo", "--add-reviewer", "username", "--add-assignee", "username"],
+    "stdout": ""
+  },
+  {
+    "contains": ["issue", "view", "43", "--repo", "owner/repo", "--json", "labels"],
+    "stdout": "{\"labels\":[{\"name\":\"agendev:in-progress\"}]}"
+  },
+  {
+    "contains": ["issue", "edit", "43", "--repo", "owner/repo", "--remove-label", "agendev:in-progress", "--add-label", "agendev:needs-human-review"],
+    "stdout": ""
+  },
+  {
+    "contains": ["issue", "comment", "43", "--repo", "owner/repo", "--body", "Escalated to human review: post-dev verification failed: no new commits were created, branch tip is not pushed to origin."],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "comment", "88", "--repo", "owner/repo", "--body-file"],
+    "stdout": ""
+  },
+  {
+    "contains": ["issue", "comment", "43", "--repo", "owner/repo", "--body", "Queue halted after 2 consecutive failures. Failed issues: #42, #43. Investigate before resuming."],
+    "stdout": ""
+  }
+]
+EOF
+  use_fake_gh "$scenario"
+
+  run bash -lc 'cd "'"$local_dir"'" && "'"$AGENDEV_ROOT"'/bin/agendev" run'
+
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | jq -r '.status')" = "halted" ]
+  [ "$(printf '%s' "$output" | jq -r '.failed_issues | join(",")')" = "42,43" ]
+
+  run cat "$FAKE_GH_LOG"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"issue view 44 --repo owner/repo --json number,title,body,labels,url"* ]]
+  run rg -n "Queue halted after 2 consecutive failures. Failed issues: #42, #43. Investigate before resuming." "$FAKE_GH_CAPTURE_DIR"
+  [ "$status" -eq 0 ]
+}
+
+@test "agendev run --dry-run reports queue selection and blocked reasons without dispatch mutation" {
+  remote_dir="$TEST_TMPDIR/remote.git"
+  local_dir="$TEST_TMPDIR/local"
+  make_remote_backed_repo "$remote_dir" "$local_dir"
+  git -C "$local_dir" remote set-url origin "$remote_dir"
+  setup_run_fixture_env "$local_dir"
+
+  blocked_body="$(queue_issue_body "[42]" 1)"
+  ready_body="$(queue_issue_body "[]" 2)"
+  ready_queue="$(jq -n --arg blocked "$blocked_body" --arg ready "$ready_body" '[
+    {number: 43, title: "Blocked beta", body: $blocked, labels: [{name:"agendev:ready"}], url: "https://example.test/issues/43"},
+    {number: 44, title: "Ready gamma", body: $ready, labels: [{name:"agendev:ready"}], url: "https://example.test/issues/44"}
+  ]')"
+
+  scenario="$TEST_TMPDIR/scenario.json"
+  write_fake_gh_scenario "$scenario" <<EOF
+[
+  {
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:in-progress"],
+    "stdout": "[]"
+  },
+  {
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:ready"],
+    "stdout": $(printf '%s' "$ready_queue")
+  },
+  {
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:ready"],
+    "stdout": $(printf '%s' "$ready_queue")
+  },
+  {
+    "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "number,labels"],
+    "stdout": "{\"number\":42,\"labels\":[{\"name\":\"agendev:ready\"}]}"
+  }
+]
+EOF
+  use_fake_gh "$scenario"
+
+  run bash -lc 'cd "'"$local_dir"'" && "'"$AGENDEV_ROOT"'/bin/agendev" run --dry-run'
+
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | jq -r '.mode')" = "dry-run" ]
+  [ "$(printf '%s' "$output" | jq -r '.selection.issue.number')" = "44" ]
+  [ "$(printf '%s' "$output" | jq -r '.selection.skipped[0].blocked_reasons[0]')" = "dependency #42 is not agendev:done" ]
+
+  run cat "$FAKE_GH_LOG"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"issue edit"* ]]
+  [[ "$output" != *"pr create"* ]]
 }

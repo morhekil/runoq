@@ -660,7 +660,7 @@ Implementation notes:
 
 ---
 id: T29
-status: todo
+status: done
 priority: medium
 depends_on:
   - T09
@@ -680,6 +680,9 @@ Dependencies:
 - Task 20.
 - Task 25.
 - Task 27.
+
+Implementation notes:
+- `scripts/run.sh` now supports fixture-mode queue iteration, queue dry-run reporting, per-issue fixture overrides, and circuit-breaker comments on the latest failed PR and issue.
 
 #### Task 30: Mention polling and authorization integration
 
