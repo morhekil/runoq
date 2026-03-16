@@ -23,11 +23,11 @@ create_worktree() {
   path="$(agendev::worktree_path "$issue")"
   base_ref="$(agendev::default_branch_ref)"
 
-  git -C "$target_root" fetch origin main
+  git -C "$target_root" fetch origin main >/dev/null 2>&1
   if [[ -d "$path/.git" || -e "$path" ]]; then
     agendev::die "Worktree already exists: $path"
   fi
-  git -C "$target_root" worktree add "$path" -b "$branch" "$base_ref" >/dev/null
+  git -C "$target_root" worktree add "$path" -b "$branch" "$base_ref" >/dev/null 2>&1
   jq -n --arg branch "$branch" --arg path "$path" --arg base_ref "$base_ref" '{
     branch: $branch,
     worktree: $path,
@@ -44,7 +44,7 @@ remove_worktree() {
     jq -n --arg worktree "$path" '{removed:false, worktree:$worktree}'
     return
   fi
-  git -C "$target_root" worktree remove "$path" --force >/dev/null
+  git -C "$target_root" worktree remove "$path" --force >/dev/null 2>&1
   jq -n --arg worktree "$path" '{removed:true, worktree:$worktree}'
 }
 
