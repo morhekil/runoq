@@ -100,3 +100,37 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$output" == *"State file is corrupted for issue 42"* ]]
 }
+
+@test "processed mention state initializes cleanly and records ids atomically" {
+  export TARGET_ROOT="$TEST_TMPDIR/project"
+  export AGENDEV_STATE_DIR="$TARGET_ROOT/.agendev/state"
+  mkdir -p "$AGENDEV_STATE_DIR"
+
+  run "$AGENDEV_ROOT/scripts/state.sh" has-mention 101
+  [ "$status" -ne 0 ]
+  [ "$output" = "false" ]
+
+  run "$AGENDEV_ROOT/scripts/state.sh" record-mention 101
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"101"* ]]
+
+  run "$AGENDEV_ROOT/scripts/state.sh" has-mention 101
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
+}
+
+@test "processed mention state deduplicates ids across polling cycles" {
+  export TARGET_ROOT="$TEST_TMPDIR/project"
+  export AGENDEV_STATE_DIR="$TARGET_ROOT/.agendev/state"
+  mkdir -p "$AGENDEV_STATE_DIR"
+
+  run bash -lc '
+    "'"$AGENDEV_ROOT"'/scripts/state.sh" record-mention 101 >/dev/null
+    "'"$AGENDEV_ROOT"'/scripts/state.sh" record-mention 101
+  '
+
+  [ "$status" -eq 0 ]
+  run jq -r 'length' "$AGENDEV_STATE_DIR/processed-mentions.json"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ]
+}

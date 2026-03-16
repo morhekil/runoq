@@ -105,6 +105,43 @@ load_state() {
   load_state_raw "$issue"
 }
 
+mentions_file() {
+  printf '%s/processed-mentions.json\n' "$(state_dir_resolved)"
+}
+
+read_mentions() {
+  local file
+  file="$(mentions_file)"
+  if [[ ! -f "$file" ]]; then
+    printf '[]\n'
+    return
+  fi
+  jq -e '.' "$file" 2>/dev/null || agendev::die "Processed mentions file is corrupted"
+}
+
+record_mention() {
+  local comment_id="$1"
+  local file tmp
+  agendev::ensure_state_dir
+  file="$(mentions_file)"
+  tmp="$(mktemp "$(state_dir_resolved)/.mentions.XXXXXX")"
+  read_mentions | jq --argjson id "$comment_id" '
+    if index($id) then . else . + [$id] end
+  ' >"$tmp"
+  mv "$tmp" "$file"
+  cat "$file"
+}
+
+has_mention() {
+  local comment_id="$1"
+  if read_mentions | jq -e --argjson id "$comment_id" 'index($id) != null' >/dev/null; then
+    printf 'true\n'
+  else
+    printf 'false\n'
+    exit 1
+  fi
+}
+
 case "${1:-}" in
   save)
     shift
@@ -127,6 +164,28 @@ case "${1:-}" in
     set -- $remaining
     [[ $# -eq 0 ]] || { usage >&2; exit 1; }
     load_state "$issue"
+    ;;
+  record-mention)
+    shift
+    [[ $# -ge 1 ]] || { usage >&2; exit 1; }
+    comment_id="$1"
+    shift
+    remaining="$(parse_state_dir_arg "$@")"
+    # shellcheck disable=SC2086
+    set -- $remaining
+    [[ $# -eq 0 ]] || { usage >&2; exit 1; }
+    record_mention "$comment_id"
+    ;;
+  has-mention)
+    shift
+    [[ $# -ge 1 ]] || { usage >&2; exit 1; }
+    comment_id="$1"
+    shift
+    remaining="$(parse_state_dir_arg "$@")"
+    # shellcheck disable=SC2086
+    set -- $remaining
+    [[ $# -eq 0 ]] || { usage >&2; exit 1; }
+    has_mention "$comment_id"
     ;;
   *)
     usage >&2
