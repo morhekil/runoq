@@ -764,7 +764,7 @@ Implementation notes:
 
 ---
 id: T33
-status: todo
+status: done
 priority: low
 depends_on:
   - T31
@@ -780,6 +780,9 @@ Acceptance criteria:
 Dependencies:
 - Task 31.
 - Task 32.
+
+Implementation notes:
+- `scripts/maintenance.sh run` now drives the full tracking issue, findings, triage, resume, and completion-summary flow from persisted maintenance state, and `test/maintenance.bats` covers clean end-to-end execution plus resume after interruption without touching source files or PRs.
 
 ## Live Smoke Tests
 

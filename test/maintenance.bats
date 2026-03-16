@@ -303,3 +303,219 @@ EOF
   [ "$status" -eq 0 ]
   [ "$output" = "3" ]
 }
+
+@test "maintenance run completes end to end without modifying source files or PRs" {
+  repo_dir="$TEST_TMPDIR/project"
+  prepare_maintenance_repo "$repo_dir"
+  cat >"$repo_dir/tsconfig.json" <<'EOF'
+{
+  "include": ["src/**/*.ts"]
+}
+EOF
+  findings_file="$TEST_TMPDIR/findings.json"
+  cat >"$findings_file" <<'EOF'
+{
+  "recurring_patterns": ["validation duplication"],
+  "findings": [
+    {
+      "id": "F1",
+      "title": "Approval finding",
+      "description": "Document the approval path.",
+      "suggested_fix": "Add missing documentation.",
+      "status": "pending",
+      "priority": 1
+    }
+  ]
+}
+EOF
+
+  scenario="$TEST_TMPDIR/scenario.json"
+  write_fake_gh_scenario "$scenario" <<EOF
+[
+  {
+    "contains": ["issue", "create", "--repo", "owner/repo", "--title", "Maintenance review"],
+    "stdout": "https://github.com/owner/repo/issues/120"
+  },
+  {
+    "contains": ["issue", "comment", "120", "--repo", "owner/repo", "--body", "Partition src reviewed. PERFECT-D score: pending. Findings: 0."],
+    "stdout": ""
+  },
+  {
+    "contains": ["issue", "comment", "120", "--repo", "owner/repo", "--body", "Finding ID: F1"],
+    "stdout": ""
+  },
+  {
+    "contains": ["api", "repos/owner/repo/issues/120/comments"],
+    "stdout": "[{\"id\":7001,\"body\":\"@agendev approve F1\",\"user\":{\"login\":\"reviewer1\"},\"created_at\":\"2026-03-17T04:00:00Z\"}]"
+  },
+  {
+    "contains": ["api", "repos/owner/repo/collaborators/reviewer1/permission"],
+    "stdout_file": "$(fixture_path "comments/permission-write.json")"
+  },
+  {
+    "contains": ["issue", "create", "--repo", "owner/repo", "--title", "Approval finding", "--label", "agendev:ready"],
+    "stdout": "https://github.com/owner/repo/issues/99"
+  },
+  {
+    "contains": ["issue", "comment", "120", "--repo", "owner/repo", "--body", "Finding F1 approved. Filed as #99."],
+    "stdout": ""
+  },
+  {
+    "contains": ["issue", "comment", "120", "--repo", "owner/repo", "--body", "Recurring patterns: validation duplication."],
+    "stdout": ""
+  },
+  {
+    "contains": ["issue", "comment", "120", "--repo", "owner/repo", "--body", "Maintenance review completed. Partitions reviewed: 1. Findings proposed: 1. Approved: 1. Declined: 0. Issues created: 1. Recurring patterns: validation duplication."],
+    "stdout": ""
+  }
+]
+EOF
+  use_fake_gh "$scenario"
+
+  before_sha="$(git -C "$repo_dir" rev-parse HEAD)"
+  run "$AGENDEV_ROOT/scripts/maintenance.sh" run owner/repo "$findings_file"
+  after_sha="$(git -C "$repo_dir" rev-parse HEAD)"
+
+  [ "$status" -eq 0 ]
+  [ "$before_sha" = "$after_sha" ]
+  [ "$(printf '%s' "$output" | jq -r '.phase')" = "COMPLETED" ]
+  [ "$(printf '%s' "$output" | jq -r '.summary.issues_created')" = "1" ]
+
+  run cat "$FAKE_GH_LOG"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"pr "* ]]
+}
+
+@test "maintenance run resumes from posted findings state" {
+  repo_dir="$TEST_TMPDIR/project"
+  prepare_maintenance_repo "$repo_dir"
+  cat >"$AGENDEV_STATE_DIR/maintenance.json" <<'EOF'
+{
+  "phase": "FINDINGS_POSTED",
+  "tracking_issue": 120,
+  "partitions": [
+    { "name": "src", "path": "src" }
+  ],
+  "recurring_patterns": ["validation duplication"],
+  "findings": [
+    {
+      "id": "F1",
+      "title": "Approval finding",
+      "description": "Document the approval path.",
+      "suggested_fix": "Add missing documentation.",
+      "status": "pending",
+      "priority": 1
+    }
+  ]
+}
+EOF
+  findings_file="$TEST_TMPDIR/findings.json"
+  cat >"$findings_file" <<'EOF'
+{
+  "recurring_patterns": ["validation duplication"],
+  "findings": [
+    {
+      "id": "F1",
+      "title": "Approval finding",
+      "description": "Document the approval path.",
+      "suggested_fix": "Add missing documentation.",
+      "status": "pending",
+      "priority": 1
+    }
+  ]
+}
+EOF
+
+  scenario="$TEST_TMPDIR/scenario.json"
+  write_fake_gh_scenario "$scenario" <<EOF
+[
+  {
+    "contains": ["api", "repos/owner/repo/issues/120/comments"],
+    "stdout": "[{\"id\":7101,\"body\":\"@agendev approve F1\",\"user\":{\"login\":\"reviewer1\"},\"created_at\":\"2026-03-17T04:10:00Z\"}]"
+  },
+  {
+    "contains": ["api", "repos/owner/repo/collaborators/reviewer1/permission"],
+    "stdout_file": "$(fixture_path "comments/permission-write.json")"
+  },
+  {
+    "contains": ["issue", "create", "--repo", "owner/repo", "--title", "Approval finding", "--label", "agendev:ready"],
+    "stdout": "https://github.com/owner/repo/issues/99"
+  },
+  {
+    "contains": ["issue", "comment", "120", "--repo", "owner/repo", "--body", "Finding F1 approved. Filed as #99."],
+    "stdout": ""
+  },
+  {
+    "contains": ["issue", "comment", "120", "--repo", "owner/repo", "--body", "Recurring patterns: validation duplication."],
+    "stdout": ""
+  },
+  {
+    "contains": ["issue", "comment", "120", "--repo", "owner/repo", "--body", "Maintenance review completed. Partitions reviewed: 1. Findings proposed: 1. Approved: 1. Declined: 0. Issues created: 1. Recurring patterns: validation duplication."],
+    "stdout": ""
+  }
+]
+EOF
+  use_fake_gh "$scenario"
+
+  run "$AGENDEV_ROOT/scripts/maintenance.sh" run owner/repo "$findings_file"
+
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | jq -r '.phase')" = "COMPLETED" ]
+  run cat "$FAKE_GH_LOG"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"issue create --repo owner/repo --title Maintenance review"* ]]
+}
+
+@test "maintenance run returns completed state without reposting summary" {
+  repo_dir="$TEST_TMPDIR/project"
+  prepare_maintenance_repo "$repo_dir"
+  cat >"$AGENDEV_STATE_DIR/maintenance.json" <<'EOF'
+{
+  "phase": "COMPLETED",
+  "tracking_issue": 120,
+  "partitions": [
+    { "name": "src", "path": "src" }
+  ],
+  "recurring_patterns": ["validation duplication"],
+  "findings": [
+    {
+      "id": "F1",
+      "title": "Approval finding",
+      "description": "Document the approval path.",
+      "suggested_fix": "Add missing documentation.",
+      "status": "approved",
+      "priority": 1,
+      "filed_issue": 99
+    }
+  ],
+  "summary": {
+    "partitions_reviewed": 1,
+    "findings_proposed": 1,
+    "approved": 1,
+    "declined": 0,
+    "issues_created": 1,
+    "recurring_patterns": ["validation duplication"]
+  }
+}
+EOF
+  findings_file="$TEST_TMPDIR/findings.json"
+  cat >"$findings_file" <<'EOF'
+{
+  "recurring_patterns": [],
+  "findings": []
+}
+EOF
+
+  scenario="$TEST_TMPDIR/scenario.json"
+  write_fake_gh_scenario "$scenario" <<'EOF'
+[]
+EOF
+  use_fake_gh "$scenario"
+
+  run "$AGENDEV_ROOT/scripts/maintenance.sh" run owner/repo "$findings_file"
+
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | jq -r '.phase')" = "COMPLETED" ]
+  [ "$(printf '%s' "$output" | jq -r '.summary.issues_created')" = "1" ]
+  [ ! -e "$FAKE_GH_LOG" ] || [ ! -s "$FAKE_GH_LOG" ]
+}

@@ -12,6 +12,7 @@ Usage:
   maintenance.sh start <repo>
   maintenance.sh post-findings <repo> <tracking-issue> <findings-file>
   maintenance.sh triage <repo> <tracking-issue>
+  maintenance.sh run <repo> <findings-file>
   maintenance.sh report-partition <repo> <tracking-issue> <partition-name> <score> <finding-count>
 EOF
 }
@@ -384,6 +385,92 @@ triage() {
   jq -n --argjson processed "$processed" '{processed: $processed}'
 }
 
+final_summary() {
+  local state_json="$1"
+  jq -n \
+    --argjson state "$state_json" '
+    {
+      partitions_reviewed: ($state.partitions | length),
+      findings_proposed: ($state.findings | length),
+      approved: ($state.findings | map(select(.status == "approved")) | length),
+      declined: ($state.findings | map(select(.status == "declined")) | length),
+      issues_created: ($state.findings | map(select(has("filed_issue"))) | length),
+      recurring_patterns: ($state.recurring_patterns // [])
+    }
+  '
+}
+
+complete_run() {
+  local repo="$1"
+  local tracking_issue="$2"
+  local state_json summary_json message
+  state_json="$(load_maintenance_state)"
+  summary_json="$(final_summary "$state_json")"
+  message="Maintenance review completed. Partitions reviewed: $(printf '%s' "$summary_json" | jq -r '.partitions_reviewed'). Findings proposed: $(printf '%s' "$summary_json" | jq -r '.findings_proposed'). Approved: $(printf '%s' "$summary_json" | jq -r '.approved'). Declined: $(printf '%s' "$summary_json" | jq -r '.declined'). Issues created: $(printf '%s' "$summary_json" | jq -r '.issues_created')."
+  if [[ "$(printf '%s' "$summary_json" | jq -r '.recurring_patterns | length')" -gt 0 ]]; then
+    message="${message} Recurring patterns: $(printf '%s' "$summary_json" | jq -r '.recurring_patterns | join(", ")')."
+  fi
+  agendev::gh issue comment "$tracking_issue" --repo "$repo" --body "$message" >/dev/null
+  state_json="$(jq -n --argjson state "$state_json" --argjson summary "$summary_json" '
+    $state + {
+      phase: "COMPLETED",
+      summary: $summary
+    }
+  ')"
+  save_maintenance_state "$state_json"
+  jq -n \
+    --arg phase "COMPLETED" \
+    --argjson tracking_issue "$tracking_issue" \
+    --argjson summary "$summary_json" '
+    {
+      phase: $phase,
+      tracking_issue: $tracking_issue,
+      summary: $summary
+    }
+  '
+}
+
+run_maintenance() {
+  local repo="$1"
+  local findings_file="$2"
+  local state_json tracking_issue phase
+
+  if [[ -f "$(maintenance_state_file)" ]]; then
+    state_json="$(load_maintenance_state)"
+  else
+    start_run "$repo" >/dev/null
+    state_json="$(load_maintenance_state)"
+  fi
+
+  tracking_issue="$(printf '%s' "$state_json" | jq -r '.tracking_issue')"
+  phase="$(printf '%s' "$state_json" | jq -r '.phase')"
+  if [[ "$phase" == "COMPLETED" ]]; then
+    jq -n \
+      --arg phase "COMPLETED" \
+      --argjson tracking_issue "$tracking_issue" \
+      --argjson summary "$(printf '%s' "$state_json" | jq '.summary')" '
+      {
+        phase: $phase,
+        tracking_issue: $tracking_issue,
+        summary: $summary
+      }
+    '
+    return 0
+  fi
+
+  if [[ "$phase" == "STARTED" ]]; then
+    post_findings "$repo" "$tracking_issue" "$findings_file" >/dev/null
+    state_json="$(load_maintenance_state)"
+  fi
+
+  phase="$(printf '%s' "$state_json" | jq -r '.phase')"
+  if [[ "$phase" == "FINDINGS_POSTED" ]]; then
+    triage "$repo" "$tracking_issue" >/dev/null
+  fi
+
+  complete_run "$repo" "$tracking_issue"
+}
+
 start_run() {
   local repo="$1"
   local partitions_json tracking_json tracking_issue
@@ -433,6 +520,10 @@ case "${1:-}" in
   triage)
     [[ $# -eq 3 ]] || { usage >&2; exit 1; }
     triage "$2" "$3"
+    ;;
+  run)
+    [[ $# -eq 3 ]] || { usage >&2; exit 1; }
+    run_maintenance "$2" "$3"
     ;;
   report-partition)
     [[ $# -eq 6 ]] || { usage >&2; exit 1; }
