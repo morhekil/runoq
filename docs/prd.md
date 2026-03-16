@@ -60,6 +60,78 @@ PRs flagged `agendev:needs-human-review` have:
 - Specific areas flagged for attention
 - A human reviewer assigned
 
+### Phase 4: Maintenance Review (periodic, agent-driven)
+
+A full PERFECT-D codebase review that runs independently of the per-issue loop. It catches cross-cutting concerns that diff-review structurally cannot see — problems that only emerge when looking at the codebase as a whole rather than one issue's changes at a time.
+
+#### What it catches
+
+- **Architectural drift** — modules violating their boundaries, dependency graph degradation across independently-merged issues.
+- **Accumulated duplication** — two issues each add similar code; only a global view notices.
+- **Convention drift** — naming, error handling, patterns that slowly diverge across issues.
+- **Dead code / unused exports** — artifacts of iteration that no single diff-review flags.
+- **Documentation staleness** — READMEs, architecture docs, AGENTS.md that haven't kept up with accumulated changes.
+- **Integration-boundary test gaps** — individual issue tests cover their own paths but miss cross-module interactions.
+- **Dependency health** — unused, duplicate, or outdated dependencies.
+
+#### Trigger
+
+- **On-demand**: Human invokes explicitly (e.g. `agendev maintenance-review`).
+- **Queue-idle**: Optionally triggered when the issue queue has been empty for a configurable duration.
+- **Precondition**: Runs against a clean `main` branch. All in-flight PRs must be merged or parked — no point reviewing code that's about to change.
+- **Concurrency**: Mutex with the per-issue loop. Either pause the queue during maintenance review, or run read-only in a temporary worktree off `main`.
+
+#### Scope derivation (zero-config)
+
+Review scope and partitioning are derived automatically from existing project configuration — no maintenance-specific config needed.
+
+1. **Exclusions** — `.gitignore` provides baseline exclusion (node_modules, dist, build artifacts, coverage output). TypeScript `tsconfig.json` `exclude` adds TS-specific exclusions (generated types, declaration output). The union of both defines "not reviewable code."
+2. **Partitioning** — In monorepos with TypeScript project references (`tsconfig.json` `references`), each referenced sub-project is one review partition. In single-project repos, top-level source directories within `tsconfig.json` `include` paths are used as partitions. Each partition gets its own PERFECT-D scorecard.
+3. **Spec source** — Per-issue review uses the issue body as its spec. Maintenance review uses project-level guidelines as its spec: AGENTS.md, README, architecture docs, and any documented conventions. The question being answered is "does this code match the project's stated intent?" rather than "does this diff satisfy this issue's acceptance criteria?"
+
+#### Tracking issue & human triage
+
+The maintenance review is **read-only** — it observes and proposes findings, never modifies code or files issues autonomously. All findings go through human triage before entering the queue.
+
+Each maintenance review run creates a **tracking issue** labeled `agendev:maintenance-review`. The tracking issue body contains run metadata (timestamp, branch/commit reviewed, partitions identified) and a summary table of per-partition PERFECT-D scores.
+
+**Findings are posted as individual comments on the tracking issue**, one comment per finding (or per grouped set of related findings). Each comment includes:
+
+- PERFECT-D dimension and severity (bug / design / documentation / etc.)
+- File locations and code references
+- Concrete description of the problem
+- Suggested fix
+
+The agent then **waits for human triage**. The human responds to each finding comment by @-mentioning the agent (see Addressability — maintenance issue mentions below):
+
+- **Approve** (`@agendev approve` or `@agendev file this`): The agent creates a new GitHub Issue from the finding, labeled `agendev:ready`, and links it from the tracking issue. The issue body includes the full finding detail and suggested fix.
+- **Deny** (`@agendev skip` or `@agendev won't fix`): The agent marks the finding as declined (edits the comment or posts a reply) and moves on. No issue is created.
+- **Question** (`@agendev why is this a problem?` or `@agendev what about X?`): The agent reads the question, the referenced code, and the review context, and posts a reply on the tracking issue. The finding stays in triage until the human follows up with approve or deny.
+- **Modify** (`@agendev file this but lower priority` or `@agendev combine with the one above`): The agent adjusts the finding per the instruction before filing.
+
+**Grouping**: Related findings (e.g. "extract duplicated validation logic in 3 places") are posted as a single comment, not three. The agent groups proactively during review; the human can also request combining findings during triage.
+
+**Deduplication with in-flight work**: Findings that reference code currently being worked on in an open PR are flagged in the comment ("Note: this code is being modified in PR #N") so the human can decide whether to file or wait.
+
+The tracking issue is updated with a summary once all findings are triaged: partitions reviewed, findings proposed, approved, declined, issues created.
+
+#### Agent structure
+
+A `maintenance-reviewer` agent — same dispatcher pattern as the existing `project-orchestrator`:
+
+- **Role**: Derive partitions from project config, spawn `perfect-review` subagents per partition, collect results, deduplicate/group findings, post findings as comments on the tracking issue, then process human triage responses.
+- **Does not fix anything** — observation, proposal, and issue-filing (after approval) only.
+- **Context management**: Holds only partition names, scores, and finding summaries. Never holds full review content in the dispatcher context. Full review output is written to the tracking issue.
+- **Triage loop**: After posting all findings, the agent polls for @-mentions on the tracking issue (same `poll-mentions` mechanism as the github-orchestrator). It processes each triage response, files approved issues, and waits until all findings are resolved or the human explicitly closes the tracking issue.
+
+#### State & resumability
+
+Same pattern as per-issue state: a local state file tracks which partitions have been reviewed, so a crashed maintenance review can resume from where it left off.
+
+#### Feedback loop
+
+If maintenance review repeatedly surfaces the same category of finding (e.g. missing error handling, inconsistent naming), that's a signal that the diff-review skill or AGENTS.md conventions need strengthening — not just that more issues need filing. The tracking issue summary should flag recurring patterns explicitly so the human can decide whether to improve the review criteria.
+
 ## Architecture
 
 ```
@@ -479,6 +551,11 @@ Events that must be commented:
 | Verification checkpoint failed | PR | "Post-dev verification failed: [no new commits / build failure / push missing]. Feeding errors to next dev round." |
 | Ground-truth verification mismatch | PR | "Codex claimed [N] commits but [M] found on branch. Files mismatch: claimed [...], actual [...]." |
 | Circuit breaker triggered | PR + Issue (latest) | "Queue halted after N consecutive failures. Failed issues: #X, #Y, #Z. Investigate before resuming." |
+| Maintenance review started | Tracking Issue | Run metadata: commit reviewed, partitions derived, timestamp. |
+| Maintenance partition reviewed | Tracking Issue | Partition name, PERFECT-D score, finding count. |
+| Maintenance finding proposed | Tracking Issue | One comment per finding (or grouped findings): dimension, severity, files, description, suggested fix. |
+| Maintenance finding triaged | Tracking Issue | Human triage result: approved (link to created issue), declined, or modified. |
+| Maintenance review completed | Tracking Issue | Summary: partitions reviewed, findings proposed, approved, declined, issues created, recurring patterns flagged. |
 
 **Format:** Comments are prefixed with `<!-- agendev:event -->` so they can be distinguished from human comments and parsed programmatically if needed. Payload comments use `<!-- agendev:payload:<type> -->` (e.g., `<!-- agendev:payload:codex-return -->`) so they can be extracted programmatically for analysis.
 
@@ -769,7 +846,7 @@ This data directly informs the "triggers for migration" thresholds in Future Wor
 
 **Per-issue (during development loop):** diff-review only. This is the lightweight gate that checks changed code against the issue's acceptance criteria. Fast, focused, sufficient for iterative development.
 
-**Periodic (maintenance task):** Full PERFECT-D review runs on a schedule (or on-demand) across the entire project codebase. This catches cross-cutting concerns, architectural drift, and accumulated tech debt that diff-review can't see. Findings are filed as new GitHub Issues for the queue to process. This keeps the per-issue loop fast while still getting full-codebase review coverage.
+**Periodic (maintenance task):** Full PERFECT-D review of the entire codebase, run on-demand or when the queue is idle. Catches cross-cutting concerns that diff-review structurally cannot see (architectural drift, accumulated duplication, convention drift, dead code, documentation staleness). Findings are posted to a tracking issue for human triage; approved findings become new GitHub Issues for the queue to process. See **Phase 4: Maintenance Review** for full details.
 
 ## Configuration
 
@@ -882,9 +959,19 @@ gh-pr-lifecycle.sh poll-mentions <repo> <agent-handle> [--since <timestamp>]
 Each mention is processed once (tracked by comment ID in `.agendev/state/processed-mentions.json` to avoid duplicates across polling cycles).
 
 **Mention types and responses:**
+
+*Development PRs and issues:*
 - **Question on a PR** (`@agendev why did you change X?`): Agent reads the PR context and referenced code, posts a reply explaining the rationale from the review/dev round that produced the change.
 - **Action request on a PR** (`@agendev please also add tests for the edge case`): Agent treats this as an additional checklist item. If the PR is still in-progress, it's folded into the next dev round. If the PR is finalized, a comment is posted explaining that the PR is closed for agent work and suggesting a follow-up issue.
 - **Action request on an issue** (`@agendev pick this up next`): Agent re-prioritizes or immediately dispatches the issue (subject to eligibility checks).
+
+*Maintenance review tracking issues (labeled `agendev:maintenance-review`):*
+- **Approve finding** (`@agendev approve`, `@agendev file this`): Agent creates a GitHub Issue from the finding, labeled `agendev:ready`, and links it from the tracking issue.
+- **Deny finding** (`@agendev skip`, `@agendev won't fix`): Agent marks the finding as declined. No issue is created.
+- **Question on finding** (`@agendev why is this a problem?`): Agent posts a reply with additional context from the review. Finding stays in triage.
+- **Modify finding** (`@agendev file this but lower priority`, `@agendev combine with the one above`): Agent adjusts the finding per the instruction before filing.
+
+The agent distinguishes context by the issue label: mentions on `agendev:maintenance-review` issues are triage commands; mentions on all other issues/PRs are development commands. Same authorization rules apply to both.
 
 ### Authorization
 
