@@ -1,0 +1,44 @@
+{
+  "labels": {
+    "ready": "agendev:ready",
+    "inProgress": "agendev:in-progress",
+    "done": "agendev:done",
+    "needsReview": "agendev:needs-human-review",
+    "blocked": "agendev:blocked",
+    "maintenanceReview": "agendev:maintenance-review"
+  },
+  "identity": {
+    "appSlug": "agendev",
+    "handle": "agendev"
+  },
+  "authorization": {
+    "minimumPermission": "write",
+    "denyResponse": "comment"
+  },
+  "maxRounds": 5,
+  "maxTokenBudget": 500000,
+  "tokenCost": {
+    "inputPerMillion": 0,
+    "cachedInputPerMillion": 0,
+    "outputPerMillion": 0
+  },
+  "autoMerge": {
+    "enabled": true,
+    "requireVerification": true,
+    "requireZeroCritical": true,
+    "maxComplexity": "low"
+  },
+  "reviewers": [
+    "username"
+  ],
+  "branchPrefix": "agendev/",
+  "worktreePrefix": "agendev-wt-",
+  "consecutiveFailureLimit": 3,
+  "verification": {
+    "testCommand": "npm test",
+    "buildCommand": "npm run build"
+  },
+  "stall": {
+    "timeoutSeconds": 600
+  }
+}
