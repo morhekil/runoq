@@ -1,0 +1,42 @@
+#!/usr/bin/env bats
+
+load test_helper
+
+@test "issue queue skill delegates to gh-issue-queue.sh and documents actions" {
+  run grep -n "gh-issue-queue.sh next" "$AGENDEV_ROOT/.claude/skills/issue-queue/SKILL.md"
+  [ "$status" -eq 0 ]
+  run grep -n "blocked_reasons" "$AGENDEV_ROOT/.claude/skills/issue-queue/SKILL.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "pr lifecycle skill delegates to gh-pr-lifecycle.sh and audit markers" {
+  run grep -n "gh-pr-lifecycle.sh update-summary" "$AGENDEV_ROOT/.claude/skills/pr-lifecycle/SKILL.md"
+  [ "$status" -eq 0 ]
+  run grep -n "agendev:payload" "$AGENDEV_ROOT/.claude/skills/pr-lifecycle/SKILL.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "plan to issues skill requires confirmation before creating issues" {
+  run grep -n "confirmation before creating" "$AGENDEV_ROOT/.claude/skills/plan-to-issues/SKILL.md"
+  [ "$status" -eq 0 ]
+  run grep -n "dependency graph" "$AGENDEV_ROOT/.claude/skills/plan-to-issues/SKILL.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "github orchestrator prompt follows the dispatch loop and avoids source edits" {
+  run grep -n "Dispatch loop" "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
+  [ "$status" -eq 0 ]
+  run grep -n "You do not edit source code" "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
+  [ "$status" -eq 0 ]
+  run grep -n "circuit breaker" "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "orchestrator github prompt enforces payload parsing and verification gates" {
+  run grep -n "Parse the Codex return payload before doing anything else" "$AGENDEV_ROOT/.claude/agents/orchestrator-github.md"
+  [ "$status" -eq 0 ]
+  run grep -n "verify.sh round" "$AGENDEV_ROOT/.claude/agents/orchestrator-github.md"
+  [ "$status" -eq 0 ]
+  run grep -n "maxTokenBudget" "$AGENDEV_ROOT/.claude/agents/orchestrator-github.md"
+  [ "$status" -eq 0 ]
+}
