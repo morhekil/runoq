@@ -64,6 +64,17 @@ summary_file() {
   mktemp "${TMPDIR:-/tmp}/agendev-summary.XXXXXX"
 }
 
+event_comment_file() {
+  local message="$1"
+  local path
+  path="$(comment_file)"
+  {
+    echo "<!-- agendev:event -->"
+    echo "$message"
+  } >"$path"
+  printf '%s\n' "$path"
+}
+
 issue_json() {
   local issue="$1"
   agendev::gh issue view "$issue" --repo "$REPO" --json number,title,body,labels,url
@@ -91,6 +102,27 @@ save_state_json() {
   local issue="$1"
   local payload="$2"
   printf '%s\n' "$payload" | "$(agendev::root)/scripts/state.sh" save "$issue" >/dev/null
+}
+
+post_pr_event() {
+  local pr_number="$1"
+  local message="$2"
+  local comment_path
+  comment_path="$(event_comment_file "$message")"
+  "$(agendev::root)/scripts/gh-pr-lifecycle.sh" comment "$REPO" "$pr_number" "$comment_path" >/dev/null 2>&1 || true
+  rm -f "$comment_path"
+}
+
+post_issue_event() {
+  local issue="$1"
+  local message="$2"
+  local body
+  body="$(printf '<!-- agendev:event -->\n%s\n' "$message")"
+  agendev::gh issue comment "$issue" --repo "$REPO" --body "$body" >/dev/null 2>&1 || true
+}
+
+first_reviewer() {
+  jq -r '.reviewers[0] // empty' "$(agendev::config_path)" 2>/dev/null || true
 }
 
 write_dispatch_comment() {
@@ -173,6 +205,130 @@ write_summary_update() {
   printf '%s\n' "$summary_path"
 }
 
+write_payload_reconstruction_comment() {
+  local pr_number="$1"
+  local payload_file="$2"
+  local message source patched_fields discrepancies
+  source="$(jq -r '.payload_source // "unknown"' "$payload_file")"
+  patched_fields="$(jq -r '(.patched_fields // []) | join(", ")' "$payload_file")"
+  discrepancies="$(jq -r '(.discrepancies // []) | join(", ")' "$payload_file")"
+  message="Codex payload required reconstruction. Source=${source}."
+  if [[ -n "$patched_fields" ]]; then
+    message="${message} Patched fields: ${patched_fields}."
+  fi
+  if [[ -n "$discrepancies" ]]; then
+    message="${message} Discrepancies: ${discrepancies}."
+  fi
+  post_pr_event "$pr_number" "$message"
+}
+
+write_verification_failure_comment() {
+  local pr_number="$1"
+  local verification_file="$2"
+  local failures
+  failures="$(jq -r '.failures | join(", ")' "$verification_file")"
+  post_pr_event "$pr_number" "Post-dev verification failed: ${failures}. Feeding errors to next dev round."
+}
+
+write_failure_result() {
+  local summary="$1"
+  local reason="$2"
+  local output_file
+  output_file="$(mktemp "${TMPDIR:-/tmp}/agendev-orchestrator-failure.XXXXXX")"
+  jq -n \
+    --arg verdict "FAIL" \
+    --arg summary "$summary" \
+    --arg reason "$reason" '
+    {
+      verdict: $verdict,
+      rounds_used: 1,
+      final_score: 0,
+      summary: $summary,
+      caveats: [$reason],
+      tokens_used: 0
+    }
+  ' >"$output_file"
+  printf '%s\n' "$output_file"
+}
+
+save_failed_state() {
+  local issue="$1"
+  local branch="$2"
+  local worktree="$3"
+  local pr_number="$4"
+  local outcome_file="$5"
+  save_state_json "$issue" "$(jq -n \
+    --arg phase "FAILED" \
+    --arg branch "$branch" \
+    --arg worktree "$worktree" \
+    --argjson pr_number "$pr_number" \
+    --slurpfile outcome "$outcome_file" '
+    {phase:$phase, round:1, branch:$branch, worktree:$worktree, pr_number:$pr_number, outcome:$outcome[0]}
+  ')"
+}
+
+finalize_needs_review() {
+  local issue="$1"
+  local branch="$2"
+  local worktree="$3"
+  local pr_number="$4"
+  local reason="$5"
+  local summary="$6"
+  local outcome_file="${7:-}"
+  local reviewer orchestrator_file summary_path cleanup_outcome=false
+
+  reviewer="$(first_reviewer)"
+  if [[ -n "$outcome_file" ]]; then
+    orchestrator_file="$outcome_file"
+  else
+    orchestrator_file="$(write_failure_result "$summary" "$reason")"
+    write_orchestrator_comment "$pr_number" "$orchestrator_file"
+    cleanup_outcome=true
+  fi
+  summary_path="$(write_summary_update "$orchestrator_file")"
+  "$(agendev::root)/scripts/gh-pr-lifecycle.sh" update-summary "$REPO" "$pr_number" "$summary_path" >/dev/null
+  if [[ -n "$reviewer" ]]; then
+    post_pr_event "$pr_number" "Assigned to @${reviewer} for human review. Reason: ${reason}."
+    "$(agendev::root)/scripts/gh-pr-lifecycle.sh" finalize "$REPO" "$pr_number" needs-review --reviewer "$reviewer" >/dev/null
+  else
+    post_pr_event "$pr_number" "Marked for human review. Reason: ${reason}."
+    "$(agendev::root)/scripts/gh-pr-lifecycle.sh" finalize "$REPO" "$pr_number" needs-review >/dev/null
+  fi
+  "$(agendev::root)/scripts/gh-issue-queue.sh" set-status "$REPO" "$issue" "needs-review" >/dev/null
+  post_issue_event "$issue" "Escalated to human review: ${reason}."
+  save_failed_state "$issue" "$branch" "$worktree" "$pr_number" "$orchestrator_file"
+  if [[ "$cleanup_outcome" == "true" ]]; then
+    rm -f "$orchestrator_file"
+  fi
+  rm -f "$summary_path"
+  jq -n \
+    --argjson issue "$issue" \
+    --argjson pr_number "$pr_number" \
+    --arg worktree "$worktree" \
+    --arg reason "$reason" '
+    {
+      issue: $issue,
+      pr_number: $pr_number,
+      worktree: $worktree,
+      status: "needs-review",
+      reason: $reason
+    }
+  '
+}
+
+run_dev_command() {
+  local worktree="$1"
+  local issue="$2"
+  local timeout dev_command
+  timeout="$(agendev::config_get '.stall.timeoutSeconds')"
+  dev_command="${AGENDEV_TEST_DEV_COMMAND:-true}"
+  "$(agendev::root)/scripts/watchdog.sh" \
+    --timeout "$timeout" \
+    --issue "$issue" \
+    --state-dir "$(agendev::state_dir)" \
+    -- bash -lc "cd \"$worktree\" && ${dev_command}"
+}
+
 generate_fixture_codex_output() {
   local worktree="$1"
   local base_sha="$2"
@@ -231,6 +387,7 @@ generate_fixture_codex_output() {
 fixture_mode_run() {
   local reconcile_output issue_data body_file title worktree_json branch_name worktree_path pr_json pr_number base_sha
   local dispatch_payload_file codex_output_file payload_file verification_file orchestrator_file summary_path verdict complexity
+  local dev_exit timeout_seconds failure_reason
 
   reconcile_output="$("$(agendev::root)/scripts/dispatch-safety.sh" reconcile "$REPO")"
   if [[ "$dry_run" == "true" ]]; then
@@ -299,8 +456,21 @@ fixture_mode_run() {
     {phase:$phase, round:1, branch:$branch, worktree:$worktree, pr_number:$pr_number}
   ')"
 
-  if [[ -n "${AGENDEV_TEST_DEV_COMMAND:-}" ]]; then
-    bash -lc "cd \"$worktree_path\" && ${AGENDEV_TEST_DEV_COMMAND}"
+  set +e
+  run_dev_command "$worktree_path" "$issue_number"
+  dev_exit="$?"
+  set -e
+  if [[ "$dev_exit" -ne 0 ]]; then
+    timeout_seconds="$(agendev::config_get '.stall.timeoutSeconds')"
+    if [[ "$dev_exit" -eq 124 ]]; then
+      failure_reason="Agent stalled after ${timeout_seconds} seconds of inactivity. Process terminated. State preserved for resume."
+    else
+      failure_reason="Agent exited unexpectedly (exit code ${dev_exit}). Last phase: DEVELOP, round 1."
+    fi
+    post_pr_event "$pr_number" "$failure_reason"
+    post_issue_event "$issue_number" "$failure_reason"
+    rm -f "$body_file" "$dispatch_payload_file"
+    exit "$dev_exit"
   fi
 
   codex_output_file="$(mktemp "${TMPDIR:-/tmp}/agendev-codex-output.XXXXXX")"
@@ -312,12 +482,19 @@ fixture_mode_run() {
 
   payload_file="$(mktemp "${TMPDIR:-/tmp}/agendev-codex-payload.XXXXXX")"
   "$(agendev::root)/scripts/state.sh" validate-payload "$worktree_path" "$base_sha" "$codex_output_file" >"$payload_file"
+  if [[ "$(jq -r '((.patched_fields // []) | length > 0) or ((.discrepancies // []) | length > 0)' "$payload_file")" == "true" ]]; then
+    write_payload_reconstruction_comment "$pr_number" "$payload_file"
+  fi
   write_codex_comment "$pr_number" "$payload_file"
 
   verification_file="$(mktemp "${TMPDIR:-/tmp}/agendev-verify.XXXXXX")"
   "$(agendev::root)/scripts/verify.sh" round "$worktree_path" "$branch_name" "$base_sha" "$payload_file" >"$verification_file"
   if [[ "$(jq -r '.ok' "$verification_file")" != "true" ]]; then
-    agendev::die "fixture mode happy path requires a passing verification result"
+    write_verification_failure_comment "$pr_number" "$verification_file"
+    failure_reason="post-dev verification failed: $(jq -r '.failures | join(", ")' "$verification_file")"
+    finalize_needs_review "$issue_number" "$branch_name" "$worktree_path" "$pr_number" "$failure_reason" "Escalated to human review after verification failure."
+    rm -f "$body_file" "$dispatch_payload_file" "$codex_output_file" "$payload_file" "$verification_file"
+    return
   fi
 
   save_state_json "$issue_number" "$(jq -n \
@@ -356,7 +533,7 @@ fixture_mode_run() {
   "$(agendev::root)/scripts/gh-pr-lifecycle.sh" update-summary "$REPO" "$pr_number" "$summary_path" >/dev/null
   verdict="$(jq -r '.verdict' "$orchestrator_file")"
 
-  if [[ "$verdict" == "PASS" && "$complexity" == "low" ]]; then
+  if [[ "$verdict" == "PASS" && "$complexity" == "low" && "$(jq -r '.caveats | length' "$orchestrator_file")" -eq 0 ]]; then
     "$(agendev::root)/scripts/gh-pr-lifecycle.sh" finalize "$REPO" "$pr_number" auto-merge >/dev/null
     "$(agendev::root)/scripts/gh-issue-queue.sh" set-status "$REPO" "$issue_number" "done" >/dev/null
     save_state_json "$issue_number" "$(jq -n \
@@ -369,7 +546,16 @@ fixture_mode_run() {
     ')"
     "$(agendev::root)/scripts/worktree.sh" remove "$issue_number" >/dev/null
   else
-    agendev::die "fixture mode currently supports only PASS + low complexity happy path"
+    if [[ "$verdict" != "PASS" ]]; then
+      failure_reason="orchestrator returned ${verdict}: $(jq -r '.summary' "$orchestrator_file")"
+    elif [[ "$(jq -r '.caveats | length' "$orchestrator_file")" -gt 0 ]]; then
+      failure_reason="$(jq -r '.caveats | join(", ")' "$orchestrator_file")"
+    else
+      failure_reason="issue complexity ${complexity} requires human review"
+    fi
+    finalize_needs_review "$issue_number" "$branch_name" "$worktree_path" "$pr_number" "$failure_reason" "$(jq -r '.summary' "$orchestrator_file")" "$orchestrator_file"
+    rm -f "$body_file" "$dispatch_payload_file" "$codex_output_file" "$payload_file" "$verification_file" "$orchestrator_file" "$summary_path"
+    return
   fi
 
   jq -n \

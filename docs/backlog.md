@@ -630,7 +630,7 @@ Dependencies:
 
 ---
 id: T28
-status: todo
+status: done
 priority: high
 depends_on:
   - T17
@@ -652,6 +652,9 @@ Dependencies:
 - Task 19.
 - Task 20.
 - Task 27.
+
+Implementation notes:
+- `test/run_integration.bats` now covers no-commit, failing verification commands, missing push, malformed payload reconstruction, watchdog stalls, crash preservation, and startup reconciliation before dispatch.
 
 #### Task 29: Queue loop and circuit breaker integration
 

@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+# shellcheck source=./scripts/lib/common.sh
 source "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
 
 usage() {
@@ -56,6 +57,11 @@ verify_round() {
   printf '[]\n' >"$failures_file"
 
   ground_truth_json "$worktree" "$base_sha" >"$truth_file"
+
+  if [[ "$(jq -r '.commits_pushed | length' "$truth_file")" -eq 0 ]]; then
+    jq '. + ["no new commits were created"]' "$failures_file" >"${failures_file}.tmp"
+    mv "${failures_file}.tmp" "$failures_file"
+  fi
 
   while IFS= read -r sha; do
     [[ -z "$sha" ]] && continue
