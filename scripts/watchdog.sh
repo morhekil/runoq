@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+# shellcheck source=./scripts/lib/common.sh
 source "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
 
 usage() {
@@ -76,6 +77,7 @@ write_stall_marker() {
   mv "$tmp" "$file"
 }
 
+# shellcheck disable=SC2329
 cleanup() {
   rm -f "${watchdog_output_file:-}"
 }

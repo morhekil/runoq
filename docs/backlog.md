@@ -446,7 +446,7 @@ Dependencies:
 
 ---
 id: T20
-status: todo
+status: done
 priority: high
 depends_on:
   - T06
