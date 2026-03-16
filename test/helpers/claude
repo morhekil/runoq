@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [[ -n "${FAKE_CLAUDE_LOG:-}" ]]; then
+  printf '%s\n' "$*" >>"$FAKE_CLAUDE_LOG"
+fi
+
+if [[ -n "${FAKE_CLAUDE_ENV_LOG:-}" ]]; then
+  {
+    printf 'AGENDEV_ROOT=%s\n' "${AGENDEV_ROOT:-}"
+    printf 'AGENDEV_CONFIG=%s\n' "${AGENDEV_CONFIG:-}"
+    printf 'TARGET_ROOT=%s\n' "${TARGET_ROOT:-}"
+    printf 'REPO=%s\n' "${REPO:-}"
+    printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"
+  } >>"$FAKE_CLAUDE_ENV_LOG"
+fi
+
+printf 'fake claude invoked\n'
