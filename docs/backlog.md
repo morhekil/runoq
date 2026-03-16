@@ -740,7 +740,7 @@ Implementation notes:
 
 ---
 id: T32
-status: todo
+status: done
 priority: low
 depends_on:
   - T12
@@ -756,6 +756,9 @@ Acceptance criteria:
 Dependencies:
 - Task 12.
 - Task 31.
+
+Implementation notes:
+- `scripts/maintenance.sh` now persists posted findings, routes authorized triage mentions into ready issues, records declined findings, supports lower-priority filing directives, and emits recurring-pattern summaries once triage is complete.
 
 #### Task 33: Maintenance end-to-end integration
 
