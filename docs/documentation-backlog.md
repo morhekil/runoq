@@ -431,7 +431,7 @@ Acceptance guidance:
 
 ---
 id: D15
-state: pending
+state: done
 priority: p2
 type: add
 depends_on:

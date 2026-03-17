@@ -87,6 +87,7 @@ export AGENDEV_SYMLINK_DIR="$HOME/.local/bin"
 - [Maintenance review guide](./docs/operations/maintenance-review.md)
 - [Contributor testing guide](./docs/contributing/testing.md)
 - [Agent and skill guide](./docs/contributing/agent-and-skill-guidelines.md)
+- [Architecture decision records](./docs/adr/README.md)
 - [Documentation backlog](./docs/documentation-backlog.md)
 - [Implementation backlog](./docs/backlog.md)
 - [Product requirements](./docs/prd.md)
