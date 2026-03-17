@@ -2,6 +2,10 @@
 
 This document turns the PRD in `docs/prd.md` into a working backlog for implementation. It is organized to support a test-first build: deterministic code and contracts first, agent prompts after the shell/runtime layer is stable.
 
+## Documentation Backlog Notes
+
+- `D01`: Added the repository landing-page `README.md` with operator prerequisites, setup flow, command overview, repo layout, and links into the current doc set.
+
 ## Task Metadata
 
 Each task includes a small YAML block for tracking.

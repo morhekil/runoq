@@ -28,7 +28,7 @@ Each task includes a small YAML block for tracking.
 
 ---
 id: D01
-state: pending
+state: done
 priority: p0
 type: add
 depends_on: []
