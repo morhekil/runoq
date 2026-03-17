@@ -9,6 +9,10 @@ This repository implements the deterministic shell/runtime layer for GitHub-back
 - Preserve the target project's main working tree; use sibling worktrees for execution.
 - Treat `.agendev/state/*.json` as recovery breadcrumbs, not the audit trail.
 
+## Development guidelines
+
+Read `docs/development-guidelines.md` for detailed implementation and testing guidance based on the lessons learned during development.
+
 ## Testing
 
 - Add or update Bats coverage when changing shell behavior.
