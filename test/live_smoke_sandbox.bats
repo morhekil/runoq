@@ -7,13 +7,13 @@ load test_helper
     skip "Set AGENDEV_SMOKE=1 plus the required AGENDEV_SMOKE_* variables to run live GitHub smoke tests."
   fi
 
-  run "$AGENDEV_ROOT/scripts/live-smoke.sh" preflight
+  run "$AGENDEV_ROOT/scripts/smoke-sandbox.sh" preflight
   [ "$status" -eq 0 ]
   if [[ "$(printf '%s' "$output" | jq -r '.ready')" != "true" ]]; then
     skip "Live smoke preflight is not ready: $output"
   fi
 
-  run "$AGENDEV_ROOT/scripts/live-smoke.sh" run
+  run "$AGENDEV_ROOT/scripts/smoke-sandbox.sh" run
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.status')" = "ok" ]

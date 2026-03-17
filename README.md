@@ -99,4 +99,4 @@ This repo expects deterministic behavior to live in scripts and JSON contracts, 
 
 - Run focused Bats suites first, then adjacent regressions.
 - Run `shellcheck -x` on shell scripts you touch.
-- Keep live GitHub validation opt-in through the sandbox smoke flow in [`docs/live-smoke.md`](./docs/live-smoke.md).
+- Keep live GitHub validation opt-in through the sandbox smoke and lifecycle eval flows in [`docs/live-smoke.md`](./docs/live-smoke.md).

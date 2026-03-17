@@ -1,0 +1,30 @@
+[
+  {
+    "key": "format-progress",
+    "title": "Add formatted progress output",
+    "depends_on_keys": [],
+    "priority": 1,
+    "estimated_complexity": "low",
+    "body": "## Context\n\nThe target repo only exposes a numeric `percent()` helper right now.\n\n## Acceptance Criteria\n\n- [ ] `src/progress.js` exports `formatProgress(complete, total)`.\n- [ ] `formatProgress(2, 5)` returns `\"2/5 complete (40%)\"`.\n- [ ] `test/progress.test.js` covers the new formatter.\n- [ ] Keep the implementation in CommonJS and use only built-in Node.js modules."
+  },
+  {
+    "key": "clamp-overflow",
+    "title": "Clamp overflowing progress values",
+    "depends_on_keys": [
+      "format-progress"
+    ],
+    "priority": 2,
+    "estimated_complexity": "low",
+    "body": "## Context\n\nThe formatter should stay predictable even when `complete` is greater than `total`.\n\n## Acceptance Criteria\n\n- [ ] Progress values are clamped so they never report more than 100%.\n- [ ] `percent(7, 5)` returns `100`.\n- [ ] `formatProgress(7, 5)` returns `\"5/5 complete (100%)\"`.\n- [ ] Add or update tests in `test/progress.test.js`."
+  },
+  {
+    "key": "add-cli",
+    "title": "Add a CLI wrapper for progress output",
+    "depends_on_keys": [
+      "clamp-overflow"
+    ],
+    "priority": 3,
+    "estimated_complexity": "low",
+    "body": "## Context\n\nAfter the formatter is stable, expose it through a tiny CLI.\n\n## Acceptance Criteria\n\n- [ ] Add `src/cli.js` that prints the formatted progress for two integer arguments.\n- [ ] Add tests for the CLI success path using built-in Node.js modules only.\n- [ ] Keep `npm test` and `npm run build` green."
+  }
+]

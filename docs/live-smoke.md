@@ -1,35 +1,63 @@
 # Live Smoke Tests
 
-The live smoke suite validates the runtime against a real sandbox GitHub repository. It is intentionally separate from normal local test runs and should be run only when you mean to exercise real credentials, real API calls, and real cleanup.
+The live smoke suite validates `agendev` against real GitHub resources. It remains opt-in and credential-gated by design.
 
-## Scope And Risk Envelope
+There are now two distinct live lanes:
 
-The smoke runner proves a narrow set of real-world behaviors:
+- sandbox smoke: a narrow GitHub/App/auth probe
+- lifecycle eval: a full end-to-end queue run fused with an LLM eval
+
+They intentionally serve different purposes and should not be conflated.
+
+## Lane Overview
+
+### Sandbox smoke
+
+This is the original narrow probe in `scripts/smoke-sandbox.sh preflight` and `scripts/smoke-sandbox.sh run`.
+
+It validates:
 
 - GitHub App auth via `scripts/gh-auth.sh`
 - label provisioning via `scripts/setup.sh`
 - queue issue creation via `scripts/gh-issue-queue.sh`
 - draft PR creation via `scripts/gh-pr-lifecycle.sh`
 - issue and PR comment attribution as `agendev[bot]`
-- collaborator permission checks against the sandbox repo
+- collaborator permission checks against a sandbox repo
 
-It does not run the full `agendev run` queue workflow.
+It does not run the full `agendev run` workflow.
 
-## Sandbox Ownership Expectations
+### Lifecycle eval
 
-Use a dedicated sandbox repo that you control.
+This is the new full-lifecycle lane in `scripts/smoke-lifecycle.sh preflight`, `scripts/smoke-lifecycle.sh run`, and `scripts/smoke-lifecycle.sh cleanup`.
 
-Expectations:
+It validates:
 
-- the repo is safe to create and close test issues and PRs in
-- the repo can tolerate a temporary branch deletion during cleanup
-- the GitHub App installation ID points at this sandbox repo
-- the private key belongs to the same app installation you intend to validate
-- `AGENDEV_SMOKE_PERMISSION_USER` names a collaborator whose permission level you are willing to check
+- disposable managed repo provisioning through `gh repo create`
+- `agendev init` against a real GitHub repo
+- deterministic queue seeding with dependent issues
+- `agendev run` queue mode through the real orchestrator/developer flow
+- worktree creation, PR lifecycle, verification, and finalization
+- queue ordering across follow-up issues
+- one-shot completion metrics suitable for LLM eval reporting
 
-Do not point the smoke suite at a production repo or a repo with active human work that could be confused by synthetic issues or PRs.
+It is intentionally more expensive and less deterministic than the sandbox smoke probe.
 
-## Required Environment
+## Why Two Lanes Exist
+
+Keep the narrow smoke lane because it is better for:
+
+- auth regressions
+- attribution checks
+- label/setup validation
+- permission and cleanup edge cases
+
+Use the lifecycle eval when you want a higher-cost acceptance test that answers:
+
+- can `agendev` run the real workflow end to end on GitHub?
+- can the configured model stack complete a short dependent issue chain cleanly?
+- does the result still look one-shotable after recent changes?
+
+## Sandbox Smoke Setup
 
 Set all of the following:
 
@@ -43,214 +71,198 @@ Set all of the following:
 
 Optional:
 
-- `AGENDEV_SMOKE_RUN_ID=<stable-id>` if you want a predictable run identifier instead of a UTC timestamp
+- `AGENDEV_SMOKE_RUN_ID=<stable-id>`
 
-## What The Runner Creates
-
-During `scripts/live-smoke.sh run`, the suite creates:
-
-- a temporary auth root with `.agendev/identity.json`
-- a temporary clone of the sandbox repo
-- a temporary `AGENDEV_SYMLINK_DIR`
-- one queue issue
-- one issue comment
-- one temporary branch
-- one draft PR
-- one PR comment
-
-During cleanup it attempts to:
-
-- close the PR with a cleanup comment
-- delete the temporary branch from `origin`
-- close the issue with a cleanup comment
-- remove the temp directories
-
-Cleanup runs from a shell `trap`, so partial cleanup is still possible if a later step fails.
-
-## Command Modes
-
-### `scripts/live-smoke.sh preflight`
-
-Use this first.
+Commands:
 
 ```bash
-scripts/live-smoke.sh preflight
+scripts/smoke-sandbox.sh preflight
+scripts/smoke-sandbox.sh run
 ```
 
-Preflight:
+## Lifecycle Eval Setup
 
-- checks whether `AGENDEV_SMOKE=1` is set
-- validates required environment variables
-- checks that the private key file exists
-- returns JSON describing readiness
+Set all of the following:
 
-Typical output fields:
+- `AGENDEV_SMOKE=1`
+- `AGENDEV_SMOKE_LIFECYCLE=1` when using the Bats wrapper
+- `AGENDEV_SMOKE_REPO_OWNER=<owner-or-org-for-managed-repos>`
+- `AGENDEV_SMOKE_APP_KEY=/absolute/path/to/app-key.pem`
 
-- `enabled`
+Optional:
+
+- `AGENDEV_SMOKE_REPO_PREFIX=agendev-live-eval`
+- `AGENDEV_SMOKE_REPO_VISIBILITY=private`
+- `AGENDEV_SMOKE_RUN_ID=<stable-id>`
+- `AGENDEV_SMOKE_MANIFEST_PATH=<path-to-managed-repo-manifest>`
+- `AGENDEV_SMOKE_RUNS_DIR=<path-to-local-run-artifacts>`
+- `AGENDEV_CLAUDE_BIN=<claude-cli>`
+- `AGENDEV_SMOKE_CODEX_BIN=<codex-cli>`
+
+Additional prerequisites for lifecycle eval:
+
+- operator `gh` auth must be ready for repo creation, repo edit, issue/PR mutation, and cleanup
+- the operator auth used for cleanup must have `delete_repo` scope
+- the GitHub App must be installed so the managed repos are visible to the app
+- `claude` and `codex` must both be available on `PATH` unless overridden
+- `node` and `npm` must be available because the managed target repo uses `npm test` and `npm run build`
+
+Commands:
+
+```bash
+scripts/smoke-lifecycle.sh preflight
+scripts/smoke-lifecycle.sh run
+scripts/smoke-lifecycle.sh cleanup --repo OWNER/REPO
+```
+
+## Managed Repo Model
+
+The lifecycle eval provisions a disposable repo by:
+
+1. copying a tiny seeded target repo from `test/fixtures/live_smoke_lifecycle_target/`
+2. creating a real GitHub repo with `gh repo create --source ... --push`
+3. enabling `main` as the base branch and enabling auto-merge
+4. running `agendev init`
+5. seeding a short dependent issue chain from `test/fixtures/live_smoke_lifecycle_issues.json`
+6. running `agendev run` in queue mode
+
+The seeded issue chain is intentionally small and predictable:
+
+- issue 1 adds formatted output
+- issue 2 revises the same area with a follow-up change
+- issue 3 adds a thin CLI on top
+
+That gives end-to-end coverage plus a useful LLM eval signal without depending on highly variable reviewer-driven iteration.
+
+## Lifecycle Eval Output
+
+`scripts/smoke-lifecycle.sh run` returns structured JSON with:
+
+- `status`
 - `repo`
-- `permission_user`
-- `permission_level`
-- `key_path`
-- `missing`
-- `ready`
+- `run_id`
+- `manifest_path`
+- `artifacts_dir`
+- `run_exit_code`
+- `checks`
+- `failures`
+- `lifecycle.seeded_issues`
+- `lifecycle.completed_issues`
+- `lifecycle.all_issues_done`
+- `lifecycle.one_shotable`
+- `lifecycle.queue_order_ok`
+- `lifecycle.issue_results`
+- `lifecycle.report_summary`
+- `lifecycle.prs`
 
-If `ready` is `false`, do not run the sandbox flow yet.
+This is meant to work as both:
 
-### Deterministic guard tests
+- a hard acceptance signal
+- an LLM eval summary for one-shot completion quality
 
-These are still local and fixture-driven:
+## Managed Repo Tracking And Cleanup
+
+Managed repos are tracked in a local manifest outside `.agendev/state/*.json`.
+
+Default manifest path:
+
+```text
+.agendev/live-smoke/managed-repos.json
+```
+
+Default artifact root:
+
+```text
+.agendev/live-smoke/runs/<run_id>/
+```
+
+Why this stays outside `.agendev/state/`:
+
+- issue state files are recovery breadcrumbs for target repos
+- managed lifecycle repos are test infrastructure assets
+- cleanup history is operational metadata, not queue resumability state
+
+Cleanup is explicit:
+
+```bash
+scripts/smoke-lifecycle.sh cleanup --repo OWNER/REPO
+scripts/smoke-lifecycle.sh cleanup --run-id <run_id>
+scripts/smoke-lifecycle.sh cleanup --all
+```
+
+Successful cleanup marks the repo entry as deleted in the manifest. Failed cleanup keeps the repo active and records the last cleanup error.
+
+## Bats Wrappers
+
+Deterministic local guard coverage:
 
 ```bash
 bats test/live_smoke.bats
 ```
 
-They verify:
-
-- preflight JSON shape
-- required env handling
-- key-path validation behavior
-
-Run these when changing smoke-runner logic even if you are not going to hit real GitHub.
-
-### Sandbox suite wrapper
+Opt-in real GitHub runs:
 
 ```bash
 bats test/live_smoke.bats test/live_smoke_sandbox.bats
+bats test/live_smoke.bats test/live_smoke_lifecycle.bats
 ```
 
-`test/live_smoke_sandbox.bats` is skipped unless:
+`test/live_smoke_sandbox.bats` is skipped unless sandbox smoke preflight is ready.
 
-- `AGENDEV_SMOKE=1`
-- preflight returns `ready: true`
-
-This is the safest high-level command because it runs the deterministic guard tests first, then the real sandbox check only if you explicitly enabled it.
-
-### Direct sandbox run
-
-```bash
-scripts/live-smoke.sh run
-```
-
-Use this when you want the raw runner output directly. On success it returns JSON with:
-
-- `status: "ok"`
-- `repo`
-- `run_id`
-- `issue_number`
-- `pr_number`
-- `bot_login`
-- `permission_check`
-- `checks`
-
-## Execution Sequence
-
-The smoke runner:
-
-1. performs preflight and aborts if not ready
-2. writes a temporary `.agendev/identity.json`
-3. forces fresh token minting with `AGENDEV_FORCE_REFRESH_TOKEN=1`
-4. clones the sandbox repo using the minted token
-5. runs `scripts/setup.sh` against the clone
-6. verifies all expected labels exist
-7. creates a queue issue
-8. posts an issue comment and checks that the author is `agendev[bot]`
-9. runs the collaborator permission check
-10. creates and pushes a temporary branch
-11. creates a draft PR
-12. posts a PR comment and checks that the author is `agendev[bot]`
-13. returns the success summary JSON
-
-## Why The Suite Stays Opt-In
-
-The smoke suite must remain opt-in because it:
-
-- uses real app credentials
-- creates real GitHub resources
-- depends on a repo-specific installation ID
-- can leave behind branch, issue, or PR debris if cleanup is blocked externally
-
-It should never be part of routine `bats test/*.bats` runs.
-
-## Troubleshooting
-
-### Preflight not ready
-
-Symptoms:
-
-- `ready: false`
-- `missing` contains one or more messages
-
-Fix:
-
-- set `AGENDEV_SMOKE=1`
-- supply the missing `AGENDEV_SMOKE_*` values
-- correct the key path if the file does not exist
-
-### Auth failures
-
-Symptoms:
-
-- `scripts/live-smoke.sh run` exits before clone or setup
-- token minting fails
-- the clone step cannot authenticate
-
-Checks:
-
-- confirm `AGENDEV_SMOKE_APP_ID` and `AGENDEV_SMOKE_INSTALLATION_ID`
-- confirm `AGENDEV_SMOKE_APP_KEY` points at the right private key
-- verify the app is installed on `AGENDEV_SMOKE_REPO`
-- remember the runner forces `AGENDEV_FORCE_REFRESH_TOKEN=1`, so an existing `GH_TOKEN` will not mask app-auth problems
-
-### Permission check failures
-
-Symptoms:
-
-- the final JSON does not return `status: "ok"`
-- permission-check execution fails against `AGENDEV_SMOKE_PERMISSION_USER`
-
-Checks:
-
-- confirm the user is a collaborator on the sandbox repo
-- confirm `AGENDEV_SMOKE_PERMISSION_LEVEL` matches the level you expect to validate
-- inspect the repo’s actual collaborator permission state in GitHub
-
-### Bot attribution mismatches
-
-Symptoms:
-
-- issue comment author or PR comment author is not `agendev[bot]`
-
-Checks:
-
-- confirm the app slug in config matches the installed app
-- confirm the token was minted from the app installation, not inherited from another auth context
-- check whether the app installation has permission to comment in the repo
-
-### Cleanup issues
-
-Symptoms:
-
-- temporary issue or PR remains open
-- temporary branch remains in the sandbox repo
-
-Checks:
-
-- search by the run ID in issue titles, PR titles, issue comments, and PR comments
-- inspect whether branch protection or permissions blocked branch deletion
-- check whether the trap ran after an earlier failure
-
-Manual cleanup targets:
-
-- issue title `agendev live smoke <run_id>`
-- PR title `agendev live smoke <run_id>`
-- branch `agendev-smoke-<run_id>`
+`test/live_smoke_lifecycle.bats` is skipped unless lifecycle preflight is ready and `AGENDEV_SMOKE_LIFECYCLE=1` is set.
 
 ## Recommended Usage Pattern
 
-1. Run `scripts/live-smoke.sh preflight`.
-2. Fix anything reported in `missing`.
-3. Run `bats test/live_smoke.bats test/live_smoke_sandbox.bats` when you want the guard tests plus the real sandbox check.
-4. Use `scripts/live-smoke.sh run` directly only when you want the raw runner output or are iterating on the script itself.
+For narrow GitHub validation:
+
+1. Run `scripts/smoke-sandbox.sh preflight`.
+2. Fix anything in `missing`.
+3. Run `bats test/live_smoke.bats test/live_smoke_sandbox.bats`.
+
+For full lifecycle eval:
+
+1. Run `scripts/smoke-lifecycle.sh preflight`.
+2. Confirm operator `gh` auth and GitHub App access are both ready.
+3. Run `bats test/live_smoke.bats test/live_smoke_lifecycle.bats` or call `scripts/smoke-lifecycle.sh run` directly.
+4. Inspect the JSON summary and local artifacts under `.agendev/live-smoke/runs/<run_id>/`.
+5. Delete managed repos intentionally with `scripts/smoke-lifecycle.sh cleanup ...`.
+
+## Troubleshooting
+
+### Lifecycle preflight fails
+
+Checks:
+
+- `AGENDEV_SMOKE=1`
+- `AGENDEV_SMOKE_REPO_OWNER`
+- `AGENDEV_SMOKE_APP_KEY`
+- operator `gh` login is active
+- `claude`, `codex`, `node`, and `npm` are available
+
+### Repo creation succeeds but `agendev init` fails
+
+Checks:
+
+- the operator `gh` auth can access `/apps/<slug>` and `/repos/<repo>/installation`
+- the GitHub App is installed so the managed repo is visible to it
+- the app key matches the installed app
+
+### Lifecycle run fails before completing the queue
+
+Inspect:
+
+- `.agendev/live-smoke/runs/<run_id>/init.log`
+- `.agendev/live-smoke/runs/<run_id>/run.log`
+- `.agendev/live-smoke/runs/<run_id>/summary.json`
+- copied state files under `.agendev/live-smoke/runs/<run_id>/state/`
+
+### Cleanup fails
+
+Checks:
+
+- operator `gh` auth still exists
+- the token has `delete_repo` scope
+- the repo still exists and is owned by the expected account or org
 
 ## Related Docs
 

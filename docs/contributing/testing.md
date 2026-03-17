@@ -19,7 +19,8 @@ Key paths:
 - `test/helpers/gh`: fake GitHub CLI used by deterministic integration tests
 - `test/helpers/claude`: fake Claude CLI used by CLI and prompt wiring tests
 - `test/fixtures/`: canned issues, comments, payloads, and plan examples
-- `scripts/live-smoke.sh`: sandbox-only real GitHub smoke runner
+- `scripts/smoke-sandbox.sh`: sandbox-only real GitHub smoke runner
+- `scripts/smoke-lifecycle.sh`: full lifecycle/eval live runner
 
 ## Choosing The Right Test Layer
 
@@ -86,8 +87,14 @@ Examples:
 - comment attribution as `agendev[bot]`
 - real collaborator permission checks
 - sandbox cleanup behavior
+- full end-to-end lifecycle/eval runs through `agendev init` and `agendev run`
 
 Live smoke is opt-in and credential-gated by design.
+
+Current lanes:
+
+- sandbox smoke: narrow GitHub/App/auth validation
+- lifecycle eval: managed disposable repo plus full queue execution and eval scoring
 
 ## The Bats Harness
 
@@ -217,6 +224,7 @@ Use it only when you are intentionally validating:
 - real issue and PR creation
 - real collaborator permission checks
 - cleanup of temporary sandbox artifacts
+- full lifecycle/eval behavior in a disposable managed repo
 
 Why it stays opt-in:
 
@@ -234,7 +242,7 @@ For setup and commands, see [docs/live-smoke.md](../live-smoke.md).
 3. Run the focused suite.
 4. Run adjacent regression suites.
 5. Run `shellcheck -x` on touched scripts.
-6. Only if needed, run the live smoke preflight or sandbox flow intentionally.
+6. Only if needed, run the live smoke preflight, sandbox flow, or lifecycle eval intentionally.
 
 ## Related Docs
 
