@@ -192,7 +192,7 @@ Acceptance guidance:
 
 ---
 id: D06
-state: pending
+state: done
 priority: p0
 type: add
 depends_on:

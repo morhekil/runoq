@@ -76,6 +76,7 @@ export AGENDEV_SYMLINK_DIR="$HOME/.local/bin"
 
 - [Architecture overview](./docs/architecture/overview.md)
 - [CLI reference](./docs/reference/cli.md)
+- [Configuration and auth reference](./docs/reference/config-auth.md)
 - [Operator quickstart](./docs/operations/quickstart.md)
 - [Documentation backlog](./docs/documentation-backlog.md)
 - [Implementation backlog](./docs/backlog.md)
