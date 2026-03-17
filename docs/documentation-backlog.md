@@ -130,7 +130,7 @@ Acceptance guidance:
 
 ---
 id: D04
-state: pending
+state: done
 priority: p1
 type: add
 depends_on:

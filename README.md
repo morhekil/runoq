@@ -75,6 +75,7 @@ export AGENDEV_SYMLINK_DIR="$HOME/.local/bin"
 ## Documentation Map
 
 - [Architecture overview](./docs/architecture/overview.md)
+- [Execution and maintenance flows](./docs/architecture/flows.md)
 - [CLI reference](./docs/reference/cli.md)
 - [Configuration and auth reference](./docs/reference/config-auth.md)
 - [Operator quickstart](./docs/operations/quickstart.md)

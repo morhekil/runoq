@@ -7,6 +7,7 @@ This document turns the PRD in `docs/prd.md` into a working backlog for implemen
 - `D01`: Added the repository landing-page `README.md` with operator prerequisites, setup flow, command overview, repo layout, and links into the current doc set.
 - `D02`: Added `docs/operations/quickstart.md` as the day-one operator workflow covering initialization, plan-to-issue creation, single-issue runs, queue runs, reports, and maintenance review entry.
 - `D03`: Added `docs/architecture/overview.md` with system-context, container, and component views plus ownership boundaries for queueing, auth, PR lifecycle, verification, maintenance, and state.
+- `D04`: Added `docs/architecture/flows.md` with runtime sequence diagrams for planning, execution, failure/escalation, reconciliation, mention authorization, and maintenance review triage.
 - `D05`: Added `docs/reference/cli.md` documenting the public CLI surface, command side effects, dry-run semantics, common failure cases, and command-specific examples.
 - `D06`: Added `docs/reference/config-auth.md` covering config keys, env var precedence, identity bootstrap, token minting, and mention authorization behavior.
 
