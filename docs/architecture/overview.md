@@ -33,9 +33,9 @@ flowchart LR
 - Claude CLI: runs the `plan-to-issues` skill plus the `github-orchestrator` and `maintenance-reviewer` agents.
 - Target repository: provides the source tree, git remote, package scripts, `.gitignore`, and optional `tsconfig.json`.
 
-## Container View
+## Subsystem View
 
-At runtime the system is split into a small set of containers with strict roles.
+At runtime the system is split into a small set of subsystems with strict roles.
 
 ```mermaid
 flowchart TB
@@ -64,9 +64,9 @@ flowchart TB
   github --> scripts
 ```
 
-### Containers
+### Subsystems
 
-| Container | Purpose | Primary implementation |
+| Subsystem | Purpose | Primary implementation |
 | --- | --- | --- |
 | CLI entrypoint | Thin command router that resolves repo context and auth, then dispatches to scripts or Claude | `bin/agendev` |
 | Deterministic shell runtime | Owns queue logic, PR lifecycle, auth, verification, maintenance operations, and recovery | `scripts/*.sh`, `config/agendev.json` |
