@@ -83,6 +83,7 @@ export AGENDEV_SYMLINK_DIR="$HOME/.local/bin"
 - [Target repo contract](./docs/reference/target-repo-contract.md)
 - [Operator quickstart](./docs/operations/quickstart.md)
 - [Queue operations guide](./docs/operations/queue-operations.md)
+- [Recovery and troubleshooting guide](./docs/operations/recovery.md)
 - [Documentation backlog](./docs/documentation-backlog.md)
 - [Implementation backlog](./docs/backlog.md)
 - [Product requirements](./docs/prd.md)

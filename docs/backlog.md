@@ -14,6 +14,7 @@ This document turns the PRD in `docs/prd.md` into a working backlog for implemen
 - `D08`: Added `docs/reference/target-repo-contract.md` defining downstream repo requirements for remotes, issue bodies, PR markers, verification commands, `AGENTS.md`, and worktree behavior.
 - `D09`: Added `docs/reference/state-model.md` documenting issue state files, maintenance state, processed mentions, terminal phases, stall markers, and GitHub audit markers.
 - `D10`: Added `docs/operations/queue-operations.md` as the practical queue playbook covering labels, selection rules, dry-run, single-issue and queue modes, finalization outcomes, and circuit-breaker handling.
+- `D11`: Added `docs/operations/recovery.md` with operator recovery steps for reconciliation, stale labels, verification failures, malformed payloads, stalled runs, corrupted state, and auth/bootstrap problems.
 
 ## Task Metadata
 

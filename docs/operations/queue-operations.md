@@ -233,5 +233,6 @@ For normal operation, this cadence works well:
 ## Related Docs
 
 - [Operator quickstart](./quickstart.md)
+- [Recovery and troubleshooting guide](./recovery.md)
 - [Execution and maintenance flows](../architecture/flows.md)
 - [State and audit model](../reference/state-model.md)
