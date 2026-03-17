@@ -303,7 +303,7 @@ Acceptance guidance:
 
 ---
 id: D10
-state: pending
+state: done
 priority: p1
 type: add
 depends_on:
