@@ -276,7 +276,7 @@ Acceptance guidance:
 
 ---
 id: D09
-state: pending
+state: done
 priority: p1
 type: add
 depends_on:

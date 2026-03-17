@@ -79,6 +79,7 @@ export AGENDEV_SYMLINK_DIR="$HOME/.local/bin"
 - [CLI reference](./docs/reference/cli.md)
 - [Configuration and auth reference](./docs/reference/config-auth.md)
 - [Script contract reference](./docs/reference/script-contracts.md)
+- [State and audit model](./docs/reference/state-model.md)
 - [Target repo contract](./docs/reference/target-repo-contract.md)
 - [Operator quickstart](./docs/operations/quickstart.md)
 - [Documentation backlog](./docs/documentation-backlog.md)

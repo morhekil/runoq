@@ -12,6 +12,7 @@ This document turns the PRD in `docs/prd.md` into a working backlog for implemen
 - `D06`: Added `docs/reference/config-auth.md` covering config keys, env var precedence, identity bootstrap, token minting, and mention authorization behavior.
 - `D07`: Added `docs/reference/script-contracts.md` with public shell entrypoints, JSON output shapes, side effects, and stability notes for maintainers and prompt authors.
 - `D08`: Added `docs/reference/target-repo-contract.md` defining downstream repo requirements for remotes, issue bodies, PR markers, verification commands, `AGENTS.md`, and worktree behavior.
+- `D09`: Added `docs/reference/state-model.md` documenting issue state files, maintenance state, processed mentions, terminal phases, stall markers, and GitHub audit markers.
 
 ## Task Metadata
 

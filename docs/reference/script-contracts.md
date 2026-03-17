@@ -217,5 +217,6 @@ Timeout behavior:
 
 - [CLI reference](./cli.md)
 - [Configuration and auth reference](./config-auth.md)
+- [State and audit model](./state-model.md)
 - [Architecture overview](../architecture/overview.md)
 - [Execution and maintenance flows](../architecture/flows.md)
