@@ -20,6 +20,7 @@ This document turns the PRD in `docs/prd.md` into a working backlog for implemen
 - `D14`: Added `docs/contributing/agent-and-skill-guidelines.md` codifying thin-prompt rules, script-first boundaries, audit marker discipline, and good versus bad prompt ownership examples.
 - `D15`: Added a `docs/adr/` set documenting the core runtime decisions around shell-first contracts, sibling worktrees, GitHub as the audit surface, and local state as resumability breadcrumbs.
 - `D16`: Refocused `docs/development-guidelines.md` on lessons learned and guardrails, with durable contributor guidance moved behind the new testing and agent/skill docs.
+- `D17`: Expanded `docs/live-smoke.md` to document preflight, sandbox side effects, cleanup behavior, risk boundaries, and troubleshooting for real GitHub validation.
 
 ## Task Metadata
 

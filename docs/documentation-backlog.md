@@ -483,7 +483,7 @@ Acceptance guidance:
 
 ---
 id: D17
-state: pending
+state: done
 priority: p2
 type: update
 depends_on:
