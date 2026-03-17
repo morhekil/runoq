@@ -1,35 +1,38 @@
 # Development Guidelines
 
-This file captures the main lessons from the implementation work completed through backlog task `T34`.
+This document now serves as a short lessons-learned companion to the more durable contributor docs.
 
-## What this iteration proved
+For day-to-day contributor guidance, start with:
+
+- [Contributor testing guide](./contributing/testing.md)
+- [Agent and skill guidelines](./contributing/agent-and-skill-guidelines.md)
+- [Script contract reference](./reference/script-contracts.md)
+
+## What This Project Learned
+
+These points are worth preserving because they explain why the repo is structured the way it is.
 
 - Keep orchestration rules in shell scripts and JSON contracts. The more behavior that lives in prompts, the harder it is to recover, test, and review.
-- Resume behavior needs explicit terminal-state handling. The maintenance runner only became safe after treating `COMPLETED` as idempotent instead of replaying its final summary.
-- Deterministic fake-`gh` integration coverage should carry almost all of the load. Real GitHub checks are still necessary, but only for auth, attribution, and permission edges that fixtures cannot prove.
-- Live smoke tests must be opt-in and credential-gated. They should never affect normal local `bats` runs.
-- Diff review after green tests still finds real issues. Two bugs fixed during review were a duplicated maintenance completion comment and a smoke runner path that skipped GitHub App auth when `GH_TOKEN` was already present.
+- Resume behavior needs explicit terminal-state handling. Maintenance only became safe after treating `COMPLETED` as idempotent instead of replaying its final summary.
+- Deterministic fake-`gh` integration coverage should carry almost all of the load. Real GitHub validation still matters, but only for auth, attribution, permission, and cleanup edges that fixtures cannot prove.
+- Live smoke tests must stay opt-in and credential-gated. They should never affect normal local `bats` runs.
+- Diff review after green tests still finds real issues. Bugs in duplicated maintenance summaries and auth-refresh behavior were both caught after otherwise successful validation.
 
-## Rules for future work
+## Ongoing Guardrails
 
-- Start with a failing Bats test whenever the behavior is deterministic enough to express locally.
-- Keep script boundaries machine-readable. Prefer JSON output to prose whenever another script or test consumes the result.
-- Preserve the target repo working tree. Use sibling worktrees or temporary clones for execution and smoke flows.
-- Treat `.agendev/state/*.json` as resumability breadcrumbs. Write them atomically and make resume paths explicit.
-- Reuse existing deterministic helpers before adding new prompt logic.
-- Run `shellcheck -x` on every shell script you touch.
-- After each backlog task, update the task status and implementation notes in [docs/backlog.md](/Users/Saruman/Projects/agendev/docs/backlog.md).
-- Commit each completed task separately with a scoped message.
+- Preserve the target repo main checkout. Execution work belongs in sibling worktrees or explicit sandbox clones.
+- Treat `.agendev/state/*.json` as resumability breadcrumbs, not the audit trail.
+- Prefer machine-readable script boundaries over prose-only prompt contracts.
+- Reuse existing scripts, helpers, fixtures, and skills before inventing new prompt behavior.
+- Keep maintenance review read-only until a human explicitly approves filing work.
 
-## Test guidance
+## How To Use This Document
 
-- Prefer focused suites first, then run adjacent regression coverage before committing.
-- For queue or maintenance behavior, default to fake-`gh` integration tests in `test/*.bats`.
-- Keep live GitHub validation in [docs/live-smoke.md](/Users/Saruman/Projects/agendev/docs/live-smoke.md) and [scripts/live-smoke.sh](/Users/Saruman/Projects/agendev/scripts/live-smoke.sh).
-- Any live smoke addition must stay minimal, sandbox-only, and clean up issues, PRs, and branches it creates.
+Use this file when you need context on why a guideline exists.
 
-## Maintenance-specific guidance
+Use the linked contributor docs when you need:
 
-- Maintenance review stays read-only until a human explicitly approves a finding.
-- Findings should be resumable, triageable, and safe to replay without duplicating side effects.
-- Recurring-pattern summaries are useful only after all findings leave `pending`.
+- testing instructions
+- prompt and skill boundary rules
+- shell entrypoint contracts
+- operator-facing runtime behavior

@@ -460,7 +460,7 @@ Acceptance guidance:
 
 ---
 id: D16
-state: pending
+state: done
 priority: p2
 type: update
 depends_on:

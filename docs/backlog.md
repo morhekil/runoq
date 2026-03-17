@@ -19,6 +19,7 @@ This document turns the PRD in `docs/prd.md` into a working backlog for implemen
 - `D13`: Added `docs/contributing/testing.md` covering Bats test layers, fake-`gh` fixtures, helper utilities, focused regression strategy, shellcheck expectations, and live smoke boundaries.
 - `D14`: Added `docs/contributing/agent-and-skill-guidelines.md` codifying thin-prompt rules, script-first boundaries, audit marker discipline, and good versus bad prompt ownership examples.
 - `D15`: Added a `docs/adr/` set documenting the core runtime decisions around shell-first contracts, sibling worktrees, GitHub as the audit surface, and local state as resumability breadcrumbs.
+- `D16`: Refocused `docs/development-guidelines.md` on lessons learned and guardrails, with durable contributor guidance moved behind the new testing and agent/skill docs.
 
 ## Task Metadata
 
