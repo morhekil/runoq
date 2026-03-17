@@ -74,6 +74,7 @@ export AGENDEV_SYMLINK_DIR="$HOME/.local/bin"
 
 ## Documentation Map
 
+- [Operator quickstart](./docs/operations/quickstart.md)
 - [Documentation backlog](./docs/documentation-backlog.md)
 - [Implementation backlog](./docs/backlog.md)
 - [Product requirements](./docs/prd.md)

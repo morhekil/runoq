@@ -5,6 +5,7 @@ This document turns the PRD in `docs/prd.md` into a working backlog for implemen
 ## Documentation Backlog Notes
 
 - `D01`: Added the repository landing-page `README.md` with operator prerequisites, setup flow, command overview, repo layout, and links into the current doc set.
+- `D02`: Added `docs/operations/quickstart.md` as the day-one operator workflow covering initialization, plan-to-issue creation, single-issue runs, queue runs, reports, and maintenance review entry.
 
 ## Task Metadata
 

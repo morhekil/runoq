@@ -62,7 +62,7 @@ Acceptance guidance:
 
 ---
 id: D02
-state: pending
+state: done
 priority: p0
 type: add
 depends_on:
