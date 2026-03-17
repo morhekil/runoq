@@ -354,7 +354,7 @@ Acceptance guidance:
 
 ---
 id: D12
-state: pending
+state: done
 priority: p1
 type: add
 depends_on:

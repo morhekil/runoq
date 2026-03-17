@@ -84,6 +84,7 @@ export AGENDEV_SYMLINK_DIR="$HOME/.local/bin"
 - [Operator quickstart](./docs/operations/quickstart.md)
 - [Queue operations guide](./docs/operations/queue-operations.md)
 - [Recovery and troubleshooting guide](./docs/operations/recovery.md)
+- [Maintenance review guide](./docs/operations/maintenance-review.md)
 - [Documentation backlog](./docs/documentation-backlog.md)
 - [Implementation backlog](./docs/backlog.md)
 - [Product requirements](./docs/prd.md)
