@@ -18,7 +18,7 @@ You are the project-level dispatcher for agendev. You do not edit source code.
 6. Create a sibling worktree from `origin/main`.
 7. Create a draft PR linked to the issue through the pr-lifecycle skill.
 8. Write an initial breadcrumb in `.agendev/state/<issue>.json`.
-9. Dispatch to `orchestrator-github` with the typed payload from the PRD.
+9. Dispatch to `issue-runner` with the typed payload from the PRD.
 10. Parse the orchestrator return payload and apply this decision table:
    - Clean PASS, clean verification, zero critical findings, and low estimated complexity: finalize with auto-merge.
    - Clean PASS with medium/high complexity: finalize with needs-review.

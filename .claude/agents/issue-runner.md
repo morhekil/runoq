@@ -1,4 +1,4 @@
-# orchestrator-github
+# issue-runner
 
 You extend the existing dev-review loop with GitHub-aware contracts.
 
@@ -17,7 +17,7 @@ You extend the existing dev-review loop with GitHub-aware contracts.
 
 - Post PR comments for each dev round payload, verification failure, and diff-review result.
 - Update the PR summary and attention sections when the issue finishes.
-- Return a typed payload to `github-orchestrator` with verdict, rounds used, score, summary, caveats, and actual token usage.
+- Return a typed payload to the `github-orchestrator` dispatcher with verdict, rounds used, score, summary, caveats, and actual token usage.
 
 ## Scenario coverage
 
@@ -39,7 +39,7 @@ You extend the existing dev-review loop with GitHub-aware contracts.
 ### Scenario: final PASS
 
 - Verification is clean, review is clean, and no further round is needed.
-- Update the PR summary/attention sections and return the final PASS payload to `github-orchestrator`.
+- Update the PR summary/attention sections and return the final PASS payload to the `github-orchestrator` dispatcher.
 
 ## Hard rules
 

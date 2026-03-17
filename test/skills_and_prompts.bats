@@ -67,23 +67,23 @@ load test_helper
   [ "$status" -eq 0 ]
 }
 
-@test "orchestrator github prompt enforces payload parsing and verification gates" {
-  run grep -n "Parse the Codex return payload before doing anything else" "$AGENDEV_ROOT/.claude/agents/orchestrator-github.md"
+@test "issue runner prompt enforces payload parsing and verification gates" {
+  run grep -n "Parse the Codex return payload before doing anything else" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
-  run grep -n "verify.sh round" "$AGENDEV_ROOT/.claude/agents/orchestrator-github.md"
+  run grep -n "verify.sh round" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
-  run grep -n "maxTokenBudget" "$AGENDEV_ROOT/.claude/agents/orchestrator-github.md"
+  run grep -n "maxTokenBudget" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
-  run grep -n "direct importers" "$AGENDEV_ROOT/.claude/agents/orchestrator-github.md"
+  run grep -n "direct importers" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
-  run grep -n "gh-pr-lifecycle.sh read-actionable" "$AGENDEV_ROOT/.claude/agents/orchestrator-github.md"
+  run grep -n "gh-pr-lifecycle.sh read-actionable" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
-  run grep -n "Scenario: iterate" "$AGENDEV_ROOT/.claude/agents/orchestrator-github.md"
+  run grep -n "Scenario: iterate" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
-  run grep -n "Scenario: stuck" "$AGENDEV_ROOT/.claude/agents/orchestrator-github.md"
+  run grep -n "Scenario: stuck" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
-  run grep -n "Scenario: verification failure" "$AGENDEV_ROOT/.claude/agents/orchestrator-github.md"
+  run grep -n "Scenario: verification failure" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
-  run grep -n "Scenario: final PASS" "$AGENDEV_ROOT/.claude/agents/orchestrator-github.md"
+  run grep -n "Scenario: final PASS" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
 }
