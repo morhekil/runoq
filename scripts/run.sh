@@ -57,7 +57,7 @@ build_run_prompt() {
 run_production() {
   local prompt
   prompt="$(build_run_prompt)"
-  claude_exec --print --agent github-orchestrator --add-dir "$AGENDEV_ROOT" "$prompt"
+  claude_exec --print --agent github-orchestrator --add-dir "$AGENDEV_ROOT" -- "$prompt"
 }
 
 main() {
