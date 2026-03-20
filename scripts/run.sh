@@ -57,7 +57,7 @@ build_run_prompt() {
 run_production() {
   local prompt
   prompt="$(build_run_prompt)"
-  claude_exec --print --permission-mode auto --agent github-orchestrator --add-dir "$AGENDEV_ROOT" -- "$prompt"
+  claude_exec --print --permission-mode bypassPermissions --agent github-orchestrator --add-dir "$AGENDEV_ROOT" -- "$prompt"
 }
 
 main() {

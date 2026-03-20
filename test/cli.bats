@@ -21,7 +21,7 @@ setup_cli_project() {
   [ "$status" -eq 0 ]
   run cat "$FAKE_CLAUDE_LOG"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--print --permission-mode auto --agent github-orchestrator --add-dir $AGENDEV_ROOT -- "* ]]
+  [[ "$output" == *"--print --permission-mode bypassPermissions --agent github-orchestrator --add-dir $AGENDEV_ROOT -- "* ]]
   [[ "$output" == *'"command":"agendev run"'* ]]
   [[ "$output" == *'"issue":42'* ]]
   [[ "$output" == *'"dry_run":true'* ]]
