@@ -171,6 +171,8 @@ If the target repo does not already have a `package.json`, `agendev init` create
 
 This makes the repo bootstrappable, not production-ready. Downstream maintainers should replace these placeholder scripts with real verification commands or supply a different runtime config.
 
+`agendev init` also creates per-file symlinks for the agendev-managed Claude agents and skills under the target repo's `.claude/` tree. It does not replace the entire `.claude/` directory, so downstream repos can keep their own project-specific agents, skills, and settings alongside the managed bridge files.
+
 ## Maintenance Review Inputs
 
 Maintenance review assumes the target repo provides enough structure to derive partitions.

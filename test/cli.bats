@@ -22,12 +22,13 @@ setup_cli_project() {
   [ "$status" -eq 0 ]
   run cat "$FAKE_CLAUDE_LOG"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--print --permission-mode bypassPermissions --agent github-orchestrator --add-dir $resolved_project_dir -- "* ]]
+  [[ "$output" == *"--print --permission-mode bypassPermissions --agent github-orchestrator --add-dir $AGENDEV_ROOT -- "* ]]
   [[ "$output" == *'"command":"agendev run"'* ]]
   [[ "$output" == *'"issue":42'* ]]
   [[ "$output" == *'"dry_run":true'* ]]
   run cat "$FAKE_CLAUDE_ENV_LOG"
   [ "$status" -eq 0 ]
+  [[ "$output" == *"PWD=$resolved_project_dir"* ]]
   [[ "$output" == *"TARGET_ROOT=$resolved_project_dir"* ]]
   [[ "$output" == *"REPO=owner/repo"* ]]
 }
@@ -48,7 +49,7 @@ setup_cli_project() {
   [ "$status" -eq 0 ]
   run cat "$FAKE_CLAUDE_LOG"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--skill plan-to-issues --add-dir $resolved_project_dir -- "*"/docs/plan.md" ]]
+  [[ "$output" == *"--skill plan-to-issues --add-dir $AGENDEV_ROOT -- "*"/docs/plan.md" ]]
 }
 
 @test "agendev maintenance routes to the maintenance reviewer" {
@@ -65,7 +66,7 @@ setup_cli_project() {
   [ "$status" -eq 0 ]
   run cat "$FAKE_CLAUDE_LOG"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--agent maintenance-reviewer --add-dir $resolved_project_dir"* ]]
+  [[ "$output" == *"--agent maintenance-reviewer --add-dir $AGENDEV_ROOT"* ]]
 }
 
 @test "agendev report delegates to report.sh" {

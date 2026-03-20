@@ -42,7 +42,7 @@ claude_exec() {
   local claude_bin="${AGENDEV_CLAUDE_BIN:-claude}"
   command -v "$claude_bin" >/dev/null 2>&1 || agendev::die "Claude CLI not found: $claude_bin"
   (
-    cd "$AGENDEV_ROOT"
+    cd "$TARGET_ROOT"
     "$claude_bin" "$@"
   )
 }
@@ -60,13 +60,13 @@ plan_subcommand() {
   prepare_auth
   plan_file="$(agendev::absolute_path "$1")"
   [[ -f "$plan_file" ]] || agendev::die "Plan file not found: $plan_file"
-  claude_exec --skill plan-to-issues --add-dir "$TARGET_ROOT" -- "$plan_file"
+  claude_exec --skill plan-to-issues --add-dir "$AGENDEV_ROOT" -- "$plan_file"
 }
 
 maintenance_subcommand() {
   prepare_target_context
   prepare_auth
-  claude_exec --agent maintenance-reviewer --add-dir "$TARGET_ROOT"
+  claude_exec --agent maintenance-reviewer --add-dir "$AGENDEV_ROOT"
 }
 
 subcommand="${1:-}"

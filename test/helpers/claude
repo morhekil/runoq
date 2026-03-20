@@ -8,6 +8,7 @@ fi
 
 if [[ -n "${FAKE_CLAUDE_ENV_LOG:-}" ]]; then
   {
+    printf 'PWD=%s\n' "$(pwd)"
     printf 'AGENDEV_ROOT=%s\n' "${AGENDEV_ROOT:-}"
     printf 'AGENDEV_CONFIG=%s\n' "${AGENDEV_CONFIG:-}"
     printf 'TARGET_ROOT=%s\n' "${TARGET_ROOT:-}"

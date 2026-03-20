@@ -112,6 +112,59 @@ EOF
   fi
 }
 
+ensure_directory() {
+  local path="$1"
+  if [[ -e "$path" && ! -d "$path" ]]; then
+    agendev::die "Cannot create ${path}; path exists and is not a directory."
+  fi
+  mkdir -p "$path"
+}
+
+ensure_claude_bridge_link() {
+  local source_path="$1"
+  local destination_path="$2"
+  local existing_target=""
+
+  ensure_directory "$(dirname "$destination_path")"
+
+  if [[ -L "$destination_path" ]]; then
+    existing_target="$(readlink "$destination_path")"
+    [[ "$existing_target" == "$source_path" ]] && return
+    agendev::die "Cannot install managed Claude bridge at ${destination_path}; it already points to ${existing_target}."
+  fi
+
+  if [[ -e "$destination_path" ]]; then
+    agendev::die "Cannot install managed Claude bridge at ${destination_path}; file exists and is not an agendev-managed symlink."
+  fi
+
+  ln -s "$source_path" "$destination_path"
+}
+
+ensure_claude_bridge_tree() {
+  local source_root="$1"
+  local destination_root="$2"
+  local source_path rel_path
+
+  while IFS= read -r source_path; do
+    [[ -n "$source_path" ]] || continue
+    rel_path="${source_path#$source_root/}"
+    ensure_claude_bridge_link "$source_path" "$destination_root/$rel_path"
+  done < <(find "$source_root" -type f | LC_ALL=C sort)
+}
+
+ensure_claude_bridge() {
+  local agendev_root target_root
+  agendev_root="$(agendev::root)"
+  target_root="$(agendev::target_root)"
+
+  ensure_directory "$target_root/.claude"
+  ensure_directory "$target_root/.claude/agents"
+  ensure_directory "$target_root/.claude/skills"
+
+  ensure_claude_bridge_tree "$agendev_root/.claude/agents" "$target_root/.claude/agents"
+  ensure_claude_bridge_tree "$agendev_root/.claude/skills" "$target_root/.claude/skills"
+}
+
 ensure_symlink() {
   local link_dir link_path target
   link_dir="${AGENDEV_SYMLINK_DIR:-/usr/local/bin}"
@@ -133,6 +186,7 @@ main() {
   ensure_identity
   ensure_labels
   ensure_package_json
+  ensure_claude_bridge
   ensure_symlink
 }
 

@@ -48,6 +48,7 @@ What it does:
 - Creates `.agendev/state/`
 - Ensures the managed `agendev:*` labels exist in GitHub
 - Creates a default `package.json` only when one does not already exist
+- Creates per-file `.claude/agents/*` and `.claude/skills/*/SKILL.md` symlinks for the agendev-managed Claude assets without taking over the rest of the target repo's `.claude/`
 - Creates an `agendev` symlink in `AGENDEV_SYMLINK_DIR` or `/usr/local/bin`
 
 Important behavior:
@@ -61,6 +62,7 @@ Common failures:
 - No `origin` remote
 - `origin` is not hosted on `github.com`
 - GitHub App private key missing
+- Managed `.claude` destination already exists as a regular file or different symlink
 - Symlink destination exists as a non-symlink file
 
 ### `agendev plan <file>`

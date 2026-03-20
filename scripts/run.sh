@@ -15,7 +15,10 @@ EOF
 claude_exec() {
   local claude_bin="${AGENDEV_CLAUDE_BIN:-claude}"
   command -v "$claude_bin" >/dev/null 2>&1 || agendev::die "Claude CLI not found: $claude_bin"
-  "$claude_bin" "$@"
+  (
+    cd "$TARGET_ROOT"
+    "$claude_bin" "$@"
+  )
 }
 
 parse_args() {
@@ -57,7 +60,7 @@ build_run_prompt() {
 run_production() {
   local prompt
   prompt="$(build_run_prompt)"
-  claude_exec --print --permission-mode bypassPermissions --agent github-orchestrator --add-dir "$TARGET_ROOT" -- "$prompt"
+  claude_exec --print --permission-mode bypassPermissions --agent github-orchestrator --add-dir "$AGENDEV_ROOT" -- "$prompt"
 }
 
 main() {
