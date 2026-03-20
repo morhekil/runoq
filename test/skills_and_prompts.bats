@@ -90,6 +90,10 @@ load test_helper
   [ "$status" -eq 0 ]
   run grep -n '"\$AGENDEV_ROOT/scripts/state.sh" validate-payload' "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
+  run grep -n "codex exec --dangerously-bypass-approvals-and-sandbox" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  [ "$status" -eq 0 ]
+  run grep -n "Do NOT combine this with \`--full-auto\`" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  [ "$status" -eq 0 ]
   run grep -n "Parse the JSON output" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
   run grep -n '"\$AGENDEV_ROOT/scripts/verify.sh" round' "$AGENDEV_ROOT/.claude/agents/issue-runner.md"

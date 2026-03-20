@@ -53,12 +53,12 @@ You receive a typed payload from `github-orchestrator` containing:
 
 ### Step 2 — Developer step
 
-Run codex as a fresh process via Bash. Execute from within the worktree. Use `codex exec` with `-s danger-full-access` so codex can run git commands (commit, push, etc.) without sandbox restrictions. Capture all output to the log file.
+Run codex as a fresh process via Bash. Execute from within the worktree. Use `codex exec --dangerously-bypass-approvals-and-sandbox` so codex can run git commands (commit, push, etc.) without sandbox restrictions. Do NOT combine this with `--full-auto`; `--full-auto` forces Codex back into `workspace-write`. Capture all output to the log file.
 
 **First round** (no prior feedback):
 
 ```bash
-cd <worktree> && codex exec -s danger-full-access --full-auto "Implement the following spec. Read the spec file and all AGENTS.md files for rules and constraints.
+cd <worktree> && codex exec --dangerously-bypass-approvals-and-sandbox "Implement the following spec. Read the spec file and all AGENTS.md files for rules and constraints.
 
 Spec: <specPath>
 
@@ -70,7 +70,7 @@ When done, push your branch: git push origin <branch>" 2>&1 | tee <log-dir>/roun
 **Subsequent rounds** (has feedback checklist from reviewer):
 
 ```bash
-cd <worktree> && codex exec -s danger-full-access --full-auto "Address the following code review feedback. Read the review file at <log-dir>/round-<N-1>-diff-review.md for full details and more context than the checklist below.
+cd <worktree> && codex exec --dangerously-bypass-approvals-and-sandbox "Address the following code review feedback. Read the review file at <log-dir>/round-<N-1>-diff-review.md for full details and more context than the checklist below.
 
 Checklist:
 <paste checklist from reviewer>
