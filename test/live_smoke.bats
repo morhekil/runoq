@@ -231,3 +231,47 @@ EOF
   grep -F "fake stdout" "$invocation_dir/stdout.log"
   grep -F "fake stderr" "$invocation_dir/stderr.log"
 }
+
+@test "lifecycle Codex capture wrapper records invocation artifacts" {
+  wrapper_path="$TEST_TMPDIR/codex"
+  capture_dir="$TEST_TMPDIR/codex-artifacts"
+  target_dir="$TEST_TMPDIR/target"
+  real_codex="$TEST_TMPDIR/fake-codex"
+  cat >"$real_codex" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'codex stdout\n'
+printf 'codex stderr\n' >&2
+EOF
+  chmod +x "$real_codex"
+
+  run bash -lc '
+    set -euo pipefail
+    source "'"$AGENDEV_ROOT"'/scripts/lib/smoke-common.sh"
+    create_codex_capture_wrapper "'"$wrapper_path"'"
+    export AGENDEV_SMOKE_REAL_CODEX_BIN="'"$real_codex"'"
+    export AGENDEV_SMOKE_CODEX_CAPTURE_DIR="'"$capture_dir"'"
+    export TARGET_ROOT="'"$target_dir"'"
+    export REPO="owner/repo"
+    export AGENDEV_ROOT="'"$AGENDEV_ROOT"'"
+    mkdir -p "$TARGET_ROOT"
+    cd "$TARGET_ROOT"
+    "'"$wrapper_path"'" exec -s danger-full-access --full-auto "do the thing"
+  '
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"codex stdout"* ]]
+  [[ "$output" == *"codex stderr"* ]]
+
+  invocation_dir="$(find "$capture_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+  [ -n "$invocation_dir" ]
+  [ -f "$invocation_dir/argv.txt" ]
+  [ -f "$invocation_dir/context.log" ]
+  [ -f "$invocation_dir/stdout.log" ]
+  [ -f "$invocation_dir/stderr.log" ]
+  grep -F -- "exec" "$invocation_dir/argv.txt"
+  grep -E '^cwd=.*/target$' "$invocation_dir/context.log"
+  grep -F "REPO=owner/repo" "$invocation_dir/context.log"
+  grep -F "codex stdout" "$invocation_dir/stdout.log"
+  grep -F "codex stderr" "$invocation_dir/stderr.log"
+}
