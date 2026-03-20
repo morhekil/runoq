@@ -8,7 +8,7 @@
     "maintenanceReview": "agendev:maintenance-review"
   },
   "identity": {
-    "appSlug": "agendev",
+    "appSlug": "agendevapp",
     "handle": "agendev"
   },
   "authorization": {

@@ -31,6 +31,27 @@ load test_helper
   [ "$(printf '%s' "$output" | jq -r '.permission_level')" = "write" ]
 }
 
+@test "live smoke preflight logs progress to stderr when verbose mode is enabled" {
+  key_path="$TEST_TMPDIR/app-key.pem"
+  stdout_file="$TEST_TMPDIR/stdout.json"
+  stderr_file="$TEST_TMPDIR/stderr.log"
+  printf 'not-a-real-key\n' >"$key_path"
+  export AGENDEV_SMOKE=1
+  export AGENDEV_SMOKE_REPO="owner/sandbox"
+  export AGENDEV_SMOKE_APP_ID="123"
+  export AGENDEV_SMOKE_INSTALLATION_ID="456"
+  export AGENDEV_SMOKE_APP_KEY="$key_path"
+  export AGENDEV_SMOKE_PERMISSION_USER="sandbox-user"
+  export AGENDEV_SMOKE_PERMISSION_LEVEL="write"
+  export AGENDEV_SMOKE_VERBOSE=1
+
+  "$AGENDEV_ROOT/scripts/smoke-sandbox.sh" preflight >"$stdout_file" 2>"$stderr_file"
+
+  [ "$(jq -r '.ready' "$stdout_file")" = "true" ]
+  grep -F "[smoke-sandbox] checking sandbox preflight prerequisites" "$stderr_file"
+  grep -F "[smoke-sandbox] sandbox preflight is ready" "$stderr_file"
+}
+
 @test "live lifecycle smoke preflight requires explicit managed repo configuration" {
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<'EOF'
@@ -119,4 +140,41 @@ EOF
   [ "$(printf '%s' "$output" | jq -r '.deleted[0]')" = "owner/repo-one" ]
   [ "$(jq -r '.[] | select(.repo == "owner/repo-one") | .cleanup_state' "$manifest_path")" = "deleted" ]
   [ "$(jq -r '.[] | select(.repo == "owner/repo-two") | .cleanup_state' "$manifest_path")" = "active" ]
+}
+
+@test "live lifecycle cleanup logs progress to stderr when verbose mode is enabled" {
+  manifest_path="$TEST_TMPDIR/managed-repos.json"
+  stdout_file="$TEST_TMPDIR/stdout.json"
+  stderr_file="$TEST_TMPDIR/stderr.log"
+  printf '%s\n' '[
+    {
+      "repo": "owner/repo-one",
+      "run_id": "run-1",
+      "cleanup_state": "active",
+      "deleted_at": null
+    }
+  ]' >"$manifest_path"
+  scenario="$TEST_TMPDIR/scenario.json"
+  write_fake_gh_scenario "$scenario" <<'EOF'
+[
+  {
+    "contains": ["auth", "status"],
+    "stdout": ""
+  },
+  {
+    "contains": ["repo", "delete", "owner/repo-one", "--yes"],
+    "stdout": ""
+  }
+]
+EOF
+  use_fake_gh "$scenario"
+  export AGENDEV_SMOKE_MANIFEST_PATH="$manifest_path"
+  export AGENDEV_SMOKE_VERBOSE=1
+
+  "$AGENDEV_ROOT/scripts/smoke-lifecycle.sh" cleanup --repo owner/repo-one >"$stdout_file" 2>"$stderr_file"
+
+  [ "$(jq -r '.status' "$stdout_file")" = "ok" ]
+  grep -F "[smoke-lifecycle] selected 1 managed repo(s) for cleanup" "$stderr_file"
+  grep -F "[smoke-lifecycle] deleting managed repo owner/repo-one" "$stderr_file"
+  grep -F "[smoke-lifecycle] deleted managed repo owner/repo-one" "$stderr_file"
 }

@@ -68,8 +68,10 @@ agendev::repo_from_remote() {
       remote="${remote%.git}"
       printf '%s\n' "$remote"
       ;;
-    https://github.com/*)
-      remote="${remote#https://github.com/}"
+    https://github.com/*|https://*@github.com/*)
+      remote="${remote#https://}"
+      remote="${remote#*@}"
+      remote="${remote#github.com/}"
       remote="${remote%.git}"
       printf '%s\n' "$remote"
       ;;

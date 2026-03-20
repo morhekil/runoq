@@ -66,6 +66,24 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
+smoke_verbose_enabled() {
+  case "${AGENDEV_SMOKE_VERBOSE:-auto}" in
+    1|true|TRUE|yes|YES|on|ON)
+      return 0
+      ;;
+    0|false|FALSE|no|NO|off|OFF)
+      return 1
+      ;;
+  esac
+  [[ -t 2 ]]
+}
+
+smoke_log() {
+  smoke_verbose_enabled || return 0
+  local scope="${AGENDEV_SMOKE_LOG_SCOPE:-smoke}"
+  printf '[%s] %s\n' "$scope" "$*" >&2
+}
+
 smoke_gh_bin() {
   printf '%s\n' "${GH_BIN:-gh}"
 }
@@ -236,6 +254,7 @@ preflight_json() {
   missing='[]'
   enabled=false
   key_path="$(smoke_key_path)"
+  smoke_log "checking sandbox preflight prerequisites"
 
   if [[ "${AGENDEV_SMOKE:-0}" == "1" ]]; then
     enabled=true
@@ -256,6 +275,12 @@ preflight_json() {
 
   if [[ -n "$key_path" && ! -f "$key_path" ]]; then
     missing="$(append_missing "$missing" "GitHub App key not found: ${key_path}")"
+  fi
+
+  if [[ "$(printf '%s' "$missing" | jq 'length')" -eq 0 ]]; then
+    smoke_log "sandbox preflight is ready"
+  else
+    smoke_log "sandbox preflight is missing $(printf '%s' "$missing" | jq 'length') requirement(s)"
   fi
 
   jq -n \
@@ -299,6 +324,7 @@ lifecycle_preflight_json() {
   codex_bin="$(smoke_codex_bin)"
   gh_bin="$(smoke_gh_bin)"
   gh_ready=false
+  smoke_log "checking lifecycle preflight prerequisites"
 
   if [[ "${AGENDEV_SMOKE:-0}" == "1" ]]; then
     enabled=true
@@ -344,6 +370,12 @@ lifecycle_preflight_json() {
     gh_ready=true
   else
     missing="$(append_missing "$missing" "Operator gh auth is not ready. Run gh auth login before lifecycle smoke.")"
+  fi
+
+  if [[ "$(printf '%s' "$missing" | jq 'length')" -eq 0 ]]; then
+    smoke_log "lifecycle preflight is ready"
+  else
+    smoke_log "lifecycle preflight is missing $(printf '%s' "$missing" | jq 'length') requirement(s)"
   fi
 
   jq -n \
@@ -694,64 +726,93 @@ run_smoke() {
   issue_number=""
   pr_number=""
   branch=""
+  AGENDEV_SMOKE_CLEANUP_REPO="$repo"
+  AGENDEV_SMOKE_CLEANUP_RUN_ID="$run_id"
+  AGENDEV_SMOKE_CLEANUP_TMPDIR="$tmpdir"
+  AGENDEV_SMOKE_CLEANUP_CLONE_DIR="$clone_dir"
+  AGENDEV_SMOKE_CLEANUP_ISSUE_NUMBER=""
+  AGENDEV_SMOKE_CLEANUP_PR_NUMBER=""
+  AGENDEV_SMOKE_CLEANUP_BRANCH=""
 
   # shellcheck disable=SC2329
   cleanup() {
-    if [[ -n "$pr_number" ]]; then
-      agendev::gh pr close "$pr_number" --repo "$repo" --comment "Closing agendev live smoke PR ${run_id}." >/dev/null 2>&1 || true
+    smoke_log "cleaning up temporary sandbox resources"
+    if [[ -n "${AGENDEV_SMOKE_CLEANUP_PR_NUMBER:-}" ]]; then
+      smoke_log "closing PR #${AGENDEV_SMOKE_CLEANUP_PR_NUMBER} in ${AGENDEV_SMOKE_CLEANUP_REPO}"
+      agendev::gh pr close "$AGENDEV_SMOKE_CLEANUP_PR_NUMBER" --repo "$AGENDEV_SMOKE_CLEANUP_REPO" --comment "Closing agendev live smoke PR ${AGENDEV_SMOKE_CLEANUP_RUN_ID}." >/dev/null 2>&1 || true
     fi
-    if [[ -n "$branch" && -d "$clone_dir/.git" ]]; then
-      git -C "$clone_dir" push origin --delete "$branch" >/dev/null 2>&1 || true
+    if [[ -n "${AGENDEV_SMOKE_CLEANUP_BRANCH:-}" && -d "${AGENDEV_SMOKE_CLEANUP_CLONE_DIR:-}/.git" ]]; then
+      smoke_log "deleting remote branch ${AGENDEV_SMOKE_CLEANUP_BRANCH}"
+      git -C "$AGENDEV_SMOKE_CLEANUP_CLONE_DIR" push origin --delete "$AGENDEV_SMOKE_CLEANUP_BRANCH" >/dev/null 2>&1 || true
     fi
-    if [[ -n "$issue_number" ]]; then
-      agendev::gh issue close "$issue_number" --repo "$repo" --comment "Closing agendev live smoke issue ${run_id}." >/dev/null 2>&1 || true
+    if [[ -n "${AGENDEV_SMOKE_CLEANUP_ISSUE_NUMBER:-}" ]]; then
+      smoke_log "closing issue #${AGENDEV_SMOKE_CLEANUP_ISSUE_NUMBER} in ${AGENDEV_SMOKE_CLEANUP_REPO}"
+      agendev::gh issue close "$AGENDEV_SMOKE_CLEANUP_ISSUE_NUMBER" --repo "$AGENDEV_SMOKE_CLEANUP_REPO" --comment "Closing agendev live smoke issue ${AGENDEV_SMOKE_CLEANUP_RUN_ID}." >/dev/null 2>&1 || true
     fi
-    rm -rf "$tmpdir"
+    smoke_log "removing temporary workspace ${AGENDEV_SMOKE_CLEANUP_TMPDIR}"
+    rm -rf "$AGENDEV_SMOKE_CLEANUP_TMPDIR"
   }
   trap cleanup EXIT
 
+  smoke_log "starting sandbox run for ${repo} with run_id=${run_id}"
+  smoke_log "created temporary workspace ${tmpdir}"
   require_preflight
+  smoke_log "sandbox preflight is ready"
   mkdir -p "$auth_root"
   export TARGET_ROOT="$auth_root"
   export AGENDEV_STATE_DIR="$auth_root/.agendev/state"
   mkdir -p "$AGENDEV_STATE_DIR"
+  smoke_log "writing GitHub App identity under ${auth_root}/.agendev"
   write_identity_file "$auth_root"
   export AGENDEV_APP_KEY
   AGENDEV_APP_KEY="$(smoke_key_path)"
   export AGENDEV_FORCE_REFRESH_TOKEN=1
+  smoke_log "minting a GitHub App installation token"
   eval "$("$root/scripts/gh-auth.sh" export-token)"
+  smoke_log "cloning ${repo} into ${clone_dir}"
   git clone "https://x-access-token:${GH_TOKEN}@github.com/${repo}.git" "$clone_dir" >/dev/null 2>&1
 
   export TARGET_ROOT="$clone_dir"
   export REPO="$repo"
   export AGENDEV_STATE_DIR="$clone_dir/.agendev/state"
   mkdir -p "$AGENDEV_STATE_DIR"
+  smoke_log "preparing cloned repo state in ${clone_dir}"
   write_identity_file "$clone_dir"
 
   export AGENDEV_SYMLINK_DIR="$tmpdir/bin"
+  smoke_log "running scripts/setup.sh to bootstrap labels and local helpers"
   "$root/scripts/setup.sh"
 
   labels_json="$(label_check_json "$repo")"
   if [[ "$(printf '%s' "$labels_json" | jq -r '.missing | length')" -ne 0 ]]; then
     agendev::die "Missing expected labels after setup: $(printf '%s' "$labels_json" | jq -r '.missing | join(", ")')"
   fi
+  smoke_log "verified expected labels in ${repo}"
 
   issue_title="agendev live smoke ${run_id}"
   issue_body="Live smoke validation issue for ${run_id}."
+  smoke_log "creating sandbox issue '${issue_title}'"
   issue_json="$("$root/scripts/gh-issue-queue.sh" create "$repo" "$issue_title" "$issue_body" --priority 3 --estimated-complexity low)"
   issue_url="$(printf '%s' "$issue_json" | jq -r '.url')"
   issue_number="$(issue_number_from_url "$issue_url")"
+  AGENDEV_SMOKE_CLEANUP_ISSUE_NUMBER="$issue_number"
   [[ -n "$issue_number" ]] || agendev::die "Failed to parse smoke issue number."
+  smoke_log "created issue #${issue_number}: ${issue_url}"
 
   issue_comment_body="agendev live smoke issue comment ${run_id}"
+  smoke_log "posting attribution check comment on issue #${issue_number}"
   agendev::gh issue comment "$issue_number" --repo "$repo" --body "$issue_comment_body" >/dev/null
   issue_comment_author="$(find_comment_author "$repo" "$issue_number" "$issue_comment_body")"
   [[ "$issue_comment_author" == "$(bot_login)" ]] || agendev::die "Issue comment author was ${issue_comment_author}, expected $(bot_login)."
+  smoke_log "verified issue comment attribution as $(bot_login)"
 
+  smoke_log "checking ${AGENDEV_SMOKE_PERMISSION_USER} has ${AGENDEV_SMOKE_PERMISSION_LEVEL:-write} access to ${repo}"
   permission_json="$("$root/scripts/gh-pr-lifecycle.sh" check-permission "$repo" "$AGENDEV_SMOKE_PERMISSION_USER" "${AGENDEV_SMOKE_PERMISSION_LEVEL:-write}")"
   current_branch="$(default_branch "$repo")"
   branch="agendev-smoke-${run_id}"
+  AGENDEV_SMOKE_CLEANUP_BRANCH="$branch"
 
+  smoke_log "creating branch ${branch} from ${current_branch}"
   git -C "$clone_dir" checkout -b "$branch" "origin/${current_branch}" >/dev/null 2>&1
   git -C "$clone_dir" config user.name "agendev live smoke"
   git -C "$clone_dir" config user.email "agendev-smoke@example.com"
@@ -760,20 +821,28 @@ run_smoke() {
   printf 'agendev live smoke %s\n' "$run_id" >"$smoke_file"
   git -C "$clone_dir" add ".agendev/smoke/${run_id}.md"
   git -C "$clone_dir" commit -m "agendev live smoke ${run_id}" >/dev/null
+  smoke_log "committed smoke marker ${smoke_file}"
+  smoke_log "pushing branch ${branch}"
   git -C "$clone_dir" push origin "$branch" >/dev/null 2>&1
 
   pr_title="agendev live smoke ${run_id}"
+  smoke_log "opening PR '${pr_title}' for issue #${issue_number}"
   pr_json="$("$root/scripts/gh-pr-lifecycle.sh" create "$repo" "$branch" "$issue_number" "$pr_title")"
   pr_url="$(printf '%s' "$pr_json" | jq -r '.url')"
   pr_number="$(pr_number_from_url "$pr_url")"
+  AGENDEV_SMOKE_CLEANUP_PR_NUMBER="$pr_number"
   [[ -n "$pr_number" ]] || agendev::die "Failed to parse smoke PR number."
+  smoke_log "created PR #${pr_number}: ${pr_url}"
 
   pr_comment_file="$tmpdir/pr-comment.md"
   pr_comment_body="agendev live smoke pr comment ${run_id}"
   printf '%s\n' "$pr_comment_body" >"$pr_comment_file"
+  smoke_log "posting attribution check comment on PR #${pr_number}"
   "$root/scripts/gh-pr-lifecycle.sh" comment "$repo" "$pr_number" "$pr_comment_file" >/dev/null
   pr_comment_author="$(find_comment_author "$repo" "$pr_number" "$pr_comment_body")"
   [[ "$pr_comment_author" == "$(bot_login)" ]] || agendev::die "PR comment author was ${pr_comment_author}, expected $(bot_login)."
+  smoke_log "verified PR comment attribution as $(bot_login)"
+  smoke_log "sandbox checks passed; structured summary will be emitted on stdout"
 
   summary_json="$(jq -n \
     --arg repo "$repo" \
@@ -824,25 +893,35 @@ run_lifecycle() {
 
   # shellcheck disable=SC2329
   cleanup() {
+    smoke_log "removing temporary lifecycle workspace ${tmpdir}"
     rm -rf "$tmpdir"
   }
   trap cleanup EXIT
 
+  smoke_log "starting lifecycle run with run_id=${run_id}"
+  smoke_log "created temporary workspace ${tmpdir}"
   require_lifecycle_preflight
+  smoke_log "lifecycle preflight is ready"
   mkdir -p "$artifacts_dir"
+  smoke_log "artifacts will be written to ${artifacts_dir}"
 
+  smoke_log "seeding local target repo from test/fixtures/live_smoke_lifecycle_target into ${target_dir}"
   seed_lifecycle_repo "$target_dir"
+  smoke_log "creating managed repo from seeded target"
   repo_json="$(create_managed_repo "$target_dir" "$run_id")"
   repo="$(printf '%s' "$repo_json" | jq -r '.repo')"
   repo_url="$(printf '%s' "$repo_json" | jq -r '.url')"
+  smoke_log "created managed repo ${repo}: ${repo_url}"
   manifest_record_repo "$repo" "$run_id" "$repo_url" "$artifacts_dir"
   checks_json="$(append_check "$checks_json" "managed_repo_created")"
   printf '%s\n' "$repo_json" >"$artifacts_dir/repo.json"
+  smoke_log "recorded managed repo in $(smoke_manifest_path)"
 
   export AGENDEV_APP_KEY
   AGENDEV_APP_KEY="$(smoke_key_path)"
   export AGENDEV_SYMLINK_DIR="$tmpdir/bin"
 
+  smoke_log "running agendev init; log -> ${init_log}"
   set +e
   (
     cd "$target_dir"
@@ -851,23 +930,29 @@ run_lifecycle() {
   run_exit="$?"
   set -e
   if [[ "$run_exit" -ne 0 ]]; then
+    smoke_log "agendev init failed with exit code ${run_exit}"
     failures_json="$(append_missing "$failures_json" "agendev init failed. See ${init_log}.")"
   else
+    smoke_log "agendev init completed successfully"
     checks_json="$(append_check "$checks_json" "repo_bootstrapped")"
     labels_json="$(label_check_json "$repo")"
     if [[ "$(printf '%s' "$labels_json" | jq -r '.missing | length')" -ne 0 ]]; then
       failures_json="$(append_missing "$failures_json" "Missing expected labels after agendev init: $(printf '%s' "$labels_json" | jq -r '.missing | join(", ")').")"
     else
+      smoke_log "verified expected labels in ${repo}"
       checks_json="$(append_check "$checks_json" "labels_present")"
     fi
   fi
 
   seeded_issues_json='[]'
   if [[ "$(printf '%s' "$failures_json" | jq 'length')" -eq 0 ]]; then
+    smoke_log "seeding lifecycle issues from test/fixtures/live_smoke_lifecycle_issues.json"
     seeded_issues_json="$(seed_lifecycle_issues "$repo")"
     printf '%s\n' "$seeded_issues_json" >"$seeded_issues_file"
+    smoke_log "seeded issues $(printf '%s' "$seeded_issues_json" | jq -r 'map("#\(.number)") | join(", ")')"
     checks_json="$(append_check "$checks_json" "issues_seeded")"
 
+    smoke_log "running agendev eval; log -> ${run_log}"
     set +e
     (
       cd "$target_dir"
@@ -877,9 +962,11 @@ run_lifecycle() {
     run_exit="$?"
     set -e
     run_exit_json="$run_exit"
+    smoke_log "agendev run exited with code ${run_exit}"
     checks_json="$(append_check "$checks_json" "lifecycle_run_invoked")"
   fi
 
+  smoke_log "copying state artifacts into ${artifacts_dir}"
   copy_state_artifacts "$target_dir" "$artifacts_dir"
   state_files_json="$(read_state_files_json "$target_dir")"
   issue_numbers_json="$(printf '%s' "$seeded_issues_json" | jq '[.[].number]')"
@@ -902,6 +989,7 @@ run_lifecycle() {
     report_summary_json='{"issues":0,"pass":0,"fail":0,"caveats":0,"tokens":{"input":0,"cached_input":0,"output":0,"total":0},"average_rounds":0}'
   fi
   printf '%s\n' "$report_summary_json" >"$report_file"
+  smoke_log "wrote report summary to ${report_file}"
 
   summary_json="$(build_lifecycle_summary \
     "$repo" \
@@ -917,12 +1005,15 @@ run_lifecycle() {
     "$checks_json"
   )"
   printf '%s\n' "$summary_json" >"$summary_file"
+  smoke_log "wrote lifecycle summary to ${summary_file}"
 
   manifest_update_run_result \
     "$repo" \
     "$(printf '%s' "$summary_json" | jq -r '.status')" \
     "$issue_numbers_json" \
     "$(printf '%s' "$summary_json" | jq '.failures')"
+  smoke_log "updated managed repo manifest with lifecycle result"
+  smoke_log "lifecycle run complete; structured summary will be emitted on stdout"
 
   printf '%s\n' "$summary_json"
 }
@@ -965,19 +1056,24 @@ cleanup_lifecycle() {
   if [[ "$(printf '%s' "$selected_json" | jq 'length')" -eq 0 ]]; then
     agendev::die "No matching managed lifecycle repos found to clean up."
   fi
+  smoke_log "selected $(printf '%s' "$selected_json" | jq 'length') managed repo(s) for cleanup"
 
   while IFS= read -r entry; do
     [[ -n "$entry" ]] || continue
     repo="$(printf '%s' "$entry" | jq -r '.repo')"
+    smoke_log "deleting managed repo ${repo}"
     if agendev::gh repo delete "$repo" --yes >/dev/null 2>&1; then
       manifest_mark_deleted "$repo"
       deleted_json="$(jq -n --argjson deleted "$deleted_json" --arg repo "$repo" '$deleted + [$repo]')"
+      smoke_log "deleted managed repo ${repo}"
     else
       result="Failed to delete ${repo}. Confirm gh delete_repo scope and repo access."
       manifest_mark_cleanup_failure "$repo" "$result"
       failed_json="$(jq -n --argjson failed "$failed_json" --arg repo "$repo" --arg error "$result" '$failed + [{repo:$repo, error:$error}]')"
+      smoke_log "$result"
     fi
   done < <(printf '%s' "$selected_json" | jq -c '.[]')
+  smoke_log "cleanup finished: deleted $(printf '%s' "$deleted_json" | jq 'length'), failed $(printf '%s' "$failed_json" | jq 'length')"
 
   jq -n \
     --arg manifest_path "$(smoke_manifest_path)" \

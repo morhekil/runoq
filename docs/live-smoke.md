@@ -2,6 +2,8 @@
 
 The live smoke suite validates `agendev` against real GitHub resources. It remains opt-in and credential-gated by design.
 
+Interactive smoke commands log progress to stderr automatically. Set `AGENDEV_SMOKE_VERBOSE=1` to force those logs in non-interactive contexts, or `AGENDEV_SMOKE_VERBOSE=0` to silence them.
+
 There are now two distinct live lanes:
 
 - sandbox smoke: a narrow GitHub/App/auth probe

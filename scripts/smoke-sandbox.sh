@@ -5,6 +5,8 @@ set -euo pipefail
 # shellcheck source=./scripts/lib/smoke-common.sh
 source "$(cd "$(dirname "$0")" && pwd)/lib/smoke-common.sh"
 
+export AGENDEV_SMOKE_LOG_SCOPE="smoke-sandbox"
+
 usage() {
   cat <<'EOF'
 Usage:

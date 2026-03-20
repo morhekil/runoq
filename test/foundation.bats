@@ -86,6 +86,16 @@ load test_helper
   [ "$output" = "owner/example" ]
 }
 
+@test "repo resolution parses authenticated HTTPS GitHub remotes" {
+  run_bash '
+    source "'"$AGENDEV_ROOT"'/scripts/lib/common.sh"
+    agendev::repo_from_remote "https://x-access-token:ghs_example@github.com/owner/example.git"
+  '
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "owner/example" ]
+}
+
 @test "repo resolution fails for non-GitHub remotes" {
   run_bash '
     source "'"$AGENDEV_ROOT"'/scripts/lib/common.sh"
