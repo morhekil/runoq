@@ -7,7 +7,7 @@ write_empty_key() {
   openssl genrsa -out "$key_path" 2048 >/dev/null 2>&1
 }
 
-@test "setup init creates identity state package json claude bridge and symlink" {
+@test "setup init creates identity state package json managed Claude files and symlink" {
   project_dir="$TEST_TMPDIR/project"
   make_git_repo "$project_dir" "git@github.com:owner/repo.git"
   export TARGET_ROOT="$project_dir"
@@ -61,11 +61,12 @@ EOF
   [ -d "$project_dir/.agendev/state" ]
   [ -f "$project_dir/.agendev/identity.json" ]
   [ -f "$project_dir/package.json" ]
-  [ -L "$project_dir/.claude/agents/github-orchestrator.md" ]
-  [ -L "$project_dir/.claude/agents/issue-runner.md" ]
-  [ -L "$project_dir/.claude/skills/plan-to-issues/SKILL.md" ]
-  [ "$(readlink "$project_dir/.claude/agents/github-orchestrator.md")" = "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md" ]
-  [ "$(readlink "$project_dir/.claude/skills/plan-to-issues/SKILL.md")" = "$AGENDEV_ROOT/.claude/skills/plan-to-issues/SKILL.md" ]
+  [ -f "$project_dir/.claude/agents/github-orchestrator.md" ]
+  [ -f "$project_dir/.claude/agents/issue-runner.md" ]
+  [ -f "$project_dir/.claude/skills/plan-to-issues/SKILL.md" ]
+  [ ! -L "$project_dir/.claude/agents/github-orchestrator.md" ]
+  cmp -s "$project_dir/.claude/agents/github-orchestrator.md" "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
+  cmp -s "$project_dir/.claude/skills/plan-to-issues/SKILL.md" "$AGENDEV_ROOT/.claude/skills/plan-to-issues/SKILL.md"
   [ -L "$AGENDEV_SYMLINK_DIR/agendev" ]
   [ "$(jq -r '.appId' "$project_dir/.agendev/identity.json")" = "123" ]
 }
@@ -200,16 +201,17 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(jq -r '.name' "$project_dir/package.json")" = "existing" ]
   [ "$(cat "$project_dir/.claude/agents/custom.md")" = "custom agent" ]
-  [ -L "$project_dir/.claude/agents/github-orchestrator.md" ]
-  [ "$(readlink "$project_dir/.claude/agents/github-orchestrator.md")" = "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md" ]
+  [ -f "$project_dir/.claude/agents/github-orchestrator.md" ]
+  [ ! -L "$project_dir/.claude/agents/github-orchestrator.md" ]
+  cmp -s "$project_dir/.claude/agents/github-orchestrator.md" "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
 }
 
-@test "setup init rejects collisions for managed Claude bridge files" {
+@test "setup init refreshes managed Claude files and replaces old symlink installs" {
   project_dir="$TEST_TMPDIR/project"
   make_git_repo "$project_dir" "git@github.com:owner/repo.git"
   export TARGET_ROOT="$project_dir"
   export AGENDEV_SYMLINK_DIR="$TEST_TMPDIR/bin"
-  mkdir -p "$project_dir/.agendev" "$project_dir/.claude/agents"
+  mkdir -p "$project_dir/.agendev" "$project_dir/.claude/agents" "$project_dir/.claude/skills/plan-to-issues"
   cat >"$project_dir/.agendev/identity.json" <<EOF
 {
   "appId": 123,
@@ -218,7 +220,8 @@ EOF
 }
 EOF
   write_empty_key "$TEST_TMPDIR/app-key.pem"
-  echo "local override" >"$project_dir/.claude/agents/github-orchestrator.md"
+  ln -s "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md" "$project_dir/.claude/agents/github-orchestrator.md"
+  echo "stale skill content" >"$project_dir/.claude/skills/plan-to-issues/SKILL.md"
 
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<EOF
@@ -233,6 +236,9 @@ EOF
 
   run "$AGENDEV_ROOT/scripts/setup.sh"
 
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"Cannot install managed Claude bridge at $project_dir/.claude/agents/github-orchestrator.md; file exists and is not an agendev-managed symlink."* ]]
+  [ "$status" -eq 0 ]
+  [ -f "$project_dir/.claude/agents/github-orchestrator.md" ]
+  [ ! -L "$project_dir/.claude/agents/github-orchestrator.md" ]
+  cmp -s "$project_dir/.claude/agents/github-orchestrator.md" "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
+  cmp -s "$project_dir/.claude/skills/plan-to-issues/SKILL.md" "$AGENDEV_ROOT/.claude/skills/plan-to-issues/SKILL.md"
 }

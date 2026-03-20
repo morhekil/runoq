@@ -4,10 +4,10 @@ Use this skill when you need structured access to the GitHub issue queue.
 
 ## Actions
 
-- `list`: run `gh-issue-queue.sh list "$REPO" "$(jq -r '.labels.ready' "$AGENDEV_CONFIG")"`
-- `next`: run `gh-issue-queue.sh next "$REPO" "$(jq -r '.labels.ready' "$AGENDEV_CONFIG")"`
-- `set-status`: run `gh-issue-queue.sh set-status "$REPO" <issue-number> <ready|in-progress|done|needs-review|blocked>`
-- `create`: run `gh-issue-queue.sh create "$REPO" <title> <body> [--depends-on N,M] [--priority N] [--estimated-complexity value]`
+- `list`: run `"$AGENDEV_ROOT/scripts/gh-issue-queue.sh" list "$REPO" "$(jq -r '.labels.ready' "$AGENDEV_CONFIG")"`
+- `next`: run `"$AGENDEV_ROOT/scripts/gh-issue-queue.sh" next "$REPO" "$(jq -r '.labels.ready' "$AGENDEV_CONFIG")"`
+- `set-status`: run `"$AGENDEV_ROOT/scripts/gh-issue-queue.sh" set-status "$REPO" <issue-number> <ready|in-progress|done|needs-review|blocked>`
+- `create`: run `"$AGENDEV_ROOT/scripts/gh-issue-queue.sh" create "$REPO" <title> <body> [--depends-on N,M] [--priority N] [--estimated-complexity value]`
 
 ## Rules
 

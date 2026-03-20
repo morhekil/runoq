@@ -120,27 +120,25 @@ ensure_directory() {
   mkdir -p "$path"
 }
 
-ensure_claude_bridge_link() {
+sync_claude_managed_file() {
   local source_path="$1"
   local destination_path="$2"
-  local existing_target=""
 
   ensure_directory "$(dirname "$destination_path")"
 
-  if [[ -L "$destination_path" ]]; then
-    existing_target="$(readlink "$destination_path")"
-    [[ "$existing_target" == "$source_path" ]] && return
-    agendev::die "Cannot install managed Claude bridge at ${destination_path}; it already points to ${existing_target}."
+  if [[ -e "$destination_path" && ! -f "$destination_path" && ! -L "$destination_path" ]]; then
+    agendev::die "Cannot update managed Claude file at ${destination_path}; path exists and is not a regular file."
   fi
 
-  if [[ -e "$destination_path" ]]; then
-    agendev::die "Cannot install managed Claude bridge at ${destination_path}; file exists and is not an agendev-managed symlink."
+  if [[ -f "$destination_path" && ! -L "$destination_path" ]] && cmp -s "$source_path" "$destination_path"; then
+    return
   fi
 
-  ln -s "$source_path" "$destination_path"
+  rm -f "$destination_path"
+  cp "$source_path" "$destination_path"
 }
 
-ensure_claude_bridge_tree() {
+ensure_claude_managed_tree() {
   local source_root="$1"
   local destination_root="$2"
   local source_path rel_path
@@ -148,11 +146,11 @@ ensure_claude_bridge_tree() {
   while IFS= read -r source_path; do
     [[ -n "$source_path" ]] || continue
     rel_path="${source_path#"$source_root"/}"
-    ensure_claude_bridge_link "$source_path" "$destination_root/$rel_path"
+    sync_claude_managed_file "$source_path" "$destination_root/$rel_path"
   done < <(find "$source_root" -type f | LC_ALL=C sort)
 }
 
-ensure_claude_bridge() {
+ensure_claude_managed_files() {
   local agendev_root target_root
   agendev_root="$(agendev::root)"
   target_root="$(agendev::target_root)"
@@ -161,8 +159,8 @@ ensure_claude_bridge() {
   ensure_directory "$target_root/.claude/agents"
   ensure_directory "$target_root/.claude/skills"
 
-  ensure_claude_bridge_tree "$agendev_root/.claude/agents" "$target_root/.claude/agents"
-  ensure_claude_bridge_tree "$agendev_root/.claude/skills" "$target_root/.claude/skills"
+  ensure_claude_managed_tree "$agendev_root/.claude/agents" "$target_root/.claude/agents"
+  ensure_claude_managed_tree "$agendev_root/.claude/skills" "$target_root/.claude/skills"
 }
 
 ensure_symlink() {
@@ -186,7 +184,7 @@ main() {
   ensure_identity
   ensure_labels
   ensure_package_json
-  ensure_claude_bridge
+  ensure_claude_managed_files
   ensure_symlink
 }
 

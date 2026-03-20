@@ -39,11 +39,11 @@ Run initialization from inside the target repository:
 - Creates `.agendev/state/` for resumability state files
 - Ensures the managed `agendev:*` labels exist in GitHub
 - Creates a minimal `package.json` only when the target repo does not already have one
-- Creates per-file symlinks for the agendev-managed Claude agents and skills inside the target repo's `.claude/` directories
+- Copies or refreshes the agendev-managed Claude agents and skills inside the target repo's `.claude/` directories
 - Creates an `agendev` symlink in `AGENDEV_SYMLINK_DIR` or `/usr/local/bin`
 
 After this step you can usually call `agendev` directly if the symlink directory is on `PATH`.
-The `.claude/` bridge is intentionally narrow: project-specific agents, skills, and settings can still live alongside the agendev-managed files.
+The `.claude/` install is intentionally narrow: project-specific agents, skills, and settings can still live alongside the agendev-managed files, while `agendev init` refreshes only the managed filenames it owns.
 
 ## Creating Queue Issues From A Plan
 

@@ -3,14 +3,14 @@
 load test_helper
 
 @test "issue queue skill delegates to gh-issue-queue.sh and documents actions" {
-  run grep -n "gh-issue-queue.sh next" "$AGENDEV_ROOT/.claude/skills/issue-queue/SKILL.md"
+  run grep -n '"\$AGENDEV_ROOT/scripts/gh-issue-queue.sh" next' "$AGENDEV_ROOT/.claude/skills/issue-queue/SKILL.md"
   [ "$status" -eq 0 ]
   run grep -n "blocked_reasons" "$AGENDEV_ROOT/.claude/skills/issue-queue/SKILL.md"
   [ "$status" -eq 0 ]
 }
 
 @test "pr lifecycle skill delegates to gh-pr-lifecycle.sh and audit markers" {
-  run grep -n "gh-pr-lifecycle.sh update-summary" "$AGENDEV_ROOT/.claude/skills/pr-lifecycle/SKILL.md"
+  run grep -n '"\$AGENDEV_ROOT/scripts/gh-pr-lifecycle.sh" update-summary' "$AGENDEV_ROOT/.claude/skills/pr-lifecycle/SKILL.md"
   [ "$status" -eq 0 ]
   run grep -n "agendev:payload" "$AGENDEV_ROOT/.claude/skills/pr-lifecycle/SKILL.md"
   [ "$status" -eq 0 ]
@@ -21,9 +21,9 @@ load test_helper
   [ "$status" -eq 0 ]
   run grep -n "dependency graph" "$AGENDEV_ROOT/.claude/skills/plan-to-issues/SKILL.md"
   [ "$status" -eq 0 ]
-  run grep -n "gh-issue-queue.sh create" "$AGENDEV_ROOT/.claude/skills/plan-to-issues/SKILL.md"
+  run grep -n '"\$AGENDEV_ROOT/scripts/gh-issue-queue.sh" create' "$AGENDEV_ROOT/.claude/skills/plan-to-issues/SKILL.md"
   [ "$status" -eq 0 ]
-  run grep -n "templates/issue-template.md" "$AGENDEV_ROOT/.claude/skills/plan-to-issues/SKILL.md"
+  run grep -n '"\$AGENDEV_ROOT/templates/issue-template.md"' "$AGENDEV_ROOT/.claude/skills/plan-to-issues/SKILL.md"
   [ "$status" -eq 0 ]
   run grep -n "broad-example.md" "$AGENDEV_ROOT/.claude/skills/plan-to-issues/SKILL.md"
   [ "$status" -eq 0 ]
@@ -49,9 +49,9 @@ load test_helper
   [ "$status" -eq 0 ]
   run grep -n "circuit breaker" "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
   [ "$status" -eq 0 ]
-  run grep -n "dispatch-safety.sh reconcile" "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
+  run grep -n '"\$AGENDEV_ROOT/scripts/dispatch-safety.sh" reconcile' "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
   [ "$status" -eq 0 ]
-  run grep -n "dispatch-safety.sh eligibility" "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
+  run grep -n '"\$AGENDEV_ROOT/scripts/dispatch-safety.sh" eligibility' "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
   [ "$status" -eq 0 ]
   run grep -n "Scenario: PASS" "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
   [ "$status" -eq 0 ]
@@ -68,15 +68,15 @@ load test_helper
 }
 
 @test "issue runner prompt enforces payload parsing and verification gates" {
-  run grep -n "Parse the Codex return payload before doing anything else" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  run grep -n "Parse the JSON output" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
-  run grep -n "verify.sh round" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  run grep -n '"\$AGENDEV_ROOT/scripts/verify.sh" round' "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
   run grep -n "maxTokenBudget" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
-  run grep -n "direct importers" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  run grep -n "direct consumers" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
-  run grep -n "gh-pr-lifecycle.sh read-actionable" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  run grep -n '"\$AGENDEV_ROOT/scripts/gh-pr-lifecycle.sh" read-actionable' "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
   run grep -n "Scenario: iterate" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]

@@ -4,15 +4,15 @@ You are the project-level dispatcher for agendev. You do not edit source code.
 
 ## Startup
 
-1. Read `AGENTS.md`, `config/agendev.json`, and the target repo context exported via `TARGET_ROOT` and `REPO`.
-2. Run `scripts/dispatch-safety.sh reconcile "$REPO"` before dispatching any new issue.
+1. Read `AGENTS.md`, `"$AGENDEV_ROOT/config/agendev.json"`, and the target repo context exported via `TARGET_ROOT` and `REPO`.
+2. Run `"$AGENDEV_ROOT/scripts/dispatch-safety.sh" reconcile "$REPO"` before dispatching any new issue.
 3. Inspect the issue queue via the `issue-queue` skill and report blocked reasons when no issue is actionable.
 
 ## Dispatch loop
 
-1. If invoked with `--issue N`, fetch that issue directly, run `scripts/dispatch-safety.sh eligibility "$REPO" N`, and stop immediately if the issue is not eligible. Do not fall back to the queue.
-2. Otherwise, request the next actionable issue from `scripts/gh-issue-queue.sh next "$REPO" <ready-label>`.
-3. Run `scripts/dispatch-safety.sh eligibility "$REPO" <issue-number>` before mutating GitHub state.
+1. If invoked with `--issue N`, fetch that issue directly, run `"$AGENDEV_ROOT/scripts/dispatch-safety.sh" eligibility "$REPO" N`, and stop immediately if the issue is not eligible. Do not fall back to the queue.
+2. Otherwise, request the next actionable issue from `"$AGENDEV_ROOT/scripts/gh-issue-queue.sh" next "$REPO" <ready-label>`.
+3. Run `"$AGENDEV_ROOT/scripts/dispatch-safety.sh" eligibility "$REPO" <issue-number>` before mutating GitHub state.
 4. If there is no actionable or eligible issue, report whether the queue is empty or blocked and stop.
 5. Mark the issue `in-progress` via deterministic scripts.
 6. Create a sibling worktree from `origin/main`.

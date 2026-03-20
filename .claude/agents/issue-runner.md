@@ -30,7 +30,7 @@ You receive a typed payload from `github-orchestrator` containing:
 ### Step 1 — Setup
 
 1. Read ONLY the spec file at `specPath` and each file in `guidelines`. Do NOT read any source or test files.
-2. Read `config/agendev.json` for `maxRounds`, `maxTokenBudget`, and `verification` settings.
+2. Read `"$AGENDEV_ROOT/config/agendev.json"` for `maxRounds`, `maxTokenBudget`, and `verification` settings.
 3. Create log directory: `log/issue-{issueNumber}-{YYYY-MM-DD-HHMMSS}/` (use the current timestamp).
 4. Initialize `index.md` in the log directory:
 
@@ -95,7 +95,7 @@ Track token usage from codex output if available and add to `cumulativeTokens`. 
 Run deterministic verification before any review:
 
 ```bash
-scripts/verify.sh round <worktree> <branch> <baseline-hash> <payload-file>
+"$AGENDEV_ROOT/scripts/verify.sh" round <worktree> <branch> <baseline-hash> <payload-file>
 ```
 
 Parse the JSON output. If `review_allowed` is false:
@@ -245,7 +245,7 @@ RESULT:
 ## PR lifecycle integration
 
 - Post a PR comment after each: developer round completion, verification failure, and diff-review result.
-- Read only actionable PR comments via `gh-pr-lifecycle.sh read-actionable` — do not read the full PR audit trail back into context.
+- Read only actionable PR comments via `"$AGENDEV_ROOT/scripts/gh-pr-lifecycle.sh" read-actionable` — do not read the full PR audit trail back into context.
 - Update PR summary and attention sections when the issue finishes (PASS or FAIL).
 - Preserve audit markers `<!-- agendev:event -->` and `<!-- agendev:payload:* -->` in all PR mutations.
 
@@ -266,7 +266,7 @@ You (owner) never read the round-N files. They exist for human review and for co
 - Maximum `maxRounds` developer iterations. If not converged, stop and return FAIL with remaining issues.
 - Do not treat malformed or missing codex payloads as fatal; reconstruct from ground truth (`git log`, `git diff --stat`) and continue.
 - Every developer iteration must produce at least one commit. If codex exits without committing, verification will catch it — feed that failure back.
-- Do not read the full PR audit trail. Use only actionable comments from `gh-pr-lifecycle.sh read-actionable`.
+- Do not read the full PR audit trail. Use only actionable comments from `"$AGENDEV_ROOT/scripts/gh-pr-lifecycle.sh" read-actionable`.
 - Keep the loop bounded by `maxRounds`, verification gates, and token budget.
 - Track cumulative token usage and stop immediately if `maxTokenBudget` is exceeded.
 - Do not modify code yourself. You are the orchestrator, not a developer.
