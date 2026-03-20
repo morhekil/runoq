@@ -123,6 +123,7 @@ ensure_directory() {
 sync_claude_managed_file() {
   local source_path="$1"
   local destination_path="$2"
+  local resolved_destination
 
   ensure_directory "$(dirname "$destination_path")"
 
@@ -130,12 +131,15 @@ sync_claude_managed_file() {
     agendev::die "Cannot update managed Claude file at ${destination_path}; path exists and is not a regular file."
   fi
 
-  if [[ -f "$destination_path" && ! -L "$destination_path" ]] && cmp -s "$source_path" "$destination_path"; then
-    return
+  if [[ -L "$destination_path" ]]; then
+    resolved_destination="$(readlink "$destination_path")"
+    if [[ "$resolved_destination" == "$source_path" ]]; then
+      return
+    fi
   fi
 
   rm -f "$destination_path"
-  cp "$source_path" "$destination_path"
+  ln -s "$source_path" "$destination_path"
 }
 
 ensure_claude_managed_tree() {

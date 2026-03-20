@@ -52,7 +52,7 @@ export AGENDEV_SYMLINK_DIR="$HOME/.local/bin"
 /path/to/agendev/bin/agendev report summary
 ```
 
-`agendev init` creates `.agendev/identity.json`, `.agendev/state/`, any missing queue labels in GitHub, a default `package.json` when the target repo does not already have one, refreshes the agendev-managed `.claude/` agent and skill files in the target repo, and creates a convenience `agendev` symlink.
+`agendev init` creates `.agendev/identity.json`, `.agendev/state/`, any missing queue labels in GitHub, a default `package.json` when the target repo does not already have one, installs or refreshes agendev-managed `.claude/` agent and skill symlinks in the target repo, and creates a convenience `agendev` symlink.
 
 ## Command Overview
 

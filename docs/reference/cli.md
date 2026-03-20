@@ -48,7 +48,7 @@ What it does:
 - Creates `.agendev/state/`
 - Ensures the managed `agendev:*` labels exist in GitHub
 - Creates a default `package.json` only when one does not already exist
-- Copies or refreshes the agendev-managed `.claude/agents/*` and `.claude/skills/*/SKILL.md` files in the target repo without taking over the rest of the target repo's `.claude/`
+- Installs or refreshes symlinks for the agendev-managed `.claude/agents/*` and `.claude/skills/*/SKILL.md` files in the target repo without taking over the rest of the target repo's `.claude/`
 - Creates an `agendev` symlink in `AGENDEV_SYMLINK_DIR` or `/usr/local/bin`
 
 Important behavior:
