@@ -88,8 +88,23 @@ smoke_gh_bin() {
   printf '%s\n' "${GH_BIN:-gh}"
 }
 
+resolve_tool_bin() {
+  local candidate="$1"
+  local resolved=""
+  if [[ "$candidate" == */* ]]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+  resolved="$(command -v "$candidate" 2>/dev/null || true)"
+  if [[ -n "$resolved" ]]; then
+    printf '%s\n' "$resolved"
+  else
+    printf '%s\n' "$candidate"
+  fi
+}
+
 smoke_claude_bin() {
-  printf '%s\n' "${AGENDEV_CLAUDE_BIN:-claude}"
+  resolve_tool_bin "${AGENDEV_CLAUDE_BIN:-claude}"
 }
 
 create_claude_capture_wrapper() {
@@ -111,6 +126,7 @@ mkdir -p "$invoke_dir"
   printf 'TARGET_ROOT=%s\n' "${TARGET_ROOT:-}"
   printf 'REPO=%s\n' "${REPO:-}"
   printf 'AGENDEV_ROOT=%s\n' "${AGENDEV_ROOT:-}"
+  printf 'REAL_BIN=%s\n' "$real_bin"
 } >"$invoke_dir/context.log"
 printf '%s\n' "$@" >"$invoke_dir/argv.txt"
 
@@ -145,6 +161,7 @@ mkdir -p "$invoke_dir"
   printf 'TARGET_ROOT=%s\n' "${TARGET_ROOT:-}"
   printf 'REPO=%s\n' "${REPO:-}"
   printf 'AGENDEV_ROOT=%s\n' "${AGENDEV_ROOT:-}"
+  printf 'REAL_BIN=%s\n' "$real_bin"
 } >"$invoke_dir/context.log"
 printf '%s\n' "$@" >"$invoke_dir/argv.txt"
 
@@ -161,7 +178,7 @@ EOF
 }
 
 smoke_codex_bin() {
-  printf '%s\n' "${AGENDEV_SMOKE_CODEX_BIN:-codex}"
+  resolve_tool_bin "${AGENDEV_SMOKE_CODEX_BIN:-codex}"
 }
 
 operator_auth_ready() {

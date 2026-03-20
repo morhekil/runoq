@@ -236,7 +236,9 @@ EOF
   wrapper_path="$TEST_TMPDIR/codex"
   capture_dir="$TEST_TMPDIR/codex-artifacts"
   target_dir="$TEST_TMPDIR/target"
-  real_codex="$TEST_TMPDIR/fake-codex"
+  real_bin_dir="$TEST_TMPDIR/real-bin"
+  mkdir -p "$real_bin_dir"
+  real_codex="$real_bin_dir/codex"
   cat >"$real_codex" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -247,13 +249,16 @@ EOF
 
   run bash -lc '
     set -euo pipefail
+    export PATH="'"$real_bin_dir"':$PATH"
     source "'"$AGENDEV_ROOT"'/scripts/lib/smoke-common.sh"
+    real_codex_bin="$(smoke_codex_bin)"
     create_codex_capture_wrapper "'"$wrapper_path"'"
-    export AGENDEV_SMOKE_REAL_CODEX_BIN="'"$real_codex"'"
+    export AGENDEV_SMOKE_REAL_CODEX_BIN="$real_codex_bin"
     export AGENDEV_SMOKE_CODEX_CAPTURE_DIR="'"$capture_dir"'"
     export TARGET_ROOT="'"$target_dir"'"
     export REPO="owner/repo"
     export AGENDEV_ROOT="'"$AGENDEV_ROOT"'"
+    export PATH="'"$TEST_TMPDIR"':$PATH"
     mkdir -p "$TARGET_ROOT"
     cd "$TARGET_ROOT"
     "'"$wrapper_path"'" exec -s danger-full-access --full-auto "do the thing"
@@ -272,6 +277,7 @@ EOF
   grep -F -- "exec" "$invocation_dir/argv.txt"
   grep -E '^cwd=.*/target$' "$invocation_dir/context.log"
   grep -F "REPO=owner/repo" "$invocation_dir/context.log"
+  grep -F "REAL_BIN=$real_codex" "$invocation_dir/context.log"
   grep -F "codex stdout" "$invocation_dir/stdout.log"
   grep -F "codex stderr" "$invocation_dir/stderr.log"
 }
