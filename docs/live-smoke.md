@@ -89,6 +89,7 @@ Set all of the following:
 - `AGENDEV_SMOKE=1`
 - `AGENDEV_SMOKE_LIFECYCLE=1` when using the Bats wrapper
 - `AGENDEV_SMOKE_REPO_OWNER=<owner-or-org-for-managed-repos>`
+- `AGENDEV_SMOKE_APP_ID=<github-app-id>`
 - `AGENDEV_SMOKE_APP_KEY=/absolute/path/to/app-key.pem`
 
 Optional:

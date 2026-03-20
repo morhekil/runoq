@@ -4,8 +4,54 @@ set -euo pipefail
 
 source "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
 
+operator_gh() {
+  local gh_bin="${GH_BIN:-gh}"
+  env -u GH_TOKEN -u GITHUB_TOKEN "$gh_bin" "$@"
+}
+
+app_gh() {
+  local jwt="$1"
+  shift
+  operator_gh api \
+    -H "Authorization: Bearer ${jwt}" \
+    -H "Accept: application/vnd.github+json" \
+    "$@"
+}
+
+base64url() {
+  openssl base64 -A | tr '+/' '-_' | tr -d '='
+}
+
+compact_json() {
+  jq -cnj "$@"
+}
+
+mint_bootstrap_jwt() {
+  local app_id="$1"
+  local key_path="$2"
+  local header payload now exp unsigned signature
+  now="$(( $(date +%s) - 60 ))"
+  exp="$((now + 540))"
+
+  header="$(printf '{"alg":"RS256","typ":"JWT"}' | base64url)"
+  payload="$(compact_json --argjson iat "$now" --argjson exp "$exp" --arg iss "$app_id" '{iat:$iat,exp:$exp,iss:$iss}' | base64url)"
+  unsigned="${header}.${payload}"
+  signature="$(printf '%s' "$unsigned" | openssl dgst -binary -sha256 -sign "$key_path" | base64url)"
+  printf '%s.%s\n' "$unsigned" "$signature"
+}
+
+resolve_bootstrap_app_id() {
+  local expected_slug="$1"
+  if [[ -n "${AGENDEV_APP_ID:-}" ]]; then
+    printf '%s\n' "$AGENDEV_APP_ID"
+    return
+  fi
+
+  operator_gh api "/apps/${expected_slug}" --jq '.id' 2>/dev/null || agendev::die "Unable to resolve app ID for ${expected_slug}. For private GitHub Apps, set AGENDEV_APP_ID before running agendev init."
+}
+
 ensure_identity() {
-  local root repo expected_slug app_id installation_id installation_json installation_slug key_path identity_path
+  local root repo expected_slug app_id installation_id installation_json installation_slug key_path identity_path jwt
   root="$(agendev::target_root)"
   repo="$(agendev::repo)"
   expected_slug="$(agendev::config_get '.identity.appSlug')"
@@ -19,7 +65,9 @@ ensure_identity() {
   key_path="${AGENDEV_APP_KEY:-$HOME/.agendev/app-key.pem}"
   [[ -f "${key_path/#\~/$HOME}" ]] || agendev::die "GitHub App private key not found at ${key_path/#\~/$HOME}. Set AGENDEV_APP_KEY or install the key before running agendev init."
 
-  installation_json="$(agendev::gh api "/repos/${repo}/installation")"
+  app_id="$(resolve_bootstrap_app_id "$expected_slug")"
+  jwt="$(mint_bootstrap_jwt "$app_id" "${key_path/#\~/$HOME}")"
+  installation_json="$(app_gh "$jwt" "/repos/${repo}/installation")"
   app_id="$(printf '%s' "$installation_json" | jq -er '.app_id')"
   installation_id="$(printf '%s' "$installation_json" | jq -er '.id')"
   installation_slug="$(printf '%s' "$installation_json" | jq -r '.app_slug // empty')"
@@ -39,10 +87,10 @@ ensure_identity() {
 ensure_labels() {
   local repo existing label
   repo="$(agendev::repo)"
-  existing="$(agendev::gh label list --repo "$repo" --limit 200 --json name | jq -r '.[].name')"
+  existing="$(operator_gh label list --repo "$repo" --limit 200 --json name | jq -r '.[].name')"
   while IFS= read -r label; do
     if ! grep -Fxq "$label" <<<"$existing"; then
-      agendev::gh label create "$label" --repo "$repo" --color BFDADC --description "Managed by agendev" >/dev/null
+      operator_gh label create "$label" --repo "$repo" --color BFDADC --description "Managed by agendev" >/dev/null
     fi
   done < <(agendev::all_state_labels)
 }

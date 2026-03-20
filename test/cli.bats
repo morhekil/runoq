@@ -21,7 +21,10 @@ setup_cli_project() {
   [ "$status" -eq 0 ]
   run cat "$FAKE_CLAUDE_LOG"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--agent github-orchestrator --add-dir $AGENDEV_ROOT -- --issue 42 --dry-run"* ]]
+  [[ "$output" == *"--print --agent github-orchestrator --add-dir $AGENDEV_ROOT"* ]]
+  [[ "$output" == *'"command":"agendev run"'* ]]
+  [[ "$output" == *'"issue":42'* ]]
+  [[ "$output" == *'"dry_run":true'* ]]
   run cat "$FAKE_CLAUDE_ENV_LOG"
   [ "$status" -eq 0 ]
   [[ "$output" == *"TARGET_ROOT=$resolved_project_dir"* ]]

@@ -13,6 +13,7 @@ write_empty_key() {
   export TARGET_ROOT="$project_dir"
   export AGENDEV_SYMLINK_DIR="$TEST_TMPDIR/bin"
   export AGENDEV_APP_KEY="$TEST_TMPDIR/app-key.pem"
+  export AGENDEV_APP_ID="123"
   write_empty_key "$AGENDEV_APP_KEY"
 
   scenario="$TEST_TMPDIR/scenario.json"
@@ -70,6 +71,7 @@ EOF
   export TARGET_ROOT="$project_dir"
   export AGENDEV_SYMLINK_DIR="$TEST_TMPDIR/bin"
   export AGENDEV_APP_KEY="$TEST_TMPDIR/app-key.pem"
+  export AGENDEV_APP_ID="123"
   write_empty_key "$AGENDEV_APP_KEY"
 
   scenario="$TEST_TMPDIR/scenario.json"
@@ -87,6 +89,63 @@ EOF
 
   [ "$status" -ne 0 ]
   [[ "$output" == *"Repository installation app slug wrong-app did not match configured identity.appSlug agendevapp."* ]]
+}
+
+@test "setup init resolves installation with an app JWT even when GH_TOKEN is set" {
+  project_dir="$TEST_TMPDIR/project"
+  make_git_repo "$project_dir" "git@github.com:owner/repo.git"
+  export TARGET_ROOT="$project_dir"
+  export AGENDEV_SYMLINK_DIR="$TEST_TMPDIR/bin"
+  export AGENDEV_APP_KEY="$TEST_TMPDIR/app-key.pem"
+  export AGENDEV_APP_ID="123"
+  export GH_TOKEN="bogus-app-token"
+  write_empty_key "$AGENDEV_APP_KEY"
+
+  gh_wrapper="$TEST_TMPDIR/gh-wrapper"
+  cat >"$gh_wrapper" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == "api" && "$*" == *"/repos/owner/repo/installation"* ]]; then
+  if [[ -n "${GH_TOKEN:-}" || -n "${GITHUB_TOKEN:-}" ]]; then
+    echo "expected setup.sh to pass the JWT via Authorization header, not GH_TOKEN" >&2
+    exit 1
+  fi
+  if [[ "$*" != *"Authorization: Bearer "* ]]; then
+    echo "expected setup.sh to call installation lookup with Authorization: Bearer <jwt>" >&2
+    exit 1
+  fi
+  printf '%s' '{"id":789,"app_id":123,"app_slug":"agendevapp"}'
+  exit 0
+fi
+
+if [[ "${1:-}" == "label" && "${2:-}" == "list" ]]; then
+  if [[ -n "${GH_TOKEN:-}" || -n "${GITHUB_TOKEN:-}" ]]; then
+    echo "expected label list to use operator gh auth without GH_TOKEN" >&2
+    exit 1
+  fi
+  printf '%s' '[]'
+  exit 0
+fi
+
+if [[ "${1:-}" == "label" && "${2:-}" == "create" ]]; then
+  if [[ -n "${GH_TOKEN:-}" || -n "${GITHUB_TOKEN:-}" ]]; then
+    echo "expected label create to use operator gh auth without GH_TOKEN" >&2
+    exit 1
+  fi
+  exit 0
+fi
+
+echo "unexpected gh invocation: $*" >&2
+exit 1
+EOF
+  chmod +x "$gh_wrapper"
+  export GH_BIN="$gh_wrapper"
+
+  run "$AGENDEV_ROOT/scripts/setup.sh"
+
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.appId' "$project_dir/.agendev/identity.json")" = "123" ]
 }
 
 @test "setup init is idempotent on repeated runs" {

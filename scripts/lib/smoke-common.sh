@@ -336,6 +336,10 @@ lifecycle_preflight_json() {
     missing="$(append_missing "$missing" "Missing AGENDEV_SMOKE_REPO_OWNER.")"
   fi
 
+  if [[ -z "${AGENDEV_SMOKE_APP_ID:-}" ]]; then
+    missing="$(append_missing "$missing" "Missing AGENDEV_SMOKE_APP_ID.")"
+  fi
+
   if [[ -z "${AGENDEV_SMOKE_APP_KEY:-}" ]]; then
     missing="$(append_missing "$missing" "Missing AGENDEV_SMOKE_APP_KEY.")"
   fi
@@ -922,6 +926,7 @@ run_lifecycle() {
 
   export AGENDEV_APP_KEY
   AGENDEV_APP_KEY="$(smoke_key_path)"
+  export AGENDEV_APP_ID="${AGENDEV_SMOKE_APP_ID}"
   export AGENDEV_SYMLINK_DIR="$tmpdir/bin"
 
   smoke_log "running agendev init; log -> ${init_log}"

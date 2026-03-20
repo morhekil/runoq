@@ -38,6 +38,10 @@ base64url() {
   openssl base64 -A | tr '+/' '-_' | tr -d '='
 }
 
+compact_json() {
+  jq -cnj "$@"
+}
+
 mint_jwt() {
   local app_id key_path header payload now exp unsigned signature
   app_id="$(identity_json | jq -r '.appId')"
@@ -46,7 +50,7 @@ mint_jwt() {
   exp="$((now + 540))"
 
   header="$(printf '{"alg":"RS256","typ":"JWT"}' | base64url)"
-  payload="$(jq -cn --argjson iat "$now" --argjson exp "$exp" --arg iss "$app_id" '{iat:$iat,exp:$exp,iss:$iss}' | base64url)"
+  payload="$(compact_json --argjson iat "$now" --argjson exp "$exp" --arg iss "$app_id" '{iat:$iat,exp:$exp,iss:$iss}' | base64url)"
   unsigned="${header}.${payload}"
   signature="$(printf '%s' "$unsigned" | openssl dgst -binary -sha256 -sign "$key_path" | base64url)"
   printf '%s.%s\n' "$unsigned" "$signature"

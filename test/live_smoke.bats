@@ -71,7 +71,7 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.ready')" = "false" ]
   [ "$(printf '%s' "$output" | jq -r '.gh_authenticated')" = "true" ]
-  [ "$(printf '%s' "$output" | jq -r '.missing | length')" = "3" ]
+  [ "$(printf '%s' "$output" | jq -r '.missing | length')" = "4" ]
 }
 
 @test "live lifecycle smoke preflight accepts explicit managed repo configuration" {
@@ -89,6 +89,7 @@ EOF
   use_fake_gh "$scenario"
   export AGENDEV_SMOKE=1
   export AGENDEV_SMOKE_REPO_OWNER="owner"
+  export AGENDEV_SMOKE_APP_ID="123"
   export AGENDEV_SMOKE_APP_KEY="$key_path"
   export AGENDEV_CLAUDE_BIN="sh"
   export AGENDEV_SMOKE_CODEX_BIN="sh"

@@ -41,15 +41,23 @@ parse_args() {
   done
 }
 
+build_run_prompt() {
+  jq -cn \
+    --arg command "agendev run" \
+    --arg issue "${issue_number:-}" \
+    --argjson dry_run "$dry_run" '
+    {
+      command: $command,
+      issue: (if $issue == "" then null else ($issue | tonumber) end),
+      dry_run: $dry_run
+    }
+  '
+}
+
 run_production() {
-  local args=()
-  if [[ -n "$issue_number" ]]; then
-    args+=(--issue "$issue_number")
-  fi
-  if [[ "$dry_run" == "true" ]]; then
-    args+=(--dry-run)
-  fi
-  claude_exec --agent github-orchestrator --add-dir "$AGENDEV_ROOT" -- "${args[@]}"
+  local prompt
+  prompt="$(build_run_prompt)"
+  claude_exec --print --agent github-orchestrator --add-dir "$AGENDEV_ROOT" "$prompt"
 }
 
 main() {

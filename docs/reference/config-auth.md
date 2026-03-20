@@ -72,7 +72,7 @@ If you change config in this area, verify whether the shell code also needs to c
 
 Field meaning:
 
-- `appId`: numeric GitHub App ID read from the repository installation payload
+- `appId`: numeric GitHub App ID supplied by `AGENDEV_APP_ID` or looked up from the public app slug
 - `installationId`: numeric installation ID for the target repo
 - `privateKeyPath`: path recorded during `init`; `gh-auth.sh` also allows `AGENDEV_APP_KEY` to override it later
 
@@ -98,6 +98,7 @@ If the file is missing, `gh-auth.sh` exits with `Run 'agendev init' first.` unle
 | Variable | Purpose | Notes |
 | --- | --- | --- |
 | `GH_TOKEN` | Reused GitHub token | Preferred by `gh-auth.sh` unless refresh is forced |
+| `AGENDEV_APP_ID` | Bootstrap GitHub App ID for `agendev init` | Required for private GitHub Apps; optional for public apps if slug lookup works |
 | `AGENDEV_APP_KEY` | Override GitHub App private key path | Used by both `setup.sh` and `gh-auth.sh` |
 | `AGENDEV_FORCE_REFRESH_TOKEN` | Force minting a fresh installation token | Ignores an existing `GH_TOKEN` when set |
 
@@ -118,11 +119,10 @@ This means a shell session with an exported `GH_TOKEN` will bypass GitHub App mi
 `agendev init` is the bootstrap phase:
 
 - It does not call `gh-auth.sh`.
-- It expects the operator to already have `gh` access that can:
-  - look up the app ID by slug
-  - resolve the repo installation ID
-  - list existing labels
-  - create missing labels
+- It resolves the app ID from `AGENDEV_APP_ID` when present. If `AGENDEV_APP_ID` is unset, it falls back to looking up the public app by slug.
+- It mints a short-lived app JWT from the app ID and private key, then resolves the repo installation ID from the GitHub App installation API.
+- It uses operator `gh` auth only for repository label listing and creation.
+- Private GitHub Apps should set `AGENDEV_APP_ID` explicitly before running `agendev init`.
 
 If that bootstrap succeeds, later commands can mint installation tokens from the saved identity.
 

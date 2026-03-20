@@ -234,6 +234,7 @@ Required variables (in addition to `AGENDEV_SMOKE=1` from above):
 ```bash
 export AGENDEV_SMOKE_LIFECYCLE=1
 export AGENDEV_SMOKE_REPO_OWNER="<owner-or-org>"
+export AGENDEV_SMOKE_APP_ID="<numeric-app-id-from-step-4c>"
 export AGENDEV_SMOKE_APP_KEY="$HOME/.agendev/app-key.pem"
 ```
 
@@ -253,7 +254,7 @@ export AGENDEV_SMOKE_RUN_ID="my-run-001"                # auto-generated if omit
 scripts/smoke-lifecycle.sh preflight
 ```
 
-Preflight checks: `AGENDEV_SMOKE`, `AGENDEV_SMOKE_REPO_OWNER`, `AGENDEV_SMOKE_APP_KEY`, operator `gh` auth, and that `claude`, `codex`, `node`, and `npm` are all on `PATH`.
+Preflight checks: `AGENDEV_SMOKE`, `AGENDEV_SMOKE_REPO_OWNER`, `AGENDEV_SMOKE_APP_ID`, `AGENDEV_SMOKE_APP_KEY`, operator `gh` auth, and that `claude`, `codex`, `node`, and `npm` are all on `PATH`.
 
 Then run:
 
