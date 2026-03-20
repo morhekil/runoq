@@ -256,6 +256,10 @@ Inspect:
 
 - `.agendev/live-smoke/runs/<run_id>/init.log`
 - `.agendev/live-smoke/runs/<run_id>/run.log`
+- `.agendev/live-smoke/runs/<run_id>/claude/<timestamp>/argv.txt`
+- `.agendev/live-smoke/runs/<run_id>/claude/<timestamp>/context.log`
+- `.agendev/live-smoke/runs/<run_id>/claude/<timestamp>/stdout.log`
+- `.agendev/live-smoke/runs/<run_id>/claude/<timestamp>/stderr.log`
 - `.agendev/live-smoke/runs/<run_id>/summary.json`
 - copied state files under `.agendev/live-smoke/runs/<run_id>/state/`
 

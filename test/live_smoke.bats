@@ -187,3 +187,47 @@ EOF
   grep -F "[smoke-lifecycle] deleting managed repo owner/repo-one" "$stderr_file"
   grep -F "[smoke-lifecycle] deleted managed repo owner/repo-one" "$stderr_file"
 }
+
+@test "lifecycle Claude capture wrapper records invocation artifacts" {
+  wrapper_path="$TEST_TMPDIR/claude-capture"
+  capture_dir="$TEST_TMPDIR/claude-artifacts"
+  target_dir="$TEST_TMPDIR/target"
+  real_claude="$TEST_TMPDIR/fake-claude"
+  cat >"$real_claude" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'fake stdout\n'
+printf 'fake stderr\n' >&2
+EOF
+  chmod +x "$real_claude"
+
+  run bash -lc '
+    set -euo pipefail
+    source "'"$AGENDEV_ROOT"'/scripts/lib/smoke-common.sh"
+    create_claude_capture_wrapper "'"$wrapper_path"'"
+    export AGENDEV_SMOKE_REAL_CLAUDE_BIN="'"$real_claude"'"
+    export AGENDEV_SMOKE_CLAUDE_CAPTURE_DIR="'"$capture_dir"'"
+    export TARGET_ROOT="'"$target_dir"'"
+    export REPO="owner/repo"
+    export AGENDEV_ROOT="'"$AGENDEV_ROOT"'"
+    mkdir -p "$TARGET_ROOT"
+    cd "$TARGET_ROOT"
+    "'"$wrapper_path"'" --print --agent github-orchestrator -- "{\"command\":\"agendev run\"}"
+  '
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"fake stdout"* ]]
+  [[ "$output" == *"fake stderr"* ]]
+
+  invocation_dir="$(find "$capture_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+  [ -n "$invocation_dir" ]
+  [ -f "$invocation_dir/argv.txt" ]
+  [ -f "$invocation_dir/context.log" ]
+  [ -f "$invocation_dir/stdout.log" ]
+  [ -f "$invocation_dir/stderr.log" ]
+  grep -F -- "--print" "$invocation_dir/argv.txt"
+  grep -E '^cwd=.*/target$' "$invocation_dir/context.log"
+  grep -F "REPO=owner/repo" "$invocation_dir/context.log"
+  grep -F "fake stdout" "$invocation_dir/stdout.log"
+  grep -F "fake stderr" "$invocation_dir/stderr.log"
+}

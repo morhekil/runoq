@@ -92,6 +92,40 @@ smoke_claude_bin() {
   printf '%s\n' "${AGENDEV_CLAUDE_BIN:-claude}"
 }
 
+create_claude_capture_wrapper() {
+  local wrapper_path="$1"
+  cat >"$wrapper_path" <<'EOF'
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+capture_root="${AGENDEV_SMOKE_CLAUDE_CAPTURE_DIR:?}"
+real_bin="${AGENDEV_SMOKE_REAL_CLAUDE_BIN:?}"
+timestamp="$(date -u +%Y%m%d%H%M%S)-$$"
+invoke_dir="$capture_root/$timestamp"
+status=0
+
+mkdir -p "$invoke_dir"
+{
+  printf 'cwd=%s\n' "$PWD"
+  printf 'TARGET_ROOT=%s\n' "${TARGET_ROOT:-}"
+  printf 'REPO=%s\n' "${REPO:-}"
+  printf 'AGENDEV_ROOT=%s\n' "${AGENDEV_ROOT:-}"
+} >"$invoke_dir/context.log"
+printf '%s\n' "$@" >"$invoke_dir/argv.txt"
+
+set +e
+"$real_bin" "$@" >"$invoke_dir/stdout.log" 2>"$invoke_dir/stderr.log"
+status="$?"
+set -e
+
+cat "$invoke_dir/stdout.log"
+cat "$invoke_dir/stderr.log" >&2
+exit "$status"
+EOF
+  chmod +x "$wrapper_path"
+}
+
 smoke_codex_bin() {
   printf '%s\n' "${AGENDEV_SMOKE_CODEX_BIN:-codex}"
 }
@@ -881,6 +915,7 @@ run_lifecycle() {
   local root run_id tmpdir target_dir artifacts_dir repo repo_url repo_json init_log run_log seeded_issues_file
   local summary_file report_file state_files_json issue_statuses_json pr_statuses_json report_summary_json
   local labels_json seeded_issues_json issue_numbers_json run_exit run_exit_json failures_json checks_json summary_json
+  local claude_capture_dir claude_wrapper_path real_claude_bin
   root="$(agendev::root)"
   run_id="$(smoke_run_id)"
   tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/agendev-live-lifecycle.XXXXXX")"
@@ -928,6 +963,10 @@ run_lifecycle() {
   AGENDEV_APP_KEY="$(smoke_key_path)"
   export AGENDEV_APP_ID="${AGENDEV_SMOKE_APP_ID}"
   export AGENDEV_SYMLINK_DIR="$tmpdir/bin"
+  claude_capture_dir="$artifacts_dir/claude"
+  claude_wrapper_path="$tmpdir/claude-capture"
+  real_claude_bin="$(smoke_claude_bin)"
+  create_claude_capture_wrapper "$claude_wrapper_path"
 
   smoke_log "running agendev init; log -> ${init_log}"
   set +e
@@ -961,10 +1000,14 @@ run_lifecycle() {
     checks_json="$(append_check "$checks_json" "issues_seeded")"
 
     smoke_log "running agendev eval; log -> ${run_log}"
+    smoke_log "capturing Claude argv/stdout/stderr under ${claude_capture_dir}"
     set +e
     (
       cd "$target_dir"
       export AGENDEV_FORCE_REFRESH_TOKEN=1
+      export AGENDEV_SMOKE_REAL_CLAUDE_BIN="$real_claude_bin"
+      export AGENDEV_SMOKE_CLAUDE_CAPTURE_DIR="$claude_capture_dir"
+      export AGENDEV_CLAUDE_BIN="$claude_wrapper_path"
       "$root/bin/agendev" run
     ) >"$run_log" 2>&1
     run_exit="$?"

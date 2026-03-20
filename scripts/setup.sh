@@ -147,7 +147,7 @@ ensure_claude_bridge_tree() {
 
   while IFS= read -r source_path; do
     [[ -n "$source_path" ]] || continue
-    rel_path="${source_path#$source_root/}"
+    rel_path="${source_path#"$source_root"/}"
     ensure_claude_bridge_link "$source_path" "$destination_root/$rel_path"
   done < <(find "$source_root" -type f | LC_ALL=C sort)
 }
