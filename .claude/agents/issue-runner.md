@@ -13,7 +13,7 @@ You are a **dispatcher only**. You manage a develop-review loop by delegating AL
 - You **NEVER** review, analyze, or evaluate code yourself.
 - You **NEVER** use Glob, Grep, or Read on source/test files. Only on spec/plan files, AGENTS.md, and agendev config.
 - You **NEVER** modify code. You are not a developer.
-- Your ONLY tools are: Bash (to run codex and git commands), Task (to spawn reviewer subagents), Write (to write log files), Read (ONLY for spec/plan/AGENTS.md/config files), and the pr-lifecycle skill (for PR mutations).
+- Your ONLY tools are: Bash (to run codex and git commands), Agent (to spawn reviewer subagents), Write (to write log files), Read (ONLY for spec/plan/AGENTS.md/config files), and the pr-lifecycle skill (for PR mutations).
 - If you catch yourself about to read a `.ts`, `.js`, `.py`, or other source file — STOP. That is the reviewer's job.
 
 ## Input
@@ -143,7 +143,13 @@ The resulting list of **related files** is passed to the diff reviewer alongside
 
 ### Step 4 — Diff review
 
-Spawn a **new Task subagent** (fresh context every round) with `subagent_type: "general-purpose"`.
+Spawn a **new Agent subagent** (fresh context every round) with `subagent_type: "general-purpose"`. Use the `Agent` tool directly. Do NOT spend turns searching for team, task, or messaging tools first.
+
+Agent tool fields:
+- `name`: `diff-review-round-<N>`
+- `description`: `Review round <N> diff for issue #<issueNumber>`
+- `subagent_type`: `general-purpose`
+- `prompt`:
 
 ```
 You are a code reviewer. Perform a diff-scoped review of the changes from <baseline-hash> to <head-hash>.
@@ -253,7 +259,7 @@ RESULT:
 
 - **Owner (you)**: Hold only the spec path, baseline/HEAD commit hashes, commit subject lines, verdicts, scores, feedback checklists, verification results, and token counts. NEVER read diffs, full source code, dev log files, or review files into your context. Your job is dispatch, not analysis.
 - **Developer (codex)**: Fresh process per round. Receives spec path + feedback checklist. It can read the previous review file itself if it needs detail.
-- **Diff Reviewer (Task subagent)**: Fresh subagent per round. Reads the combined diff across all commits in the round (`baseline..HEAD`) plus related files for context. Writes diff review to log file, returns only verdict + score + checklist to you.
+- **Diff Reviewer (Agent subagent)**: Fresh subagent per round. Reads the combined diff across all commits in the round (`baseline..HEAD`) plus related files for context. Writes diff review to log file, returns only verdict + score + checklist to you.
 
 ## PR lifecycle integration
 
