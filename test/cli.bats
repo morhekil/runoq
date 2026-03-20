@@ -15,13 +15,14 @@ setup_cli_project() {
   export FAKE_CLAUDE_LOG="$TEST_TMPDIR/claude.log"
   export FAKE_CLAUDE_ENV_LOG="$TEST_TMPDIR/claude-env.log"
   export GH_TOKEN="existing-token"
+  resolved_project_dir="$(cd "$project_dir" && pwd -P)"
 
   run bash -lc 'cd "'"$project_dir"'" && "'"$AGENDEV_ROOT"'/bin/agendev" run --issue 42 --dry-run'
 
   [ "$status" -eq 0 ]
   run cat "$FAKE_CLAUDE_LOG"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--print --permission-mode bypassPermissions --agent github-orchestrator --add-dir $AGENDEV_ROOT -- "* ]]
+  [[ "$output" == *"--print --permission-mode bypassPermissions --agent github-orchestrator --add-dir $resolved_project_dir -- "* ]]
   [[ "$output" == *'"command":"agendev run"'* ]]
   [[ "$output" == *'"issue":42'* ]]
   [[ "$output" == *'"dry_run":true'* ]]
@@ -47,7 +48,7 @@ setup_cli_project() {
   [ "$status" -eq 0 ]
   run cat "$FAKE_CLAUDE_LOG"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--skill plan-to-issues --add-dir $AGENDEV_ROOT -- "*"/docs/plan.md" ]]
+  [[ "$output" == *"--skill plan-to-issues --add-dir $resolved_project_dir -- "*"/docs/plan.md" ]]
 }
 
 @test "agendev maintenance routes to the maintenance reviewer" {
@@ -57,13 +58,14 @@ setup_cli_project() {
   export AGENDEV_CLAUDE_BIN="claude"
   export FAKE_CLAUDE_LOG="$TEST_TMPDIR/claude.log"
   export GH_TOKEN="existing-token"
+  resolved_project_dir="$(cd "$project_dir" && pwd -P)"
 
   run bash -lc 'cd "'"$project_dir"'" && "'"$AGENDEV_ROOT"'/bin/agendev" maintenance'
 
   [ "$status" -eq 0 ]
   run cat "$FAKE_CLAUDE_LOG"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--agent maintenance-reviewer --add-dir $AGENDEV_ROOT"* ]]
+  [[ "$output" == *"--agent maintenance-reviewer --add-dir $resolved_project_dir"* ]]
 }
 
 @test "agendev report delegates to report.sh" {
