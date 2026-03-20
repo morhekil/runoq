@@ -94,6 +94,12 @@ load test_helper
   [ "$status" -eq 0 ]
   run grep -n "Do NOT combine this with \`--full-auto\`" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
+  run grep -n "agendev:payload:codex-return" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  [ "$status" -eq 0 ]
+  run grep -n '"commits_pushed": \["<sha>", "\.\.\."\]' "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  [ "$status" -eq 0 ]
+  run grep -n "Make the JSON the LAST fenced block" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  [ "$status" -eq 0 ]
   run grep -n "Your ONLY tools are: Bash (to run codex and git commands), Agent" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
   run grep -n "Use the \`Agent\` tool directly" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"

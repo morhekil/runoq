@@ -32,6 +32,15 @@ wrap_payload_fixture() {
   [[ "$output" != *"intermediate non-json block"* ]]
 }
 
+@test "extract-payload prefers the codex-return marker block" {
+  run "$AGENDEV_ROOT/scripts/state.sh" extract-payload "$(fixture_path "payloads/codex-output-marked-block.txt")"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"status": "completed"'* ]]
+  [[ "$output" == *'"notes": "use marked payload"'* ]]
+  [[ "$output" != *"ignore trailing fenced block"* ]]
+}
+
 @test "validate-payload synthesizes a failed payload when no JSON block exists" {
   base_repo="$TEST_TMPDIR/repo"
   base_sha="$(setup_payload_repo "$base_repo")"

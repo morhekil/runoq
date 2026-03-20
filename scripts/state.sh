@@ -107,6 +107,32 @@ load_state() {
 
 extract_payload_block() {
   local source_file="$1"
+  local marked_block
+  marked_block="$(
+    awk '
+      /^<!-- agendev:payload:codex-return -->$/ {
+        saw_marker = 1
+        next
+      }
+      saw_marker && /^```/ {
+        if (!in_block) {
+          in_block = 1
+          block = ""
+          next
+        }
+        printf "%s", block
+        exit
+      }
+      saw_marker && in_block {
+        block = block $0 ORS
+      }
+    ' "$source_file"
+  )"
+  if [[ -n "$marked_block" ]]; then
+    printf '%s' "$marked_block"
+    return 0
+  fi
+
   awk '
     /^```/ {
       if (in_block) {

@@ -55,21 +55,56 @@ You receive a typed payload from `github-orchestrator` containing:
 
 Run codex as a fresh process via Bash. Execute from within the worktree. Use `codex exec --dangerously-bypass-approvals-and-sandbox` so codex can run git commands (commit, push, etc.) without sandbox restrictions. Do NOT combine this with `--full-auto`; `--full-auto` forces Codex back into `workspace-write`. Capture all output to the log file.
 
+Codex MUST end each developer round by printing a machine-readable payload block to stdout for `state.sh validate-payload`. Use this exact marker and a fenced JSON block:
+
+````markdown
+<!-- agendev:payload:codex-return -->
+```json
+{
+  "status": "completed" | "failed" | "stuck",
+  "commits_pushed": ["<sha>", "..."],
+  "commit_range": "<first-sha>..<last-sha>",
+  "files_changed": ["path", "..."],
+  "files_added": ["path", "..."],
+  "files_deleted": ["path", "..."],
+  "tests_run": true | false,
+  "tests_passed": true | false,
+  "test_summary": "<short summary>",
+  "build_passed": true | false,
+  "blockers": ["message", "..."],
+  "notes": "<short note>"
+}
+```
+````
+
+Requirements for that payload:
+- Print the marker and JSON block even on failure or stuck runs.
+- Make the JSON the LAST fenced block that codex prints.
+- Populate `commits_pushed`, file lists, and test/build fields from the actual commands you ran, not guesses.
+- Do not emit prose instead of the payload. Human-readable summary is optional, but the marked JSON block is mandatory.
+
 **First round** (no prior feedback):
 
-```bash
+````bash
 cd <worktree> && codex exec --dangerously-bypass-approvals-and-sandbox "Implement the following spec. Read the spec file and all AGENTS.md files for rules and constraints.
 
 Spec: <specPath>
 
 Commit granularity: make one commit per semantic unit of work — a feature, a bug fix, a refactor, a new module with its tests, etc. If the spec has multiple distinct pieces, each should be its own commit with a clear, descriptive message. Do NOT bundle unrelated changes into a single monolithic commit.
 
-When done, push your branch: git push origin <branch>" 2>&1 | tee <log-dir>/round-<N>-dev.md
+When done, push your branch: git push origin <branch>
+
+Then print the required final stdout payload block:
+<!-- agendev:payload:codex-return -->
+```json
+{ ... }
 ```
+" 2>&1 | tee <log-dir>/round-<N>-dev.md
+````
 
 **Subsequent rounds** (has feedback checklist from reviewer):
 
-```bash
+````bash
 cd <worktree> && codex exec --dangerously-bypass-approvals-and-sandbox "Address the following code review feedback. Read the review file at <log-dir>/round-<N-1>-diff-review.md for full details and more context than the checklist below.
 
 Checklist:
@@ -80,8 +115,15 @@ Read all AGENTS.md files for rules and constraints.
 
 Commit granularity: make one commit per semantic unit of work — one per checklist item, or per distinct fix/change. Do NOT bundle unrelated changes into a single commit.
 
-When done, push your branch: git push origin <branch>" 2>&1 | tee <log-dir>/round-<N>-dev.md
+When done, push your branch: git push origin <branch>
+
+Then print the required final stdout payload block:
+<!-- agendev:payload:codex-return -->
+```json
+{ ... }
 ```
+" 2>&1 | tee <log-dir>/round-<N>-dev.md
+````
 
 After codex exits, capture all new commits since the previous round's baseline:
 
