@@ -27,7 +27,7 @@ The default runtime config lives at [`config/agendev.json`](../../config/agendev
 | `labels.needsReview` | Queue label for human escalation | `gh-issue-queue.sh`, `run.sh`, `setup.sh` |
 | `labels.blocked` | Queue label for blocked work | `gh-issue-queue.sh`, `setup.sh` |
 | `labels.maintenanceReview` | Tracking issue label for maintenance review | `maintenance.sh`, `setup.sh` |
-| `identity.appSlug` | GitHub App slug used during `init` | `setup.sh` |
+| `identity.appSlug` | GitHub App slug expected on the repo installation and used for bot attribution | `setup.sh`, smoke scripts |
 | `identity.handle` | Mention handle used by agents and scripts | agent prompts and mention flows |
 | `authorization.minimumPermission` | Minimum collaborator permission required to act on mentions | `mentions.sh`, `gh-pr-lifecycle.sh` |
 | `authorization.denyResponse` | Denial behavior for unauthorized mentions | `mentions.sh` |
@@ -72,7 +72,7 @@ If you change config in this area, verify whether the shell code also needs to c
 
 Field meaning:
 
-- `appId`: numeric GitHub App ID looked up from `identity.appSlug`
+- `appId`: numeric GitHub App ID read from the repository installation payload
 - `installationId`: numeric installation ID for the target repo
 - `privateKeyPath`: path recorded during `init`; `gh-auth.sh` also allows `AGENDEV_APP_KEY` to override it later
 

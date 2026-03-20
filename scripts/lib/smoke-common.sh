@@ -890,11 +890,14 @@ run_lifecycle() {
   failures_json='[]'
   checks_json='[]'
   run_exit_json='null'
+  AGENDEV_SMOKE_LIFECYCLE_CLEANUP_TMPDIR="$tmpdir"
 
   # shellcheck disable=SC2329
   cleanup() {
-    smoke_log "removing temporary lifecycle workspace ${tmpdir}"
-    rm -rf "$tmpdir"
+    if [[ -n "${AGENDEV_SMOKE_LIFECYCLE_CLEANUP_TMPDIR:-}" ]]; then
+      smoke_log "removing temporary lifecycle workspace ${AGENDEV_SMOKE_LIFECYCLE_CLEANUP_TMPDIR}"
+      rm -rf "$AGENDEV_SMOKE_LIFECYCLE_CLEANUP_TMPDIR"
+    fi
   }
   trap cleanup EXIT
 

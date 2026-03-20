@@ -69,9 +69,14 @@ Go to **GitHub > Settings > Developer settings > GitHub Apps > New GitHub App**.
 
 | Field | Value |
 | --- | --- |
-| **GitHub App name** | `agendev` (must match the `identity.appSlug` value in `config/agendev.json`) |
+| **GitHub App name** | `agendevapp` (must match the `identity.appSlug` value in `config/agendev.json`) |
 | **Homepage URL** | Any valid URL |
 | **Webhook** | Uncheck **Active** — agendev does not use webhook delivery |
+
+For **visibility**, choose:
+
+- **Private / only on this account** if all repos that `agendev` will touch live under the same user or organization that owns the app. This is the preferred setup for a single-owner sandbox plus lifecycle eval.
+- **Public / any account** only if you intentionally need to install the app on other GitHub accounts or organizations. Public apps can be installed by other GitHub accounts; private apps cannot.
 
 ### 4b. Set repository permissions
 
@@ -110,9 +115,15 @@ export AGENDEV_APP_KEY="/path/to/your-key.pem"
 
 ### 4e. Install the app
 
-From the app settings page, click **Install App** in the left sidebar. Select the owner (your user account or organization) where your target and sandbox repos live.
+From the app settings page, click **Install App** in the left sidebar. Select the owner where your target and sandbox repos live.
 
-Choose **Only select repositories** if you want to scope it narrowly, or **All repositories** if the app should cover any repo under that owner (required for lifecycle eval, which creates disposable repos).
+- If the app is **private**, the install target must be the same user or organization that owns the app.
+- If the app is **public**, you can install it on other accounts or organizations that you control.
+
+Then choose repository access:
+
+- **Only select repositories** is fine for sandbox smoke or for a fixed set of existing repos.
+- **All repositories** is the safest choice if you plan to run lifecycle eval, because lifecycle eval creates disposable repos under the selected owner and the app needs access to those new repos immediately.
 
 After installation, note the **Installation ID** from the URL. The URL will look like:
 
@@ -126,13 +137,18 @@ For organization installs the URL is:
 https://github.com/organizations/<org>/settings/installations/<installation-id>
 ```
 
-### 4f. Verify the app is reachable
+### 4f. Verify the installation is reachable
 
 ```bash
-gh api "/apps/agendev" --jq '.id'
+gh api "/repos/<owner>/<repo>/installation"
 ```
 
-This should print the numeric App ID. If it fails, confirm the app name matches `identity.appSlug` in `config/agendev.json` (default: `agendev`).
+Run that against a repository that should be covered by the installation. Confirm:
+
+- `app_slug` matches `identity.appSlug` in `config/agendev.json`
+- `app_id` matches the App ID from step 4c
+
+Do not use `gh api "/apps/<slug>"` as the primary check here. Private apps may return `404` on that endpoint even when the installation is correct, so `agendev init` resolves the App ID from the repository installation instead.
 
 ## 5. Prepare A Sandbox Repository
 
@@ -229,7 +245,7 @@ export AGENDEV_SMOKE_REPO_VISIBILITY="private"          # default
 export AGENDEV_SMOKE_RUN_ID="my-run-001"                # auto-generated if omitted
 ```
 
-**Important**: The GitHub App must be installed with access to **all repositories** under the owner (step 4e), or you must manually grant the app access to each managed repo after it is created. Since lifecycle eval creates repos dynamically, "all repositories" is strongly recommended.
+**Important**: Lifecycle eval creates repos dynamically under `AGENDEV_SMOKE_REPO_OWNER`. Install the app on that same owner, and prefer **all repositories** access there. If you keep **only select repositories**, you must manually add each newly created lifecycle repo to the app before `agendev init` can succeed.
 
 ## 9. Run Lifecycle Eval
 
@@ -292,9 +308,10 @@ Run `gh auth status`. If expired, run `gh auth login` again.
 
 ### App ID or installation ID lookup fails
 
-- Confirm the app name matches `identity.appSlug` in `config/agendev.json` (default: `agendev`)
+- Confirm the app name matches `identity.appSlug` in `config/agendev.json` (default: `agendevapp`)
 - Confirm the app is installed on the correct owner/org
-- Try: `gh api "/apps/agendev" --jq '.id'` and `gh api "/repos/<owner>/<repo>/installation" --jq '.id'`
+- If the app is private, confirm the app owner and install target are the same account
+- Try: `gh api "/repos/<owner>/<repo>/installation"` and confirm the returned `app_slug` and `app_id`
 
 ### Private key errors
 

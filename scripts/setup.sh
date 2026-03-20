@@ -5,10 +5,10 @@ set -euo pipefail
 source "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
 
 ensure_identity() {
-  local root repo slug app_id installation_id key_path identity_path
+  local root repo expected_slug app_id installation_id installation_json installation_slug key_path identity_path
   root="$(agendev::target_root)"
   repo="$(agendev::repo)"
-  slug="$(agendev::config_get '.identity.appSlug')"
+  expected_slug="$(agendev::config_get '.identity.appSlug')"
   identity_path="$root/.agendev/identity.json"
 
   mkdir -p "$root/.agendev" "$(agendev::state_dir)"
@@ -19,8 +19,14 @@ ensure_identity() {
   key_path="${AGENDEV_APP_KEY:-$HOME/.agendev/app-key.pem}"
   [[ -f "${key_path/#\~/$HOME}" ]] || agendev::die "GitHub App private key not found at ${key_path/#\~/$HOME}. Set AGENDEV_APP_KEY or install the key before running agendev init."
 
-  app_id="$(agendev::gh api "/apps/${slug}" --jq '.id')"
-  installation_id="$(agendev::gh api "/repos/${repo}/installation" --jq '.id')"
+  installation_json="$(agendev::gh api "/repos/${repo}/installation")"
+  app_id="$(printf '%s' "$installation_json" | jq -er '.app_id')"
+  installation_id="$(printf '%s' "$installation_json" | jq -er '.id')"
+  installation_slug="$(printf '%s' "$installation_json" | jq -r '.app_slug // empty')"
+
+  if [[ -n "$expected_slug" && -n "$installation_slug" && "$installation_slug" != "$expected_slug" ]]; then
+    agendev::die "Repository installation app slug ${installation_slug} did not match configured identity.appSlug ${expected_slug}."
+  fi
 
   jq -n \
     --argjson appId "$app_id" \

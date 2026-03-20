@@ -101,6 +101,14 @@ EOF
   [ "$(printf '%s' "$output" | jq -r '.repo_prefix')" = "agendev-live-eval" ]
 }
 
+@test "live lifecycle run preflight failure does not trip cleanup on unset locals" {
+  run "$AGENDEV_ROOT/scripts/smoke-lifecycle.sh" run
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Live lifecycle smoke preflight failed."* ]]
+  [[ "$output" != *"tmpdir: unbound variable"* ]]
+}
+
 @test "live lifecycle cleanup deletes selected managed repos and updates the manifest" {
   manifest_path="$TEST_TMPDIR/managed-repos.json"
   printf '%s\n' '[

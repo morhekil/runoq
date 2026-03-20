@@ -245,7 +245,7 @@ Checks:
 
 Checks:
 
-- the operator `gh` auth can access `/apps/<slug>` and `/repos/<repo>/installation`
+- the operator `gh` auth can access `/repos/<repo>/installation`
 - the GitHub App is installed so the managed repo is visible to it
 - the app key matches the installed app
 
