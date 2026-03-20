@@ -59,6 +59,12 @@ load test_helper
   [ "$status" -eq 0 ]
   run grep -n '"\$AGENDEV_ROOT/scripts/dispatch-safety.sh" eligibility' "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
   [ "$status" -eq 0 ]
+  run grep -n "Create an initial empty commit on the issue branch" "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
+  [ "$status" -eq 0 ]
+  run grep -n "Agent tool prompt must contain ONLY the typed payload data needed to start the run" "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
+  [ "$status" -eq 0 ]
+  run grep -n "Do NOT inline a replacement workflow" "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
+  [ "$status" -eq 0 ]
   run grep -n "Scenario: PASS" "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
   [ "$status" -eq 0 ]
   run grep -n "Scenario: FAIL" "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
@@ -70,6 +76,8 @@ load test_helper
   run grep -n "Scenario: budget exhaustion" "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
   [ "$status" -eq 0 ]
   run grep -n "agendev:event" "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
+  [ "$status" -eq 0 ]
+  run grep -n "Never dispatch \`issue-runner\` with an ad hoc inline implementation prompt" "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
   [ "$status" -eq 0 ]
 }
 
