@@ -203,4 +203,4 @@ Every processed mention ID is appended to `.agendev/state/processed-mentions.jso
 
 - [CLI reference](./cli.md)
 - [Architecture overview](../architecture/overview.md)
-- [Operator quickstart](../operations/quickstart.md)
+- [Operator workflow](../operations/operator-workflow.md)

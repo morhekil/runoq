@@ -1,128 +1,323 @@
-# Quickstart
+# Setup From Scratch
 
-This guide walks through the minimum operator workflow for using `agendev` against a target repository, from first-time setup through a successful run and a maintenance review launch.
+This guide takes you from a brand-new checkout of the `agendev` repository to successfully running both smoke test lanes (sandbox and lifecycle). It covers every prerequisite, the GitHub App creation, and the environment configuration needed before anything will work.
 
-## Before You Start
+## 1. Install System Dependencies
 
-Make sure you have:
+Install all of the following. The smoke tests and runtime scripts will fail if any are missing.
 
-- `git`, `gh`, `jq`, `openssl`, `bats`, and `shellcheck`
-- Claude CLI available as `claude`, or `AGENDEV_CLAUDE_BIN` set to the correct binary
-- A target repository hosted on `github.com` with an `origin` remote
-- Repo access that allows issue, PR, and label management
-- A GitHub App private key at `$HOME/.agendev/app-key.pem` or a path exported through `AGENDEV_APP_KEY`
-- A checkout of this runtime repository so you can invoke `bin/agendev`
+| Tool | Purpose | Install (macOS) |
+| --- | --- | --- |
+| `bash` | Shell runtime | Preinstalled |
+| `git` | Version control | `xcode-select --install` |
+| `gh` | GitHub CLI | `brew install gh` |
+| `jq` | JSON processing | `brew install jq` |
+| `openssl` | JWT signing for GitHub App auth | `brew install openssl` |
+| `bats` | Shell test framework | `brew install bats-core` |
+| `shellcheck` | Shell linting | `brew install shellcheck` |
+| `node` / `npm` | Lifecycle eval target repos use `npm test` and `npm run build` | `brew install node` |
+| `claude` | Claude CLI, used by `agendev plan`, `run`, and `maintenance` | [Install instructions](https://docs.anthropic.com/en/docs/claude-code) |
+| `codex` | Required by lifecycle eval alongside `claude` | See OpenAI Codex docs |
 
-Examples below assume:
-
-```bash
-export AGENDEV_RUNTIME=/path/to/agendev
-cd /path/to/target-repo
-```
-
-If `/usr/local/bin` is not writable on your machine, set a writable symlink location before initialization:
-
-```bash
-export AGENDEV_SYMLINK_DIR="$HOME/.local/bin"
-```
-
-## Initial Setup
-
-Run initialization from inside the target repository:
+If `claude` or `codex` are installed under different names or paths, override with:
 
 ```bash
-"$AGENDEV_RUNTIME/bin/agendev" init
+export AGENDEV_CLAUDE_BIN=/path/to/claude
+export AGENDEV_SMOKE_CODEX_BIN=/path/to/codex
 ```
 
-`agendev init` performs one-time bootstrap work:
-
-- Creates `.agendev/identity.json` with the GitHub App ID, installation ID, and private key path
-- Creates `.agendev/state/` for resumability state files
-- Ensures the managed `agendev:*` labels exist in GitHub
-- Creates a minimal `package.json` only when the target repo does not already have one
-- Creates an `agendev` symlink in `AGENDEV_SYMLINK_DIR` or `/usr/local/bin`
-
-After this step you can usually call `agendev` directly if the symlink directory is on `PATH`.
-
-## Creating Queue Issues From A Plan
-
-Prepare a local plan document in the target repository, then run:
+## 2. Clone The Runtime Repository
 
 ```bash
-agendev plan docs/plan.md
+git clone <agendev-repo-url>
+cd agendev
 ```
 
-The `plan-to-issues` skill reads the file, proposes a queue, and asks for explicit confirmation before creating anything in GitHub. After you confirm, it creates issues with:
-
-- The `agendev:ready` label
-- An `<!-- agendev:meta -->` block containing dependencies, priority, and estimated complexity
-- Acceptance criteria in the issue body
-
-At this point GitHub becomes the queue surface. Operators can inspect issue titles, labels, and metadata without reading local state files.
-
-## Running A Single Issue
-
-Use single-issue mode when you want to drive one queue item explicitly:
+All smoke test commands run from inside this checkout. Set a convenience variable:
 
 ```bash
-agendev run --issue 42
+export AGENDEV_RUNTIME="$(pwd)"
 ```
 
-During a successful run, `agendev`:
+## 3. Authenticate The GitHub CLI
 
-- Verifies the issue is eligible for dispatch
-- Moves the issue label from `agendev:ready` to `agendev:in-progress`
-- Creates a sibling worktree next to the target repo
-- Creates a draft PR for the issue branch
-- Posts structured audit comments to the PR
-- Writes `.agendev/state/42.json` so interrupted runs can be reconciled
-- Verifies the resulting changes before finalization
-
-If the outcome is a clean low-complexity pass, the issue is marked `agendev:done` and the worktree is removed. Otherwise the run is escalated to `agendev:needs-human-review`.
-
-## Running The Queue
-
-Queue mode lets `agendev` select the next ready issue automatically:
+Log in with `gh` so the operator shell can create repos, manage issues/PRs, and delete repos during cleanup:
 
 ```bash
-agendev run
+gh auth login
 ```
 
-Queue selection is based on open issues labeled `agendev:ready`. The runtime skips issues whose dependencies are not yet labeled `agendev:done` and continues until there are no actionable items left or the consecutive-failure circuit breaker halts the queue.
-
-Use queue mode after the plan has been converted into issues and you want the runtime to keep draining ready work without naming each issue manually.
-
-## Inspecting Outputs And Reports
-
-Use the report commands from the target repository:
+When prompted, choose `GitHub.com`, HTTPS, and authenticate via browser. After login, verify:
 
 ```bash
-agendev report summary
-agendev report issue 42
-agendev report cost
+gh auth status
 ```
 
-What to inspect after a run:
-
-- GitHub issue labels and issue comments for queue state and escalations
-- The draft or finalized PR for audit comments and summary updates
-- `.agendev/state/<issue>.json` for resumability state and the final outcome
-- `.agendev/state/maintenance.json` after maintenance review starts
-
-`report summary` aggregates local state files. `report issue <n>` prints the saved JSON for one issue. `report cost` estimates token cost from the configured per-million rates.
-
-## Running Maintenance Review
-
-Launch maintenance review from a clean target repository checkout:
+For lifecycle eval cleanup, your token needs the `delete_repo` scope. Add it if missing:
 
 ```bash
-agendev maintenance
+gh auth refresh -s delete_repo
 ```
 
-This invokes the `maintenance-reviewer` agent. The runtime creates a tracking issue labeled `agendev:maintenance-review`, posts partition progress comments, and records local state in `.agendev/state/maintenance.json`. The review is read-only until a human triages findings and explicitly approves filing follow-up issues.
+## 4. Create The GitHub App
 
-## Where To Go Next
+`agendev` authenticates as a GitHub App to manage issues, PRs, and labels on target repositories.
 
-- Use the [README](../../README.md) for the repo overview and prerequisite list
-- Use [docs/live-smoke.md](../live-smoke.md) for sandboxed real-GitHub validation
-- Use [docs/documentation-backlog.md](../documentation-backlog.md) to track the remaining operator, architecture, and reference docs
+### 4a. Register the app
+
+Go to **GitHub > Settings > Developer settings > GitHub Apps > New GitHub App**.
+
+| Field | Value |
+| --- | --- |
+| **GitHub App name** | `agendev` (must match the `identity.appSlug` value in `config/agendev.json`) |
+| **Homepage URL** | Any valid URL |
+| **Webhook** | Uncheck **Active** — agendev does not use webhook delivery |
+
+### 4b. Set repository permissions
+
+Under **Permissions & events > Repository permissions**, grant:
+
+| Permission | Access | Used for |
+| --- | --- | --- |
+| **Contents** | Read & write | Reading repo contents and pushing branches |
+| **Issues** | Read & write | Creating, labeling, and commenting on queue issues |
+| **Pull requests** | Read & write | Creating draft PRs, posting audit comments, managing reviewers |
+| **Metadata** | Read-only | Required by GitHub for all apps |
+
+No organization permissions, account permissions, or webhook event subscriptions are needed.
+
+### 4c. Note the App ID
+
+After creating the app you land on the app's **General** settings page. The numeric **App ID** is shown near the top. You will need this for the sandbox smoke configuration.
+
+### 4d. Generate and install the private key
+
+Scroll to **Private keys** on the same page and click **Generate a private key**. GitHub downloads a `.pem` file.
+
+Move it to the default location:
+
+```bash
+mkdir -p "$HOME/.agendev"
+mv ~/Downloads/<app-name>.*.private-key.pem "$HOME/.agendev/app-key.pem"
+chmod 600 "$HOME/.agendev/app-key.pem"
+```
+
+Or place it anywhere and export the path:
+
+```bash
+export AGENDEV_APP_KEY="/path/to/your-key.pem"
+```
+
+### 4e. Install the app
+
+From the app settings page, click **Install App** in the left sidebar. Select the owner (your user account or organization) where your target and sandbox repos live.
+
+Choose **Only select repositories** if you want to scope it narrowly, or **All repositories** if the app should cover any repo under that owner (required for lifecycle eval, which creates disposable repos).
+
+After installation, note the **Installation ID** from the URL. The URL will look like:
+
+```
+https://github.com/settings/installations/<installation-id>
+```
+
+For organization installs the URL is:
+
+```
+https://github.com/organizations/<org>/settings/installations/<installation-id>
+```
+
+### 4f. Verify the app is reachable
+
+```bash
+gh api "/apps/agendev" --jq '.id'
+```
+
+This should print the numeric App ID. If it fails, confirm the app name matches `identity.appSlug` in `config/agendev.json` (default: `agendev`).
+
+## 5. Prepare A Sandbox Repository
+
+The sandbox smoke lane runs against an existing repo that you control. It does not create or delete repos — it only creates and cleans up test issues, PRs, and labels.
+
+Create a throwaway repo or use an existing one:
+
+```bash
+gh repo create <owner>/agendev-sandbox --private --clone
+cd agendev-sandbox
+git commit --allow-empty -m "init" && git push
+cd "$AGENDEV_RUNTIME"
+```
+
+Make sure the GitHub App is installed on this repo (step 4e).
+
+You also need a GitHub user who is a collaborator on the sandbox repo, for the permission check. This can be your own username:
+
+```bash
+gh api "repos/<owner>/agendev-sandbox/collaborators/<your-username>/permission" --jq '.permission'
+# Should print "admin" or "write"
+```
+
+## 6. Configure Sandbox Smoke Environment
+
+Set these variables. All are required for the sandbox lane:
+
+```bash
+export AGENDEV_SMOKE=1
+export AGENDEV_SMOKE_REPO="<owner>/agendev-sandbox"
+export AGENDEV_SMOKE_APP_ID="<numeric-app-id-from-step-4c>"
+export AGENDEV_SMOKE_INSTALLATION_ID="<installation-id-from-step-4e>"
+export AGENDEV_SMOKE_APP_KEY="$HOME/.agendev/app-key.pem"
+export AGENDEV_SMOKE_PERMISSION_USER="<your-github-username>"
+export AGENDEV_SMOKE_PERMISSION_LEVEL="write"
+```
+
+You can put these in a file and source it:
+
+```bash
+# .env.smoke-sandbox (not checked in — already in .gitignore)
+AGENDEV_SMOKE=1
+AGENDEV_SMOKE_REPO=myorg/agendev-sandbox
+AGENDEV_SMOKE_APP_ID=123456
+AGENDEV_SMOKE_INSTALLATION_ID=78901234
+AGENDEV_SMOKE_APP_KEY=/Users/me/.agendev/app-key.pem
+AGENDEV_SMOKE_PERMISSION_USER=myusername
+AGENDEV_SMOKE_PERMISSION_LEVEL=write
+```
+
+```bash
+set -a; source .env.smoke-sandbox; set +a
+```
+
+## 7. Run Sandbox Smoke
+
+```bash
+scripts/smoke-sandbox.sh preflight
+```
+
+Preflight returns JSON listing what is `ready` and what is `missing`. Fix anything in `missing` before proceeding.
+
+Then run the actual smoke:
+
+```bash
+scripts/smoke-sandbox.sh run
+```
+
+This creates a test issue and PR in the sandbox repo, validates bot attribution, checks collaborator permissions, and cleans up after itself.
+
+Or run through Bats for structured test output:
+
+```bash
+bats test/live_smoke.bats test/live_smoke_sandbox.bats
+```
+
+## 8. Configure Lifecycle Eval Environment
+
+The lifecycle eval creates a disposable GitHub repo, runs `agendev init` and `agendev run` against it end-to-end, and then you clean it up.
+
+Required variables (in addition to `AGENDEV_SMOKE=1` from above):
+
+```bash
+export AGENDEV_SMOKE_LIFECYCLE=1
+export AGENDEV_SMOKE_REPO_OWNER="<owner-or-org>"
+export AGENDEV_SMOKE_APP_KEY="$HOME/.agendev/app-key.pem"
+```
+
+Optional overrides:
+
+```bash
+export AGENDEV_SMOKE_REPO_PREFIX="agendev-live-eval"   # default
+export AGENDEV_SMOKE_REPO_VISIBILITY="private"          # default
+export AGENDEV_SMOKE_RUN_ID="my-run-001"                # auto-generated if omitted
+```
+
+**Important**: The GitHub App must be installed with access to **all repositories** under the owner (step 4e), or you must manually grant the app access to each managed repo after it is created. Since lifecycle eval creates repos dynamically, "all repositories" is strongly recommended.
+
+## 9. Run Lifecycle Eval
+
+```bash
+scripts/smoke-lifecycle.sh preflight
+```
+
+Preflight checks: `AGENDEV_SMOKE`, `AGENDEV_SMOKE_REPO_OWNER`, `AGENDEV_SMOKE_APP_KEY`, operator `gh` auth, and that `claude`, `codex`, `node`, and `npm` are all on `PATH`.
+
+Then run:
+
+```bash
+scripts/smoke-lifecycle.sh run
+```
+
+This will:
+
+1. Create a disposable repo under `<owner>/<prefix>-<run_id>`
+2. Push a small seeded target from `test/fixtures/live_smoke_lifecycle_target/`
+3. Run `agendev init` against it
+4. Seed a 3-issue dependent chain from `test/fixtures/live_smoke_lifecycle_issues.json`
+5. Run `agendev run` in queue mode
+6. Return structured JSON with completion metrics
+
+Or run through Bats:
+
+```bash
+bats test/live_smoke.bats test/live_smoke_lifecycle.bats
+```
+
+Inspect artifacts after the run:
+
+```bash
+ls .agendev/live-smoke/runs/<run_id>/
+# init.log  run.log  state/  summary.json
+```
+
+## 10. Clean Up Lifecycle Repos
+
+Managed repos are tracked in `.agendev/live-smoke/managed-repos.json`. Clean up explicitly:
+
+```bash
+# Single repo
+scripts/smoke-lifecycle.sh cleanup --repo <owner>/<repo-name>
+
+# By run ID
+scripts/smoke-lifecycle.sh cleanup --run-id <run_id>
+
+# Everything tracked
+scripts/smoke-lifecycle.sh cleanup --all
+```
+
+Your `gh` token must have the `delete_repo` scope (step 3).
+
+## Troubleshooting
+
+### Preflight says `gh` auth is missing
+
+Run `gh auth status`. If expired, run `gh auth login` again.
+
+### App ID or installation ID lookup fails
+
+- Confirm the app name matches `identity.appSlug` in `config/agendev.json` (default: `agendev`)
+- Confirm the app is installed on the correct owner/org
+- Try: `gh api "/apps/agendev" --jq '.id'` and `gh api "/repos/<owner>/<repo>/installation" --jq '.id'`
+
+### Private key errors
+
+- Check the file exists at the path in `AGENDEV_SMOKE_APP_KEY` or `$HOME/.agendev/app-key.pem`
+- Check permissions: `ls -la "$HOME/.agendev/app-key.pem"` (should be `600`)
+- Confirm the key belongs to the correct app (regenerate if unsure)
+
+### Lifecycle init succeeds but `agendev run` fails
+
+- Check `.agendev/live-smoke/runs/<run_id>/init.log` and `run.log`
+- Confirm `claude` and `codex` are on `PATH` and working
+- Confirm `node` and `npm` are available
+
+### Cleanup fails with permission error
+
+Run `gh auth refresh -s delete_repo` and retry.
+
+### Sandbox smoke creates resources but doesn't clean up
+
+The sandbox script cleans up on success. If it fails mid-run, manually check the sandbox repo for leftover issues/PRs with `agendev` in the title and close them.
+
+## Related Docs
+
+- [Operator workflow](./operator-workflow.md) — day-to-day agendev commands (init, plan, run, report, maintenance)
+- [Live smoke tests](../live-smoke.md) — lane details, output formats, and managed repo model
+- [Configuration and auth reference](../reference/config-auth.md) — full variable and identity reference

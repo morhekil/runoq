@@ -220,4 +220,4 @@ If neither file is present, maintenance can still run, but partition quality may
 - [CLI reference](./cli.md)
 - [Configuration and auth reference](./config-auth.md)
 - [Script contract reference](./script-contracts.md)
-- [Operator quickstart](../operations/quickstart.md)
+- [Operator workflow](../operations/operator-workflow.md)

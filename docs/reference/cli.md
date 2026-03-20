@@ -224,6 +224,6 @@ agendev maintenance
 ## Related Docs
 
 - [README](../../README.md)
-- [Operator quickstart](../operations/quickstart.md)
+- [Operator workflow](../operations/operator-workflow.md)
 - [Architecture overview](../architecture/overview.md)
 - [Documentation backlog](../documentation-backlog.md)
