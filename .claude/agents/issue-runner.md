@@ -93,6 +93,14 @@ Store the baseline hash and the new HEAD hash — these define the diff range fo
 
 If codex exits without producing any new commits, that is a verification failure — proceed to Step 3 (verification will catch it).
 
+Materialize the normalized developer payload from the captured codex log before verification:
+
+```bash
+"$AGENDEV_ROOT/scripts/state.sh" validate-payload <worktree> <baseline-hash> <log-dir>/round-<N>-dev.md > <log-dir>/round-<N>-payload.json
+```
+
+Use that generated JSON file as the ONLY verification payload. Never hand-write or reconstruct payload JSON yourself inside the prompt.
+
 Track token usage from codex output if available and add to `cumulativeTokens`. If `cumulativeTokens >= maxTokenBudget`, skip further rounds and proceed to Step 5 with a budget-exhaustion result.
 
 ### Step 3 — Verification
@@ -100,7 +108,7 @@ Track token usage from codex output if available and add to `cumulativeTokens`. 
 Run deterministic verification before any review:
 
 ```bash
-"$AGENDEV_ROOT/scripts/verify.sh" round <worktree> <branch> <baseline-hash> <payload-file>
+"$AGENDEV_ROOT/scripts/verify.sh" round <worktree> <branch> <baseline-hash> <log-dir>/round-<N>-payload.json
 ```
 
 Parse the JSON output. If `review_allowed` is false:
