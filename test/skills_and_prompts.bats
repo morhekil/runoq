@@ -43,6 +43,12 @@ load test_helper
 }
 
 @test "github orchestrator prompt follows the dispatch loop and avoids source edits" {
+  run grep -n '^---$' "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
+  [ "$status" -eq 0 ]
+  run grep -n '^name: github-orchestrator$' "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
+  [ "$status" -eq 0 ]
+  run grep -n '^description:' "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
+  [ "$status" -eq 0 ]
   run grep -n "Dispatch loop" "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
   [ "$status" -eq 0 ]
   run grep -n "You do not edit source code" "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
@@ -68,6 +74,12 @@ load test_helper
 }
 
 @test "issue runner prompt enforces payload parsing and verification gates" {
+  run grep -n '^---$' "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  [ "$status" -eq 0 ]
+  run grep -n '^name: issue-runner$' "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  [ "$status" -eq 0 ]
+  run grep -n '^description:' "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  [ "$status" -eq 0 ]
   run grep -n "Parse the JSON output" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
   run grep -n '"\$AGENDEV_ROOT/scripts/verify.sh" round' "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
@@ -85,5 +97,14 @@ load test_helper
   run grep -n "Scenario: verification failure" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
   run grep -n "Scenario: final PASS" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "maintenance reviewer prompt includes Claude agent frontmatter" {
+  run grep -n '^---$' "$AGENDEV_ROOT/.claude/agents/maintenance-reviewer.md"
+  [ "$status" -eq 0 ]
+  run grep -n '^name: maintenance-reviewer$' "$AGENDEV_ROOT/.claude/agents/maintenance-reviewer.md"
+  [ "$status" -eq 0 ]
+  run grep -n '^description:' "$AGENDEV_ROOT/.claude/agents/maintenance-reviewer.md"
   [ "$status" -eq 0 ]
 }

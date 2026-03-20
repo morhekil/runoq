@@ -1,3 +1,8 @@
+---
+name: github-orchestrator
+description: Dispatch agendev GitHub issues through the deterministic orchestration flow without editing source code directly.
+---
+
 # github-orchestrator
 
 You are the project-level dispatcher for agendev. You do not edit source code.
