@@ -52,6 +52,39 @@ load test_helper
   grep -F "[smoke-sandbox] sandbox preflight is ready" "$stderr_file"
 }
 
+@test "live smoke run surfaces sandbox clone failures" {
+  key_path="$TEST_TMPDIR/app-key.pem"
+  git_helper_dir="$TEST_TMPDIR/git-bin"
+  real_git="$(command -v git)"
+  printf 'not-a-real-key\n' >"$key_path"
+  mkdir -p "$git_helper_dir"
+  cat >"$git_helper_dir/git" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${1:-}" == "clone" ]]; then
+  printf 'fatal: simulated clone failure\n' >&2
+  exit 128
+fi
+exec "$real_git" "\$@"
+EOF
+  chmod +x "$git_helper_dir/git"
+
+  export PATH="$git_helper_dir:$PATH"
+  export RUNOQ_SMOKE=1
+  export RUNOQ_SMOKE_REPO="owner/sandbox"
+  export RUNOQ_SMOKE_APP_ID="123"
+  export RUNOQ_SMOKE_INSTALLATION_ID="456"
+  export RUNOQ_SMOKE_APP_KEY="$key_path"
+  export RUNOQ_SMOKE_PERMISSION_USER="sandbox-user"
+  export RUNOQ_TEST_GH_TOKEN="test-token"
+
+  run "$RUNOQ_ROOT/scripts/smoke-sandbox.sh" run
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"fatal: simulated clone failure"* ]]
+  [[ "$output" == *"Failed to clone sandbox repo owner/sandbox"* ]]
+}
+
 @test "live lifecycle smoke preflight requires explicit managed repo configuration" {
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<'EOF'

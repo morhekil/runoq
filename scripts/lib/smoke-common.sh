@@ -84,6 +84,24 @@ smoke_log() {
   printf '[%s] %s\n' "$scope" "$*" >&2
 }
 
+run_quiet_command() {
+  local description="$1"
+  shift
+  local output status
+
+  set +e
+  output="$("$@" 2>&1)"
+  status="$?"
+  set -e
+
+  if [[ "$status" -ne 0 ]]; then
+    if [[ -n "$output" ]]; then
+      printf '%s\n' "$output" >&2
+    fi
+    runoq::die "${description} failed with exit code ${status}."
+  fi
+}
+
 smoke_gh_bin() {
   printf '%s\n' "${GH_BIN:-gh}"
 }
@@ -904,7 +922,8 @@ run_smoke() {
   smoke_log "minting a GitHub App installation token"
   eval "$("$root/scripts/gh-auth.sh" export-token)"
   smoke_log "cloning ${repo} into ${clone_dir}"
-  git clone "https://x-access-token:${GH_TOKEN}@github.com/${repo}.git" "$clone_dir" >/dev/null 2>&1
+  run_quiet_command "Failed to clone sandbox repo ${repo} into ${clone_dir}" \
+    git clone "https://x-access-token:${GH_TOKEN}@github.com/${repo}.git" "$clone_dir"
 
   export TARGET_ROOT="$clone_dir"
   export REPO="$repo"
@@ -947,7 +966,8 @@ run_smoke() {
   RUNOQ_SMOKE_CLEANUP_BRANCH="$branch"
 
   smoke_log "creating branch ${branch} from ${current_branch}"
-  git -C "$clone_dir" checkout -b "$branch" "origin/${current_branch}" >/dev/null 2>&1
+  run_quiet_command "Failed to create sandbox branch ${branch} from ${current_branch}" \
+    git -C "$clone_dir" checkout -b "$branch" "origin/${current_branch}"
   git -C "$clone_dir" config user.name "runoq live smoke"
   git -C "$clone_dir" config user.email "runoq-smoke@example.com"
   mkdir -p "$clone_dir/.runoq/smoke"
@@ -957,7 +977,8 @@ run_smoke() {
   git -C "$clone_dir" commit -m "runoq live smoke ${run_id}" >/dev/null
   smoke_log "committed smoke marker ${smoke_file}"
   smoke_log "pushing branch ${branch}"
-  git -C "$clone_dir" push origin "$branch" >/dev/null 2>&1
+  run_quiet_command "Failed to push sandbox branch ${branch}" \
+    git -C "$clone_dir" push origin "$branch"
 
   pr_title="runoq live smoke ${run_id}"
   smoke_log "opening PR '${pr_title}' for issue #${issue_number}"
