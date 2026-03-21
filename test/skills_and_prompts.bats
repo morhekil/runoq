@@ -65,6 +65,12 @@ load test_helper
   [ "$status" -eq 0 ]
   run grep -n "Do NOT inline a replacement workflow" "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
   [ "$status" -eq 0 ]
+  run grep -n 'subagent_type: "diff-reviewer"' "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
+  [ "$status" -eq 0 ]
+  run grep -n "Own the Claude diff-reviewer subagent yourself" "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
+  [ "$status" -eq 0 ]
+  run grep -n "feed only the parsed checklist block back into the next" "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
+  [ "$status" -eq 0 ]
   run grep -n "Scenario: PASS" "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
   [ "$status" -eq 0 ]
   run grep -n "Scenario: FAIL" "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md"
@@ -96,25 +102,27 @@ load test_helper
   [ "$status" -eq 0 ]
   run grep -n "agendev:payload:codex-return" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
+  run grep -n "agendev:payload:issue-runner" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  [ "$status" -eq 0 ]
   run grep -n '"commits_pushed": \["<sha>", "\.\.\."\]' "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
   run grep -n "Make the JSON the LAST fenced block" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
-  run grep -n "Your ONLY tools are: Bash (to run codex and git commands), Agent" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  run grep -n "Your ONLY tools are: Bash (to run codex and git commands), Write" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
-  run grep -n 'subagent_type: "diff-reviewer"' "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  run grep -n "Do NOT try to spawn or simulate a reviewer" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
-  run grep -n '`mode`: `bypassPermissions`' "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  run grep -n "status\": \"review_ready\" | \"fail\" | \"budget_exhausted\"" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
-  run grep -n "Use the \`Agent\` tool directly" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  run grep -n "Verified diffs are handed back to" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
-  run grep -n "Do NOT call \`ToolSearch\`, \`Task\`, or any other tool-discovery helper" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  run grep -n "Return ONLY this marked JSON payload as your final structured result" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
-  run grep -n "Do NOT review the diff yourself, do NOT fall back to codex as reviewer" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  run grep -n "Do NOT run diff review yourself" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
-  run grep -n "typed review payload needed to start the run" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  run grep -n "verification retry" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
-  run grep -n "the verdict block cannot be parsed, stop and return FAIL with blocker \`diff reviewer unavailable\`" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  run grep -n "review handoff" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
   run grep -n "Parse the JSON output" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
@@ -124,17 +132,21 @@ load test_helper
   [ "$status" -eq 0 ]
   run grep -n "maxTokenBudget" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
-  run grep -n "direct consumers" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  run grep -n "expand the review file list beyond the directly changed files" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
   run grep -n '"\$AGENDEV_ROOT/scripts/gh-pr-lifecycle.sh" read-actionable' "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
-  run grep -n "Scenario: iterate" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  run grep -n "Scenario: verification retry" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
   run grep -n "Scenario: stuck" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
-  run grep -n "Scenario: verification failure" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  run grep -n "You never read the round-N files" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
-  run grep -n "Scenario: final PASS" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  run grep -n "Read only actionable PR comments via" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  [ "$status" -eq 0 ]
+  run grep -n "Do NOT try to spawn or simulate a reviewer" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  [ "$status" -eq 0 ]
+  run grep -n "Scenario: budget exhaustion" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
 }
 
