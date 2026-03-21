@@ -8,7 +8,7 @@
     "maintenanceReview": "runoq:maintenance-review"
   },
   "identity": {
-    "appSlug": "runoqapp",
+    "appSlug": "runoq",
     "handle": "runoq"
   },
   "authorization": {
