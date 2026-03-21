@@ -5,7 +5,7 @@ description: Coordinate the develop-review loop for one GitHub issue by delegati
 
 # issue-runner
 
-You are a **dispatcher only**. You manage a develop-review loop by delegating ALL implementation work to codex and ALL review work to a fresh codex reviewer subprocess. You extend this core loop with GitHub-aware verification and PR lifecycle contracts.
+You are a **dispatcher only**. You manage a develop-review loop by delegating ALL implementation work to codex and ALL review work to a Claude Code diff-reviewer subagent. You extend this core loop with GitHub-aware verification and PR lifecycle contracts.
 
 ## Critical constraints — read before doing ANYTHING
 
@@ -13,7 +13,7 @@ You are a **dispatcher only**. You manage a develop-review loop by delegating AL
 - You **NEVER** review, analyze, or evaluate code yourself.
 - You **NEVER** use Glob, Grep, or Read on source/test files. Only on spec/plan files, AGENTS.md, and agendev config.
 - You **NEVER** modify code. You are not a developer.
-- Your ONLY tools are: Bash (to run codex and git commands), Write (to write log files), Read (ONLY for spec/plan/AGENTS.md/config files), and the pr-lifecycle skill (for PR mutations).
+- Your ONLY tools are: Bash (to run codex and git commands), Agent (to spawn the reviewer), Write (to write log files), Read (ONLY for spec/plan/AGENTS.md/config files), and the pr-lifecycle skill (for PR mutations).
 - If you catch yourself about to read a `.ts`, `.js`, `.py`, or other source file — STOP. That is the reviewer's job.
 
 ## Input
@@ -185,47 +185,43 @@ The resulting list of **related files** is passed to the diff reviewer alongside
 
 ### Step 4 — Diff review
 
-Run a **fresh codex reviewer subprocess** via Bash. Execute from within the worktree and capture the full review to `<log-dir>/round-<N>-diff-review.md`.
+Spawn a **new Agent subagent** (fresh context every round) with `subagent_type: "diff-reviewer"`. Use the `Agent` tool directly. Do NOT spend turns searching for team, task, messaging, or deferred tools first.
+The `Agent` tool is already available in this environment. Do NOT call `ToolSearch`, `Task`, or any other tool-discovery helper before spawning the reviewer. Call `Agent` immediately.
+If the direct `Agent` call itself returns an error, stop and return FAIL with blocker `diff reviewer unavailable`. Do NOT review the diff yourself, do NOT fall back to codex as reviewer, and do NOT invent a replacement workflow.
 
-Use:
+Agent tool fields:
+- `name`: `diff-review-round-<N>`
+- `description`: `Review round <N> diff for issue #<issueNumber>`
+- `subagent_type`: `diff-reviewer`
+- `mode`: `bypassPermissions`
+- `prompt`:
 
-````bash
-cd <worktree> && codex exec --dangerously-bypass-approvals-and-sandbox "You are a code reviewer. Perform a diff-scoped review of the changes from <baseline-hash> to <head-hash>.
+```json
+{
+  "issueNumber": <issueNumber>,
+  "round": <N>,
+  "worktree": "<worktree>",
+  "baselineHash": "<baseline-hash>",
+  "headHash": "<head-hash>",
+  "reviewLogPath": "<log-dir>/round-<N>-diff-review.md",
+  "specRequirements": "<paste the original issue requirements inline, not just a URL>",
+  "guidelines": "<guidelines list>",
+  "changedFiles": "<file list from verify.sh>",
+  "relatedFiles": "<related file list from Step 3b>",
+  "previousChecklist": "<paste previous checklist, or \"None — first round\">"
+}
+```
 
-The developer may have produced multiple commits in this round. Review the COMBINED diff across all of them — the overall change is what matters, not individual commits.
+Do not preface this with tool-discovery or capability checks. Spawn the reviewer immediately with the `Agent` tool call above.
+The Agent tool prompt must contain ONLY the typed review payload needed to start the run. Do NOT inline a replacement review workflow, rubric text, or bespoke extra instructions into the Agent tool prompt.
 
-Run: git diff <baseline-hash>..<head-hash>
-
-Read the diff-review rubric at "$AGENDEV_ROOT/.claude/skills/diff-review/SKILL.md" and follow it.
-
-Inputs:
-- Spec requirements: <paste the original issue requirements inline, not just a URL>
-- Guidelines: <guidelines list>
-- Changed file list (verified): <file list from verify.sh>
-- Related files (consumers of changed interfaces): <related file list from Step 3b>
-- Previous checklist: <paste previous checklist, or "None — first round">
-
-Requirements:
-1. Review only the combined diff plus any related files needed for breakage detection.
-2. Write the FULL review report to stdout so it is captured in the log file.
-3. End with this exact block at the very end:
-   VERDICT: PASS or ITERATE
-   SCORE: NN/40
-   CHECKLIST:
-   - [ ] item 1
-   - [ ] item 2
-   ...
-
-VERDICT is PASS only if: no issues found in the diff scope.
-Otherwise VERDICT is ITERATE and CHECKLIST must list all actionable items." 2>&1 | tee <log-dir>/round-<N>-diff-review.md
-````
-
-After codex exits, parse the verdict block with Bash from the captured review file. Do NOT read the whole file into your context. Extract only:
+After the reviewer returns, parse the verdict block with Bash from the captured review file. Do NOT read the whole file into your context. Extract only:
+- `REVIEW-TYPE:` line
 - `VERDICT:` line
 - `SCORE:` line
 - the trailing `CHECKLIST:` block
 
-If the reviewer subprocess exits non-zero or the verdict block cannot be parsed, stop and return FAIL with blocker `diff reviewer unavailable`.
+If the verdict block cannot be parsed, stop and return FAIL with blocker `diff reviewer unavailable`.
 
 Post the diff-review result as a PR comment via `pr-lifecycle` skill.
 
@@ -305,7 +301,7 @@ RESULT:
 
 - **Owner (you)**: Hold only the spec path, baseline/HEAD commit hashes, commit subject lines, verdicts, scores, feedback checklists, verification results, and token counts. NEVER read diffs, full source code, dev log files, or review files into your context. Your job is dispatch, not analysis.
 - **Developer (codex)**: Fresh process per round. Receives spec path + feedback checklist. It can read the previous review file itself if it needs detail.
-- **Diff Reviewer (codex subprocess)**: Fresh `codex exec` per round. Reads the combined diff across all commits in the round (`baseline..HEAD`) plus related files for context. Writes diff review to log file, returns only verdict + score + checklist to you.
+- **Diff Reviewer (Claude subagent)**: Fresh `diff-reviewer` Agent subagent per round. Reads the combined diff across all commits in the round (`baseline..HEAD`) plus related files for context. Writes diff review to log file, returns only verdict + score + checklist to you.
 
 ## PR lifecycle integration
 
@@ -322,7 +318,7 @@ Directory: `log/issue-<N>-{YYYY-MM-DD-HHMMSS}/`
 | ------------------------ | ------------------------------------- | ------------------------------------------------------------------------ |
 | `index.md`               | Owner (you)                           | Round-by-round timeline: commits, verification, score, verdict, key issues, tokens |
 | `round-N-dev.md`         | Captured from codex stdout via `tee`  | Full developer output for round N                                        |
-| `round-N-diff-review.md` | Captured from codex reviewer stdout via `tee` | Diff-scoped PERFECT-D review for round N                                 |
+| `round-N-diff-review.md` | Diff reviewer subagent via Write tool | Diff-scoped PERFECT-D review for round N                                 |
 
 You (owner) never read the round-N files. They exist for human review and for codex to reference in subsequent rounds.
 

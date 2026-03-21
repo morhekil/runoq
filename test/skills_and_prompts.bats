@@ -100,13 +100,19 @@ load test_helper
   [ "$status" -eq 0 ]
   run grep -n "Make the JSON the LAST fenced block" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
-  run grep -n "Your ONLY tools are: Bash (to run codex and git commands), Write" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  run grep -n "Your ONLY tools are: Bash (to run codex and git commands), Agent" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
-  run grep -n "fresh codex reviewer subprocess" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  run grep -n 'subagent_type: "diff-reviewer"' "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
-  run grep -n "codex exec --dangerously-bypass-approvals-and-sandbox \"You are a code reviewer" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  run grep -n '`mode`: `bypassPermissions`' "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
-  run grep -n 'Read the diff-review rubric at "$AGENDEV_ROOT/.claude/skills/diff-review/SKILL.md"' "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  run grep -n "Use the \`Agent\` tool directly" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  [ "$status" -eq 0 ]
+  run grep -n "Do NOT call \`ToolSearch\`, \`Task\`, or any other tool-discovery helper" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  [ "$status" -eq 0 ]
+  run grep -n "Do NOT review the diff yourself, do NOT fall back to codex as reviewer" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  [ "$status" -eq 0 ]
+  run grep -n "typed review payload needed to start the run" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
   run grep -n "the verdict block cannot be parsed, stop and return FAIL with blocker \`diff reviewer unavailable\`" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
@@ -129,6 +135,23 @@ load test_helper
   run grep -n "Scenario: verification failure" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
   run grep -n "Scenario: final PASS" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "diff reviewer prompt includes Claude agent frontmatter and review-only rules" {
+  run grep -n '^---$' "$AGENDEV_ROOT/.claude/agents/diff-reviewer.md"
+  [ "$status" -eq 0 ]
+  run grep -n '^name: diff-reviewer$' "$AGENDEV_ROOT/.claude/agents/diff-reviewer.md"
+  [ "$status" -eq 0 ]
+  run grep -n '^description:' "$AGENDEV_ROOT/.claude/agents/diff-reviewer.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'Read `"\$AGENDEV_ROOT/.claude/skills/diff-review/SKILL.md"` and follow it' "$AGENDEV_ROOT/.claude/agents/diff-reviewer.md"
+  [ "$status" -eq 0 ]
+  run grep -n "You \\*\\*NEVER\\*\\* edit source code" "$AGENDEV_ROOT/.claude/agents/diff-reviewer.md"
+  [ "$status" -eq 0 ]
+  run grep -n "You \\*\\*MUST\\*\\* write the full review report to \`reviewLogPath\`" "$AGENDEV_ROOT/.claude/agents/diff-reviewer.md"
+  [ "$status" -eq 0 ]
+  run grep -n '^   REVIEW-TYPE: diff$' "$AGENDEV_ROOT/.claude/agents/diff-reviewer.md"
   [ "$status" -eq 0 ]
 }
 
