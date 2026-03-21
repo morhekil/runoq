@@ -346,3 +346,34 @@ EOF
   [ "$(printf '%s' "$output" | jq -r '.failures | map(select(. == "Not all seeded issues reached DONE.")) | length')" = "0" ]
   [ "$(printf '%s' "$output" | jq -r '.failures | map(select(. == "Not all seeded issues completed in one round.")) | length')" = "0" ]
 }
+
+@test "copy_state_artifacts collects sibling worktree breadcrumbs for lifecycle reporting" {
+  smoke_root="$TEST_TMPDIR/live-smoke"
+  target_dir="$smoke_root/target"
+  artifacts_dir="$TEST_TMPDIR/artifacts"
+  worktree_dir="$smoke_root/agendev-wt-2"
+  mkdir -p "$target_dir" "$worktree_dir/.agendev/state" "$artifacts_dir"
+  cat >"$worktree_dir/.agendev/state/2.json" <<'EOF'
+{
+  "issueNumber": 2,
+  "status": "done",
+  "rounds": 1,
+  "result": { "verdict": "PASS" }
+}
+EOF
+
+  source "$AGENDEV_ROOT/scripts/lib/smoke-common.sh"
+  copy_state_artifacts "$target_dir" "$artifacts_dir"
+  states="$(read_state_files_json_from_dir "$artifacts_dir/state")"
+  report="$(
+    TARGET_ROOT="$target_dir" \
+    AGENDEV_STATE_DIR="$artifacts_dir/state" \
+    "$AGENDEV_ROOT/scripts/report.sh" summary
+  )"
+
+  [ "$(printf '%s' "$states" | jq -r 'length')" = "1" ]
+  [ "$(printf '%s' "$states" | jq -r '.[0].issue')" = "2" ]
+  [ "$(printf '%s' "$states" | jq -r '.[0].phase')" = "DONE" ]
+  [ "$(printf '%s' "$report" | jq -r '.issues')" = "1" ]
+  [ "$(printf '%s' "$report" | jq -r '.pass')" = "1" ]
+}

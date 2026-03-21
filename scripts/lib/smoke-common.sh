@@ -668,17 +668,27 @@ seed_lifecycle_issues() {
 copy_state_artifacts() {
   local target_dir="$1"
   local artifacts_dir="$2"
-  if [[ -d "$target_dir/.agendev/state" ]]; then
-    rm -rf "$artifacts_dir/state"
-    mkdir -p "$artifacts_dir"
-    cp -R "$target_dir/.agendev/state" "$artifacts_dir/state"
+  local parent_dir state_dir file
+  parent_dir="$(dirname "$target_dir")"
+
+  rm -rf "$artifacts_dir/state"
+  mkdir -p "$artifacts_dir/state"
+
+  while IFS= read -r state_dir; do
+    [[ -d "$state_dir" ]] || continue
+    while IFS= read -r file; do
+      [[ -n "$file" ]] || continue
+      cp "$file" "$artifacts_dir/state/"
+    done < <(find "$state_dir" -maxdepth 1 -type f -name '*.json' | sort)
+  done < <(find "$parent_dir" -maxdepth 3 -type d -path '*/.agendev/state' | sort)
+
+  if [[ -z "$(find "$artifacts_dir/state" -maxdepth 1 -type f -name '*.json' -print -quit)" ]]; then
+    rmdir "$artifacts_dir/state" 2>/dev/null || true
   fi
 }
 
-read_state_files_json() {
-  local target_dir="$1"
-  local state_dir
-  state_dir="$target_dir/.agendev/state"
+read_state_files_json_from_dir() {
+  local state_dir="$1"
   if [[ ! -d "$state_dir" ]]; then
     printf '[]\n'
     return
@@ -721,6 +731,11 @@ read_state_files_json() {
       ' "$file"
     fi
   done | jq -s '.'
+}
+
+read_state_files_json() {
+  local target_dir="$1"
+  read_state_files_json_from_dir "$target_dir/.agendev/state"
 }
 
 fetch_issue_statuses_json() {
@@ -1108,7 +1123,7 @@ run_lifecycle() {
 
   smoke_log "copying state artifacts into ${artifacts_dir}"
   copy_state_artifacts "$target_dir" "$artifacts_dir"
-  state_files_json="$(read_state_files_json "$target_dir")"
+  state_files_json="$(read_state_files_json_from_dir "$artifacts_dir/state")"
   issue_numbers_json="$(printf '%s' "$seeded_issues_json" | jq '[.[].number]')"
   issue_statuses_json='[]'
   pr_statuses_json='[]'
@@ -1119,10 +1134,10 @@ run_lifecycle() {
     printf '%s\n' "$pr_statuses_json" >"$artifacts_dir/prs.json"
   fi
 
-  if [[ -d "$target_dir/.agendev/state" ]]; then
+  if [[ -d "$artifacts_dir/state" ]]; then
     report_summary_json="$(
       TARGET_ROOT="$target_dir" \
-      AGENDEV_STATE_DIR="$target_dir/.agendev/state" \
+      AGENDEV_STATE_DIR="$artifacts_dir/state" \
       "$root/scripts/report.sh" summary
     )"
   else
