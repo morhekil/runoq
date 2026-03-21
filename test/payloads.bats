@@ -113,3 +113,44 @@ wrap_payload_fixture() {
   [[ "$output" != *'unknown_field'* ]]
   [[ "$output" == *'"tests_run": false'* ]]
 }
+
+@test "validate-payload uses ground truth for added files instead of duplicated files_changed entries" {
+  base_repo="$TEST_TMPDIR/repo"
+  base_sha="$(setup_payload_repo "$base_repo")"
+  printf 'console.log("cli")\n' >"$base_repo/src/cli.ts"
+  git -C "$base_repo" add src/cli.ts
+  git -C "$base_repo" commit -m "Add cli" >/dev/null
+
+  payload_file="$TEST_TMPDIR/added-file-output.txt"
+  cat >"$payload_file" <<'EOF'
+<!-- agendev:payload:codex-return -->
+```json
+{
+  "status": "completed",
+  "commits_pushed": ["wrongsha"],
+  "commit_range": "wrongsha..wrongsha",
+  "files_changed": ["src/cli.ts"],
+  "files_added": ["src/cli.ts"],
+  "files_deleted": [],
+  "tests_run": true,
+  "tests_passed": true,
+  "test_summary": "ok",
+  "build_passed": true,
+  "blockers": [],
+  "notes": "ok"
+}
+```
+EOF
+
+  run "$AGENDEV_ROOT/scripts/state.sh" validate-payload "$base_repo" "$base_sha" "$payload_file"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"files_changed": []'* ]]
+  [[ "$output" == *'"files_added": ['* ]]
+  [[ "$output" == *'"src/cli.ts"'* ]]
+  [[ "$output" == *'"patched_fields": ['* ]]
+  [[ "$output" == *'"files_changed"'* ]]
+  [[ "$output" == *'"commits_pushed"'* ]]
+  [[ "$output" == *'"discrepancies": ['* ]]
+  [[ "$output" == *'"files_changed_mismatch"'* ]]
+}

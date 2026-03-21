@@ -204,14 +204,20 @@ normalize_payload() {
         if ($value | type) == "boolean" then $value else $fallback end;
       def valid_status($value):
         if ($value | type) == "string" and ($value == "completed" or $value == "failed" or $value == "stuck") then $value else "failed" end;
+      def truth_backed_string_array($value; $fallback):
+        if ($value | type) == "array" and all($value[]?; type == "string") and $value == $fallback then $value else $fallback end;
+      def truth_backed_string($value; $fallback):
+        if ($value | type) == "string" and $value == $fallback then $value else $fallback end;
+      def truth_backed_mismatch($value; $fallback):
+        ($value | type) != ($fallback | type) or $value != $fallback;
 
       {
         status: valid_status(p.status),
-        commits_pushed: string_array_or(p.commits_pushed; truth.commits_pushed),
-        commit_range: string_or(p.commit_range; truth.commit_range),
-        files_changed: string_array_or(p.files_changed; truth.files_changed),
-        files_added: string_array_or(p.files_added; truth.files_added),
-        files_deleted: string_array_or(p.files_deleted; truth.files_deleted),
+        commits_pushed: truth_backed_string_array(p.commits_pushed; truth.commits_pushed),
+        commit_range: truth_backed_string(p.commit_range; truth.commit_range),
+        files_changed: truth_backed_string_array(p.files_changed; truth.files_changed),
+        files_added: truth_backed_string_array(p.files_added; truth.files_added),
+        files_deleted: truth_backed_string_array(p.files_deleted; truth.files_deleted),
         tests_run: bool_or(p.tests_run; false),
         tests_passed: bool_or(p.tests_passed; false),
         test_summary: string_or(p.test_summary; ""),
@@ -221,11 +227,11 @@ normalize_payload() {
         payload_source: "patched",
         patched_fields: [
           if (p.status | type != "string") or (p.status != "completed" and p.status != "failed" and p.status != "stuck") then "status" else empty end,
-          if (p.commits_pushed | type != "array") then "commits_pushed" else empty end,
-          if (p.commit_range | type != "string") then "commit_range" else empty end,
-          if (p.files_changed | type != "array") then "files_changed" else empty end,
-          if (p.files_added | type != "array") then "files_added" else empty end,
-          if (p.files_deleted | type != "array") then "files_deleted" else empty end,
+          if truth_backed_mismatch(p.commits_pushed; truth.commits_pushed) then "commits_pushed" else empty end,
+          if truth_backed_mismatch(p.commit_range; truth.commit_range) then "commit_range" else empty end,
+          if truth_backed_mismatch(p.files_changed; truth.files_changed) then "files_changed" else empty end,
+          if truth_backed_mismatch(p.files_added; truth.files_added) then "files_added" else empty end,
+          if truth_backed_mismatch(p.files_deleted; truth.files_deleted) then "files_deleted" else empty end,
           if (p.tests_run | type != "boolean") then "tests_run" else empty end,
           if (p.tests_passed | type != "boolean") then "tests_passed" else empty end,
           if (p.test_summary | type != "string") then "test_summary" else empty end,
@@ -235,7 +241,13 @@ normalize_payload() {
           if ((p | has("blockers") | not)) then "blockers" else empty end,
           if ((p | has("notes") | not)) then "notes" else empty end
         ] | unique | sort,
-        discrepancies: []
+        discrepancies: [
+          if truth_backed_mismatch(p.commits_pushed; truth.commits_pushed) then "commits_pushed_mismatch" else empty end,
+          if truth_backed_mismatch(p.commit_range; truth.commit_range) then "commit_range_mismatch" else empty end,
+          if truth_backed_mismatch(p.files_changed; truth.files_changed) then "files_changed_mismatch" else empty end,
+          if truth_backed_mismatch(p.files_added; truth.files_added) then "files_added_mismatch" else empty end,
+          if truth_backed_mismatch(p.files_deleted; truth.files_deleted) then "files_deleted_mismatch" else empty end
+        ] | unique | sort
       }
     '
 }
