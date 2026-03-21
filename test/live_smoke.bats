@@ -85,6 +85,43 @@ EOF
   [[ "$output" == *"Failed to clone sandbox repo owner/sandbox"* ]]
 }
 
+@test "live smoke resolves the default branch from the cloned remote" {
+  remote_dir="$TEST_TMPDIR/remote.git"
+  local_dir="$TEST_TMPDIR/local"
+  make_remote_backed_repo "$remote_dir" "$local_dir"
+
+  run bash -lc '
+    set -euo pipefail
+    export RUNOQ_ROOT="'"$RUNOQ_ROOT"'"
+    export RUNOQ_CONFIG="'"$RUNOQ_CONFIG"'"
+    source "'"$RUNOQ_ROOT"'/scripts/lib/smoke-common.sh"
+    default_branch_from_clone "'"$local_dir"'"
+  '
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "main" ]
+}
+
+@test "live smoke bootstraps an empty default branch" {
+  remote_dir="$TEST_TMPDIR/remote.git"
+  local_dir="$TEST_TMPDIR/local"
+  git init --bare "$remote_dir" >/dev/null
+  git -C "$remote_dir" symbolic-ref HEAD refs/heads/main
+  git clone "$remote_dir" "$local_dir" >/dev/null 2>&1
+
+  run bash -lc '
+    set -euo pipefail
+    export RUNOQ_ROOT="'"$RUNOQ_ROOT"'"
+    export RUNOQ_CONFIG="'"$RUNOQ_CONFIG"'"
+    source "'"$RUNOQ_ROOT"'/scripts/lib/smoke-common.sh"
+    ensure_default_branch_commit "'"$local_dir"'" owner/sandbox main
+  '
+
+  [ "$status" -eq 0 ]
+  run git --git-dir "$remote_dir" rev-parse --verify --quiet refs/heads/main^{commit}
+  [ "$status" -eq 0 ]
+}
+
 @test "live lifecycle smoke preflight requires explicit managed repo configuration" {
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<'EOF'

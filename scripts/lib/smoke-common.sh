@@ -582,7 +582,39 @@ find_comment_author() {
 
 default_branch() {
   local repo="$1"
-  runoq::gh repo view "$repo" --json defaultBranchRef | jq -r '.defaultBranchRef.name'
+  local branch
+  branch="$(runoq::gh repo view "$repo" --json defaultBranchRef | jq -r '.defaultBranchRef.name // empty')"
+  [[ -n "$branch" ]] || runoq::die "Failed to resolve default branch for ${repo}."
+  printf '%s\n' "$branch"
+}
+
+default_branch_from_clone() {
+  local clone_dir="$1"
+  local branch
+
+  branch="$(git -C "$clone_dir" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+  branch="${branch#origin/}"
+  if [[ -z "$branch" ]]; then
+    branch="$(git -C "$clone_dir" branch --show-current 2>/dev/null || true)"
+  fi
+
+  [[ -n "$branch" ]] || runoq::die "Failed to resolve default branch from cloned repo at ${clone_dir}."
+  printf '%s\n' "$branch"
+}
+
+ensure_default_branch_commit() {
+  local clone_dir="$1"
+  local repo="$2"
+  local branch="$3"
+
+  if ! git -C "$clone_dir" rev-parse --verify --quiet "refs/remotes/origin/${branch}^{commit}" >/dev/null; then
+    smoke_log "default branch ${branch} is empty in ${repo}; creating bootstrap commit"
+    run_quiet_command "Failed to create bootstrap commit on ${repo} default branch ${branch}" \
+      git -C "$clone_dir" -c user.name="runoq live smoke" -c user.email="runoq-smoke@example.com" \
+      commit --allow-empty -m "Seed sandbox default branch"
+    run_quiet_command "Failed to push bootstrap commit for ${repo} default branch ${branch}" \
+      git -C "$clone_dir" push -u origin "$branch"
+  fi
 }
 
 copy_fixture_tree() {
@@ -942,6 +974,9 @@ run_smoke() {
   fi
   smoke_log "verified expected labels in ${repo}"
 
+  current_branch="$(default_branch_from_clone "$clone_dir")"
+  ensure_default_branch_commit "$clone_dir" "$repo" "$current_branch"
+
   issue_title="runoq live smoke ${run_id}"
   issue_body="Live smoke validation issue for ${run_id}."
   smoke_log "creating sandbox issue '${issue_title}'"
@@ -961,13 +996,12 @@ run_smoke() {
 
   smoke_log "checking ${RUNOQ_SMOKE_PERMISSION_USER} has ${RUNOQ_SMOKE_PERMISSION_LEVEL:-write} access to ${repo}"
   permission_json="$("$root/scripts/gh-pr-lifecycle.sh" check-permission "$repo" "$RUNOQ_SMOKE_PERMISSION_USER" "${RUNOQ_SMOKE_PERMISSION_LEVEL:-write}")"
-  current_branch="$(default_branch "$repo")"
   branch="runoq-smoke-${run_id}"
   RUNOQ_SMOKE_CLEANUP_BRANCH="$branch"
 
   smoke_log "creating branch ${branch} from ${current_branch}"
   run_quiet_command "Failed to create sandbox branch ${branch} from ${current_branch}" \
-    git -C "$clone_dir" checkout -b "$branch" "origin/${current_branch}"
+    git -C "$clone_dir" checkout -b "$branch" "$current_branch"
   git -C "$clone_dir" config user.name "runoq live smoke"
   git -C "$clone_dir" config user.email "runoq-smoke@example.com"
   mkdir -p "$clone_dir/.runoq/smoke"
