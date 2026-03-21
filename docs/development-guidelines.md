@@ -21,7 +21,7 @@ These points are worth preserving because they explain why the repo is structure
 ## Ongoing Guardrails
 
 - Preserve the target repo main checkout. Execution work belongs in sibling worktrees or explicit sandbox clones.
-- Treat `.agendev/state/*.json` as resumability breadcrumbs, not the audit trail.
+- Treat `.runoq/state/*.json` as resumability breadcrumbs, not the audit trail.
 - Prefer machine-readable script boundaries over prose-only prompt contracts.
 - Reuse existing scripts, helpers, fixtures, and skills before inventing new prompt behavior.
 - Keep maintenance review read-only until a human explicitly approves filing work.

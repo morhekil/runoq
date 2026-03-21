@@ -1,6 +1,6 @@
 # Operator Workflow
 
-This guide walks through the day-to-day operator workflow for using `agendev` against a target repository, from initialization through a successful run and a maintenance review launch.
+This guide walks through the day-to-day operator workflow for using `runoq` against a target repository, from initialization through a successful run and a maintenance review launch.
 
 ## Before You Start
 
@@ -10,19 +10,19 @@ Once that is done, make sure you have:
 
 - A target repository hosted on `github.com` with an `origin` remote
 - The GitHub App installed on that repository
-- A checkout of this runtime repository so you can invoke `bin/agendev`
+- A checkout of this runtime repository so you can invoke `bin/runoq`
 
 Examples below assume:
 
 ```bash
-export AGENDEV_RUNTIME=/path/to/agendev
+export RUNOQ_RUNTIME=/path/to/runoq
 cd /path/to/target-repo
 ```
 
 If `/usr/local/bin` is not writable on your machine, set a writable symlink location before initialization:
 
 ```bash
-export AGENDEV_SYMLINK_DIR="$HOME/.local/bin"
+export RUNOQ_SYMLINK_DIR="$HOME/.local/bin"
 ```
 
 ## Initial Setup
@@ -30,33 +30,33 @@ export AGENDEV_SYMLINK_DIR="$HOME/.local/bin"
 Run initialization from inside the target repository:
 
 ```bash
-"$AGENDEV_RUNTIME/bin/agendev" init
+"$RUNOQ_RUNTIME/bin/runoq" init
 ```
 
-`agendev init` performs one-time bootstrap work:
+`runoq init` performs one-time bootstrap work:
 
-- Creates `.agendev/identity.json` with the GitHub App ID, installation ID, and private key path
-- Creates `.agendev/state/` for resumability state files
-- Ensures the managed `agendev:*` labels exist in GitHub
+- Creates `.runoq/identity.json` with the GitHub App ID, installation ID, and private key path
+- Creates `.runoq/state/` for resumability state files
+- Ensures the managed `runoq:*` labels exist in GitHub
 - Creates a minimal `package.json` only when the target repo does not already have one
-- Installs or refreshes symlinks for the agendev-managed Claude agents and skills inside the target repo's `.claude/` directories
-- Creates an `agendev` symlink in `AGENDEV_SYMLINK_DIR` or `/usr/local/bin`
+- Installs or refreshes symlinks for the runoq-managed Claude agents and skills inside the target repo's `.claude/` directories
+- Creates an `runoq` symlink in `RUNOQ_SYMLINK_DIR` or `/usr/local/bin`
 
-After this step you can usually call `agendev` directly if the symlink directory is on `PATH`.
-The `.claude/` install is intentionally narrow: project-specific agents, skills, and settings can still live alongside the agendev-managed files, while `agendev init` refreshes only the managed filenames it owns.
+After this step you can usually call `runoq` directly if the symlink directory is on `PATH`.
+The `.claude/` install is intentionally narrow: project-specific agents, skills, and settings can still live alongside the runoq-managed files, while `runoq init` refreshes only the managed filenames it owns.
 
 ## Creating Queue Issues From A Plan
 
 Prepare a local plan document in the target repository, then run:
 
 ```bash
-agendev plan docs/plan.md
+runoq plan docs/plan.md
 ```
 
 The `plan-to-issues` skill reads the file, proposes a queue, and asks for explicit confirmation before creating anything in GitHub. After you confirm, it creates issues with:
 
-- The `agendev:ready` label
-- An `<!-- agendev:meta -->` block containing dependencies, priority, and estimated complexity
+- The `runoq:ready` label
+- An `<!-- runoq:meta -->` block containing dependencies, priority, and estimated complexity
 - Acceptance criteria in the issue body
 
 At this point GitHub becomes the queue surface. Operators can inspect issue titles, labels, and metadata without reading local state files.
@@ -66,30 +66,30 @@ At this point GitHub becomes the queue surface. Operators can inspect issue titl
 Use single-issue mode when you want to drive one queue item explicitly:
 
 ```bash
-agendev run --issue 42
+runoq run --issue 42
 ```
 
-During a successful run, `agendev`:
+During a successful run, `runoq`:
 
 - Verifies the issue is eligible for dispatch
-- Moves the issue label from `agendev:ready` to `agendev:in-progress`
+- Moves the issue label from `runoq:ready` to `runoq:in-progress`
 - Creates a sibling worktree next to the target repo
 - Creates a draft PR for the issue branch
 - Posts structured audit comments to the PR
-- Writes `.agendev/state/42.json` so interrupted runs can be reconciled
+- Writes `.runoq/state/42.json` so interrupted runs can be reconciled
 - Verifies the resulting changes before finalization
 
-If the outcome is a clean low-complexity pass, the issue is marked `agendev:done` and the worktree is removed. Otherwise the run is escalated to `agendev:needs-human-review`.
+If the outcome is a clean low-complexity pass, the issue is marked `runoq:done` and the worktree is removed. Otherwise the run is escalated to `runoq:needs-human-review`.
 
 ## Running The Queue
 
-Queue mode lets `agendev` select the next ready issue automatically:
+Queue mode lets `runoq` select the next ready issue automatically:
 
 ```bash
-agendev run
+runoq run
 ```
 
-Queue selection is based on open issues labeled `agendev:ready`. The runtime skips issues whose dependencies are not yet labeled `agendev:done` and continues until there are no actionable items left or the consecutive-failure circuit breaker halts the queue.
+Queue selection is based on open issues labeled `runoq:ready`. The runtime skips issues whose dependencies are not yet labeled `runoq:done` and continues until there are no actionable items left or the consecutive-failure circuit breaker halts the queue.
 
 Use queue mode after the plan has been converted into issues and you want the runtime to keep draining ready work without naming each issue manually.
 
@@ -98,17 +98,17 @@ Use queue mode after the plan has been converted into issues and you want the ru
 Use the report commands from the target repository:
 
 ```bash
-agendev report summary
-agendev report issue 42
-agendev report cost
+runoq report summary
+runoq report issue 42
+runoq report cost
 ```
 
 What to inspect after a run:
 
 - GitHub issue labels and issue comments for queue state and escalations
 - The draft or finalized PR for audit comments and summary updates
-- `.agendev/state/<issue>.json` for resumability state and the final outcome
-- `.agendev/state/maintenance.json` after maintenance review starts
+- `.runoq/state/<issue>.json` for resumability state and the final outcome
+- `.runoq/state/maintenance.json` after maintenance review starts
 
 `report summary` aggregates local state files. `report issue <n>` prints the saved JSON for one issue. `report cost` estimates token cost from the configured per-million rates.
 
@@ -117,10 +117,10 @@ What to inspect after a run:
 Launch maintenance review from a clean target repository checkout:
 
 ```bash
-agendev maintenance
+runoq maintenance
 ```
 
-This invokes the `maintenance-reviewer` agent. The runtime creates a tracking issue labeled `agendev:maintenance-review`, posts partition progress comments, and records local state in `.agendev/state/maintenance.json`. The review is read-only until a human triages findings and explicitly approves filing follow-up issues.
+This invokes the `maintenance-reviewer` agent. The runtime creates a tracking issue labeled `runoq:maintenance-review`, posts partition progress comments, and records local state in `.runoq/state/maintenance.json`. The review is read-only until a human triages findings and explicitly approves filing follow-up issues.
 
 ## Where To Go Next
 

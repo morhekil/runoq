@@ -17,59 +17,59 @@ load test_helper
     .verification.testCommand and
     .verification.buildCommand and
     .stall.timeoutSeconds
-  ' "$AGENDEV_CONFIG"
+  ' "$RUNOQ_CONFIG"
 
   [ "$status" -eq 0 ]
 }
 
 @test "issue template includes metadata block and acceptance criteria section" {
-  run grep -n "agendev:meta" "$AGENDEV_ROOT/templates/issue-template.md"
+  run grep -n "runoq:meta" "$RUNOQ_ROOT/templates/issue-template.md"
   [ "$status" -eq 0 ]
 
-  run grep -n "## Acceptance Criteria" "$AGENDEV_ROOT/templates/issue-template.md"
+  run grep -n "## Acceptance Criteria" "$RUNOQ_ROOT/templates/issue-template.md"
   [ "$status" -eq 0 ]
 }
 
 @test "pr template includes marker-delimited summary and attention sections" {
-  run grep -n "agendev:summary:start" "$AGENDEV_ROOT/templates/pr-template.md"
+  run grep -n "runoq:summary:start" "$RUNOQ_ROOT/templates/pr-template.md"
   [ "$status" -eq 0 ]
 
-  run grep -n "agendev:summary:end" "$AGENDEV_ROOT/templates/pr-template.md"
+  run grep -n "runoq:summary:end" "$RUNOQ_ROOT/templates/pr-template.md"
   [ "$status" -eq 0 ]
 
-  run grep -n "agendev:attention:start" "$AGENDEV_ROOT/templates/pr-template.md"
+  run grep -n "runoq:attention:start" "$RUNOQ_ROOT/templates/pr-template.md"
   [ "$status" -eq 0 ]
 
-  run grep -n "agendev:attention:end" "$AGENDEV_ROOT/templates/pr-template.md"
+  run grep -n "runoq:attention:end" "$RUNOQ_ROOT/templates/pr-template.md"
   [ "$status" -eq 0 ]
 }
 
 @test "repo resolution parses SSH GitHub remotes" {
   run_bash '
-    source "'"$AGENDEV_ROOT"'/scripts/lib/common.sh"
-    agendev::repo_from_remote "git@github.com:owner/example.git"
+    source "'"$RUNOQ_ROOT"'/scripts/lib/common.sh"
+    runoq::repo_from_remote "git@github.com:owner/example.git"
   '
 
   [ "$status" -eq 0 ]
   [ "$output" = "owner/example" ]
 }
 
-@test "agendev root resolves to the project root when sourced directly" {
+@test "runoq root resolves to the project root when sourced directly" {
   run_bash '
-    unset AGENDEV_ROOT
-    source "'"$AGENDEV_ROOT"'/scripts/lib/common.sh"
-    agendev::root
+    unset RUNOQ_ROOT
+    source "'"$RUNOQ_ROOT"'/scripts/lib/common.sh"
+    runoq::root
   '
 
   [ "$status" -eq 0 ]
-  [ "$output" = "$AGENDEV_ROOT" ]
+  [ "$output" = "$RUNOQ_ROOT" ]
 }
 
-@test "repo resolution honors AGENDEV_REPO override" {
+@test "repo resolution honors RUNOQ_REPO override" {
   run_bash '
-    export AGENDEV_REPO="override/repo"
-    source "'"$AGENDEV_ROOT"'/scripts/lib/common.sh"
-    agendev::repo_from_remote "git@gitlab.com:owner/example.git"
+    export RUNOQ_REPO="override/repo"
+    source "'"$RUNOQ_ROOT"'/scripts/lib/common.sh"
+    runoq::repo_from_remote "git@gitlab.com:owner/example.git"
   '
 
   [ "$status" -eq 0 ]
@@ -78,8 +78,8 @@ load test_helper
 
 @test "repo resolution parses HTTPS GitHub remotes" {
   run_bash '
-    source "'"$AGENDEV_ROOT"'/scripts/lib/common.sh"
-    agendev::repo_from_remote "https://github.com/owner/example.git"
+    source "'"$RUNOQ_ROOT"'/scripts/lib/common.sh"
+    runoq::repo_from_remote "https://github.com/owner/example.git"
   '
 
   [ "$status" -eq 0 ]
@@ -88,8 +88,8 @@ load test_helper
 
 @test "repo resolution parses authenticated HTTPS GitHub remotes" {
   run_bash '
-    source "'"$AGENDEV_ROOT"'/scripts/lib/common.sh"
-    agendev::repo_from_remote "https://x-access-token:ghs_example@github.com/owner/example.git"
+    source "'"$RUNOQ_ROOT"'/scripts/lib/common.sh"
+    runoq::repo_from_remote "https://x-access-token:ghs_example@github.com/owner/example.git"
   '
 
   [ "$status" -eq 0 ]
@@ -98,8 +98,8 @@ load test_helper
 
 @test "repo resolution fails for non-GitHub remotes" {
   run_bash '
-    source "'"$AGENDEV_ROOT"'/scripts/lib/common.sh"
-    agendev::repo_from_remote "git@gitlab.com:owner/example.git"
+    source "'"$RUNOQ_ROOT"'/scripts/lib/common.sh"
+    runoq::repo_from_remote "git@gitlab.com:owner/example.git"
   '
 
   [ "$status" -ne 0 ]
@@ -113,12 +113,12 @@ load test_helper
 
   run_bash '
     cd "'"$repo_dir"'"
-    source "'"$AGENDEV_ROOT"'/scripts/lib/common.sh"
-    agendev::origin_url
+    source "'"$RUNOQ_ROOT"'/scripts/lib/common.sh"
+    runoq::origin_url
   '
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"No 'origin' remote found. agendev requires a GitHub-hosted repo."* ]]
+  [[ "$output" == *"No 'origin' remote found. runoq requires a GitHub-hosted repo."* ]]
 }
 
 @test "target root resolution fails outside a git repository" {
@@ -126,12 +126,12 @@ load test_helper
   cd "$TEST_TMPDIR/outside"
 
   run_bash '
-    source "'"$AGENDEV_ROOT"'/scripts/lib/common.sh"
-    agendev::target_root
+    source "'"$RUNOQ_ROOT"'/scripts/lib/common.sh"
+    runoq::target_root
   '
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"Run agendev from inside a git repository."* ]]
+  [[ "$output" == *"Run runoq from inside a git repository."* ]]
 }
 
 @test "repo resolution from origin works inside a git repository" {
@@ -139,9 +139,9 @@ load test_helper
   cd "$TEST_TMPDIR/repo"
 
   run_bash '
-    export AGENDEV_CONFIG="'"$AGENDEV_CONFIG"'"
-    source "'"$AGENDEV_ROOT"'/scripts/lib/common.sh"
-    agendev::repo
+    export RUNOQ_CONFIG="'"$RUNOQ_CONFIG"'"
+    source "'"$RUNOQ_ROOT"'/scripts/lib/common.sh"
+    runoq::repo
   '
 
   [ "$status" -eq 0 ]
@@ -154,8 +154,8 @@ load test_helper
 
   run_bash '
     export TARGET_ROOT="'"$override_dir"'"
-    source "'"$AGENDEV_ROOT"'/scripts/lib/common.sh"
-    agendev::target_root
+    source "'"$RUNOQ_ROOT"'/scripts/lib/common.sh"
+    runoq::target_root
   '
 
   [ "$status" -eq 0 ]

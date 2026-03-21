@@ -6,35 +6,35 @@ This guide explains how to recover from interrupted runs, eligibility failures, 
 
 When a run behaves unexpectedly, check these in order:
 
-1. `agendev run --dry-run`
-2. `agendev report issue <n>`
+1. `runoq run --dry-run`
+2. `runoq report issue <n>`
 3. the issue comments
 4. the PR comments and PR body summary
-5. `.agendev/state/<issue>.json`
+5. `.runoq/state/<issue>.json`
 
 Useful commands:
 
 ```bash
-agendev run --dry-run
-agendev report issue 42
-agendev report summary
+runoq run --dry-run
+runoq report issue 42
+runoq report summary
 scripts/worktree.sh inspect 42
 scripts/gh-auth.sh print-identity
 ```
 
 ## What Startup Reconciliation Does
 
-Every `agendev run` begins with `dispatch-safety.sh reconcile`.
+Every `runoq run` begins with `dispatch-safety.sh reconcile`.
 
 Possible reconciliation outcomes:
 
 | Outcome | Meaning | What the runtime does |
 | --- | --- | --- |
 | `resume` | non-terminal state still points to an open PR and pushed branch | comments on the issue and PR that the run is resuming |
-| `needs-review` | interrupted state cannot be resumed safely | relabels the issue to `agendev:needs-human-review` and comments on the issue |
-| `reset-ready` | GitHub still shows `agendev:in-progress`, but no active local state explains it | resets the label to `agendev:ready` and comments on the issue |
+| `needs-review` | interrupted state cannot be resumed safely | relabels the issue to `runoq:needs-human-review` and comments on the issue |
+| `reset-ready` | GitHub still shows `runoq:in-progress`, but no active local state explains it | resets the label to `runoq:ready` and comments on the issue |
 
-If you want to see reconciliation output without dispatching new work, use `agendev run --dry-run`.
+If you want to see reconciliation output without dispatching new work, use `runoq run --dry-run`.
 
 ## Interrupted Runs
 
@@ -42,7 +42,7 @@ If you want to see reconciliation output without dispatching new work, use `agen
 
 Symptoms:
 
-- `.agendev/state/<issue>.json` has a non-terminal phase like `DEVELOP` or `REVIEW`
+- `.runoq/state/<issue>.json` has a non-terminal phase like `DEVELOP` or `REVIEW`
 - the saved branch is still pushed to `origin`
 - the PR still exists and is open
 - issue or PR comments show `Detected interrupted run ... Resuming.`
@@ -50,7 +50,7 @@ Symptoms:
 What to do:
 
 - confirm the branch and PR still reflect the intended work
-- rerun `agendev run --issue <n>` if you want to continue manually
+- rerun `runoq run --issue <n>` if you want to continue manually
 - otherwise let queue mode resume naturally on the next run
 
 ### Unrecoverable interruption
@@ -58,8 +58,8 @@ What to do:
 Symptoms:
 
 - reconciliation comments say `Marking for human review`
-- the issue is relabeled `agendev:needs-human-review`
-- `.agendev/state/<issue>.json` is still non-terminal, but the branch or PR can no longer be resolved safely
+- the issue is relabeled `runoq:needs-human-review`
+- `.runoq/state/<issue>.json` is still non-terminal, but the branch or PR can no longer be resolved safely
 
 Common causes:
 
@@ -74,12 +74,12 @@ What to do:
 - decide whether to reopen/recreate the PR manually or file follow-up work
 - do not force the queue to continue on that issue until the human review is resolved
 
-## Stale `agendev:in-progress` Labels
+## Stale `runoq:in-progress` Labels
 
 Symptoms:
 
-- `agendev run --dry-run` shows a reconciliation action `reset-ready`
-- issue comment says `Found stale agendev:in-progress label with no active run. Reset to agendev:ready.`
+- `runoq run --dry-run` shows a reconciliation action `reset-ready`
+- issue comment says `Found stale runoq:in-progress label with no active run. Reset to runoq:ready.`
 
 What it means:
 
@@ -93,7 +93,7 @@ What to do:
 
 ## Eligibility Failures Before Dispatch
 
-Eligibility failures happen before `agendev` mutates queue state for an issue. The runtime comments on the issue with `Skipped: ...`.
+Eligibility failures happen before `runoq` mutates queue state for an issue. The runtime comments on the issue with `Skipped: ...`.
 
 ### Missing acceptance criteria
 
@@ -122,7 +122,7 @@ Fix:
 
 Signal:
 
-- issue comment: `Skipped: dependency #... is not agendev:done.`
+- issue comment: `Skipped: dependency #... is not runoq:done.`
 
 Fix:
 
@@ -133,7 +133,7 @@ Fix:
 
 Signal:
 
-- issue comment: `Skipped: branch agendev/... has unresolved conflicts with origin/main.`
+- issue comment: `Skipped: branch runoq/... has unresolved conflicts with origin/main.`
 
 Fix:
 
@@ -142,7 +142,7 @@ Fix:
 
 ## Verification Failures
 
-Verification failures escalate the issue to `agendev:needs-human-review`. The PR gets a verification comment and the issue gets an escalation comment.
+Verification failures escalate the issue to `runoq:needs-human-review`. The PR gets a verification comment and the issue gets an escalation comment.
 
 ### No commits or missing push
 
@@ -209,7 +209,7 @@ What it means:
 
 What to do:
 
-- inspect the PR’s `agendev:payload:codex-return` comment
+- inspect the PR’s `runoq:payload:codex-return` comment
 - check whether the fallback payload caused verification to fail
 - fix the agent/prompt/output issue before retrying if malformed payloads recur
 
@@ -221,7 +221,7 @@ Symptoms:
 
 - command exits `124`
 - issue comment says `Agent stalled after N seconds of inactivity. Process terminated. State preserved for resume.`
-- `.agendev/state/<issue>.json` still shows a non-terminal phase and includes `stall`
+- `.runoq/state/<issue>.json` still shows a non-terminal phase and includes `stall`
 
 What to inspect:
 
@@ -254,7 +254,7 @@ What to do:
 
 Symptoms:
 
-- `agendev report issue <n>` or `scripts/state.sh load <n>` fails with `State file is corrupted for issue <n>`
+- `runoq report issue <n>` or `scripts/state.sh load <n>` fails with `State file is corrupted for issue <n>`
 
 What to do:
 
@@ -266,34 +266,34 @@ Be conservative here. A corrupted state file means the runtime may not be able t
 
 ## Auth And Config Failures
 
-### `Run 'agendev init' first.`
+### `Run 'runoq init' first.`
 
 Meaning:
 
-- `.agendev/identity.json` is missing and no reusable `GH_TOKEN` was available
+- `.runoq/identity.json` is missing and no reusable `GH_TOKEN` was available
 
 Fix:
 
-- run `agendev init` from inside the target repo
+- run `runoq init` from inside the target repo
 - or export a valid `GH_TOKEN` if you intentionally bypass app-token minting
 
 ### `GitHub App private key not found`
 
 Meaning:
 
-- `AGENDEV_APP_KEY` or the path recorded in `.agendev/identity.json` does not exist
+- `RUNOQ_APP_KEY` or the path recorded in `.runoq/identity.json` does not exist
 
 Fix:
 
 - inspect `scripts/gh-auth.sh print-identity`
-- correct `AGENDEV_APP_KEY` or repair the recorded `privateKeyPath`
+- correct `RUNOQ_APP_KEY` or repair the recorded `privateKeyPath`
 
 ### Repo resolution failures
 
 Signals:
 
-- `Run agendev from inside a git repository.`
-- `No 'origin' remote found. agendev requires a GitHub-hosted repo.`
+- `Run runoq from inside a git repository.`
+- `No 'origin' remote found. runoq requires a GitHub-hosted repo.`
 - `Origin remote is not a GitHub URL: ...`
 
 Fix:

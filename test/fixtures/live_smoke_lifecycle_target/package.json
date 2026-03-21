@@ -1,5 +1,5 @@
 {
-  "name": "agendev-live-smoke-target",
+  "name": "runoq-live-smoke-target",
   "private": true,
   "scripts": {
     "test": "node --test",

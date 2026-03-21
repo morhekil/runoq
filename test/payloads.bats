@@ -16,7 +16,7 @@ wrap_payload_fixture() {
   local fixture="$1"
   local destination="$2"
   {
-    echo "<!-- agendev:payload:codex-return -->"
+    echo "<!-- runoq:payload:codex-return -->"
     echo '```json'
     cat "$fixture"
     echo
@@ -25,7 +25,7 @@ wrap_payload_fixture() {
 }
 
 @test "extract-payload returns the last fenced block" {
-  run "$AGENDEV_ROOT/scripts/state.sh" extract-payload "$(fixture_path "payloads/codex-output-multi-block.txt")"
+  run "$RUNOQ_ROOT/scripts/state.sh" extract-payload "$(fixture_path "payloads/codex-output-multi-block.txt")"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *'"status": "completed"'* ]]
@@ -33,7 +33,7 @@ wrap_payload_fixture() {
 }
 
 @test "extract-payload prefers the codex-return marker block" {
-  run "$AGENDEV_ROOT/scripts/state.sh" extract-payload "$(fixture_path "payloads/codex-output-marked-block.txt")"
+  run "$RUNOQ_ROOT/scripts/state.sh" extract-payload "$(fixture_path "payloads/codex-output-marked-block.txt")"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *'"status": "completed"'* ]]
@@ -48,7 +48,7 @@ wrap_payload_fixture() {
   git -C "$base_repo" add src/app.ts
   git -C "$base_repo" commit -m "Update app" >/dev/null
 
-  run "$AGENDEV_ROOT/scripts/state.sh" validate-payload "$base_repo" "$base_sha" "$(fixture_path "payloads/codex-output-no-json.txt")"
+  run "$RUNOQ_ROOT/scripts/state.sh" validate-payload "$base_repo" "$base_sha" "$(fixture_path "payloads/codex-output-no-json.txt")"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *'"status": "failed"'* ]]
@@ -63,7 +63,7 @@ wrap_payload_fixture() {
   git -C "$base_repo" add src/app.ts
   git -C "$base_repo" commit -m "Update app" >/dev/null
 
-  run "$AGENDEV_ROOT/scripts/state.sh" validate-payload "$base_repo" "$base_sha" "$(fixture_path "payloads/codex-return-malformed.txt")"
+  run "$RUNOQ_ROOT/scripts/state.sh" validate-payload "$base_repo" "$base_sha" "$(fixture_path "payloads/codex-return-malformed.txt")"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *'"payload_source": "synthetic"'* ]]
@@ -79,7 +79,7 @@ wrap_payload_fixture() {
   payload_file="$TEST_TMPDIR/missing-fields-output.txt"
   wrap_payload_fixture "$(fixture_path "payloads/codex-return-missing-fields.json")" "$payload_file"
 
-  run "$AGENDEV_ROOT/scripts/state.sh" validate-payload "$base_repo" "$base_sha" "$payload_file"
+  run "$RUNOQ_ROOT/scripts/state.sh" validate-payload "$base_repo" "$base_sha" "$payload_file"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *'"payload_source": "patched"'* ]]
@@ -93,7 +93,7 @@ wrap_payload_fixture() {
   payload_file="$TEST_TMPDIR/unknown-status-output.txt"
   wrap_payload_fixture "$(fixture_path "payloads/codex-return-unknown-status.json")" "$payload_file"
 
-  run "$AGENDEV_ROOT/scripts/state.sh" validate-payload "$base_repo" "$base_sha" "$payload_file"
+  run "$RUNOQ_ROOT/scripts/state.sh" validate-payload "$base_repo" "$base_sha" "$payload_file"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *'"status": "failed"'* ]]
@@ -106,7 +106,7 @@ wrap_payload_fixture() {
   payload_file="$TEST_TMPDIR/wrong-types-output.txt"
   wrap_payload_fixture "$(fixture_path "payloads/codex-return-wrong-types.json")" "$payload_file"
 
-  run "$AGENDEV_ROOT/scripts/state.sh" validate-payload "$base_repo" "$base_sha" "$payload_file"
+  run "$RUNOQ_ROOT/scripts/state.sh" validate-payload "$base_repo" "$base_sha" "$payload_file"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *'"status": "failed"'* ]]
@@ -123,7 +123,7 @@ wrap_payload_fixture() {
 
   payload_file="$TEST_TMPDIR/added-file-output.txt"
   cat >"$payload_file" <<'EOF'
-<!-- agendev:payload:codex-return -->
+<!-- runoq:payload:codex-return -->
 ```json
 {
   "status": "completed",
@@ -142,7 +142,7 @@ wrap_payload_fixture() {
 ```
 EOF
 
-  run "$AGENDEV_ROOT/scripts/state.sh" validate-payload "$base_repo" "$base_sha" "$payload_file"
+  run "$RUNOQ_ROOT/scripts/state.sh" validate-payload "$base_repo" "$base_sha" "$payload_file"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *'"files_changed": []'* ]]

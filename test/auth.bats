@@ -6,10 +6,10 @@ load test_helper
   export TARGET_ROOT="$TEST_TMPDIR/project"
   mkdir -p "$TARGET_ROOT"
 
-  run "$AGENDEV_ROOT/scripts/gh-auth.sh" export-token
+  run "$RUNOQ_ROOT/scripts/gh-auth.sh" export-token
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"Run 'agendev init' first."* ]]
+  [[ "$output" == *"Run 'runoq init' first."* ]]
 }
 
 @test "gh auth respects an existing GH_TOKEN without reading identity" {
@@ -17,7 +17,7 @@ load test_helper
   mkdir -p "$TARGET_ROOT"
   export GH_TOKEN="already-set"
 
-  run "$AGENDEV_ROOT/scripts/gh-auth.sh" export-token
+  run "$RUNOQ_ROOT/scripts/gh-auth.sh" export-token
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"export GH_TOKEN=already-set"* ]]
@@ -25,8 +25,8 @@ load test_helper
 
 @test "gh auth fails cleanly when the private key path is missing" {
   export TARGET_ROOT="$TEST_TMPDIR/project"
-  mkdir -p "$TARGET_ROOT/.agendev"
-  cat >"$TARGET_ROOT/.agendev/identity.json" <<'EOF'
+  mkdir -p "$TARGET_ROOT/.runoq"
+  cat >"$TARGET_ROOT/.runoq/identity.json" <<'EOF'
 {
   "appId": 123,
   "installationId": 456,
@@ -35,7 +35,7 @@ load test_helper
 EOF
   unset GH_TOKEN
 
-  run "$AGENDEV_ROOT/scripts/gh-auth.sh" export-token
+  run "$RUNOQ_ROOT/scripts/gh-auth.sh" export-token
 
   [ "$status" -ne 0 ]
   [[ "$output" == *"GitHub App private key not found"* ]]
@@ -43,10 +43,10 @@ EOF
 
 @test "gh auth can mint a token from identity and fake gh api" {
   export TARGET_ROOT="$TEST_TMPDIR/project"
-  mkdir -p "$TARGET_ROOT/.agendev"
+  mkdir -p "$TARGET_ROOT/.runoq"
   key_path="$TEST_TMPDIR/app-key.pem"
   openssl genrsa -out "$key_path" 2048 >/dev/null 2>&1
-  cat >"$TARGET_ROOT/.agendev/identity.json" <<EOF
+  cat >"$TARGET_ROOT/.runoq/identity.json" <<EOF
 {
   "appId": 123,
   "installationId": 789,
@@ -65,7 +65,7 @@ EOF
   use_fake_gh "$scenario"
   unset GH_TOKEN
 
-  run "$AGENDEV_ROOT/scripts/gh-auth.sh" export-token
+  run "$RUNOQ_ROOT/scripts/gh-auth.sh" export-token
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"export GH_TOKEN=minted-token"* ]]

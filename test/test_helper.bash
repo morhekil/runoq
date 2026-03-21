@@ -1,9 +1,10 @@
 setup() {
-  export AGENDEV_ROOT="/Users/Saruman/Projects/agendev"
-  export AGENDEV_CONFIG="$AGENDEV_ROOT/config/agendev.json"
+  export RUNOQ_ROOT
+  RUNOQ_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  export RUNOQ_CONFIG="$RUNOQ_ROOT/config/runoq.json"
   export TEST_TMPDIR
-  TEST_TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/agendev-test.XXXXXX")"
-  export PATH="$AGENDEV_ROOT/test/helpers:$PATH"
+  TEST_TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/runoq-test.XXXXXX")"
+  export PATH="$RUNOQ_ROOT/test/helpers:$PATH"
 }
 
 teardown() {
@@ -48,7 +49,7 @@ run_bash() {
 }
 
 fixture_path() {
-  printf '%s/test/fixtures/%s\n' "$AGENDEV_ROOT" "$1"
+  printf '%s/test/fixtures/%s\n' "$RUNOQ_ROOT" "$1"
 }
 
 load_fixture() {
@@ -65,5 +66,5 @@ use_fake_gh() {
   export FAKE_GH_STATE="${2:-$TEST_TMPDIR/fake-gh.state}"
   export FAKE_GH_LOG="${3:-$TEST_TMPDIR/fake-gh.log}"
   export FAKE_GH_CAPTURE_DIR="${4:-$TEST_TMPDIR/fake-gh-capture}"
-  export GH_BIN="$AGENDEV_ROOT/test/helpers/gh"
+  export GH_BIN="$RUNOQ_ROOT/test/helpers/gh"
 }

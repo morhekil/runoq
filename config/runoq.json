@@ -1,15 +1,15 @@
 {
   "labels": {
-    "ready": "agendev:ready",
-    "inProgress": "agendev:in-progress",
-    "done": "agendev:done",
-    "needsReview": "agendev:needs-human-review",
-    "blocked": "agendev:blocked",
-    "maintenanceReview": "agendev:maintenance-review"
+    "ready": "runoq:ready",
+    "inProgress": "runoq:in-progress",
+    "done": "runoq:done",
+    "needsReview": "runoq:needs-human-review",
+    "blocked": "runoq:blocked",
+    "maintenanceReview": "runoq:maintenance-review"
   },
   "identity": {
-    "appSlug": "agendevapp",
-    "handle": "agendev"
+    "appSlug": "runoqapp",
+    "handle": "runoq"
   },
   "authorization": {
     "minimumPermission": "write",
@@ -31,8 +31,8 @@
   "reviewers": [
     "username"
   ],
-  "branchPrefix": "agendev/",
-  "worktreePrefix": "agendev-wt-",
+  "branchPrefix": "runoq/",
+  "worktreePrefix": "runoq-wt-",
   "consecutiveFailureLimit": 3,
   "verification": {
     "testCommand": "npm test",

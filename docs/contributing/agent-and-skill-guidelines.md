@@ -1,6 +1,6 @@
 # Agent And Skill Guidelines
 
-This guide explains how prompts, skills, and shell scripts should interact in `agendev`.
+This guide explains how prompts, skills, and shell scripts should interact in `runoq`.
 
 The short version: prompts dispatch and summarize; scripts own deterministic behavior.
 
@@ -86,10 +86,10 @@ The prompt layer must preserve the repo’s audit markers.
 
 Required markers include:
 
-- `<!-- agendev:event -->`
-- `<!-- agendev:payload:github-orchestrator-dispatch -->`
-- `<!-- agendev:payload:codex-return -->`
-- `<!-- agendev:payload:orchestrator-return -->`
+- `<!-- runoq:event -->`
+- `<!-- runoq:payload:github-orchestrator-dispatch -->`
+- `<!-- runoq:payload:codex-return -->`
+- `<!-- runoq:payload:orchestrator-return -->`
 
 Prompt authors must not:
 

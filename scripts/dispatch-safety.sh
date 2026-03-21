@@ -17,21 +17,21 @@ issue_comment() {
   local repo="$1"
   local issue_number="$2"
   local body="$3"
-  agendev::gh issue comment "$issue_number" --repo "$repo" --body "$body" >/dev/null
+  runoq::gh issue comment "$issue_number" --repo "$repo" --body "$body" >/dev/null
 }
 
 pr_comment() {
   local repo="$1"
   local pr_number="$2"
   local body="$3"
-  agendev::gh pr comment "$pr_number" --repo "$repo" --body "$body" >/dev/null
+  runoq::gh pr comment "$pr_number" --repo "$repo" --body "$body" >/dev/null
 }
 
 set_issue_status() {
   local repo="$1"
   local issue_number="$2"
   local status="$3"
-  "$(agendev::root)/scripts/gh-issue-queue.sh" set-status "$repo" "$issue_number" "$status" >/dev/null
+  "$(runoq::root)/scripts/gh-issue-queue.sh" set-status "$repo" "$issue_number" "$status" >/dev/null
 }
 
 parse_issue_metadata() {
@@ -39,7 +39,7 @@ parse_issue_metadata() {
   local block depends_line depends_json
 
   block="$(awk '
-    /<!-- agendev:meta/ { in_block = 1; next }
+    /<!-- runoq:meta/ { in_block = 1; next }
     in_block && /-->/ { exit }
     in_block { print }
   ' "$body_file")"
@@ -61,7 +61,7 @@ parse_issue_metadata() {
 
 state_dir_json_files() {
   local state_dir
-  state_dir="$(agendev::state_dir)"
+  state_dir="$(runoq::state_dir)"
   [[ -d "$state_dir" ]] || return 0
   find "$state_dir" -maxdepth 1 -type f -name '*.json' | sort
 }
@@ -88,8 +88,8 @@ active_state_issues_json() {
 branch_is_pushed() {
   local branch="$1"
   [[ -n "$branch" ]] || return 1
-  [[ -d "$(agendev::target_root)/.git" ]] || return 1
-  [[ -n "$(git -C "$(agendev::target_root)" ls-remote --heads origin "$branch" 2>/dev/null)" ]]
+  [[ -d "$(runoq::target_root)/.git" ]] || return 1
+  [[ -n "$(git -C "$(runoq::target_root)" ls-remote --heads origin "$branch" 2>/dev/null)" ]]
 }
 
 resolve_open_pr_number() {
@@ -99,14 +99,14 @@ resolve_open_pr_number() {
   local pr_json
 
   if [[ -n "$pr_number" && "$pr_number" != "null" ]]; then
-    if pr_json="$(agendev::gh pr view "$pr_number" --repo "$repo" --json number 2>/dev/null)"; then
+    if pr_json="$(runoq::gh pr view "$pr_number" --repo "$repo" --json number 2>/dev/null)"; then
       printf '%s\n' "$(printf '%s' "$pr_json" | jq -r '.number')"
       return 0
     fi
   fi
 
   if [[ -n "$branch" ]]; then
-    pr_json="$(agendev::gh pr list --repo "$repo" --state open --head "$branch" --json number 2>/dev/null || printf '[]')"
+    pr_json="$(runoq::gh pr list --repo "$repo" --state open --head "$branch" --json number 2>/dev/null || printf '[]')"
     if [[ "$(printf '%s' "$pr_json" | jq -r '.[0].number // empty')" != "" ]]; then
       printf '%s\n' "$(printf '%s' "$pr_json" | jq -r '.[0].number')"
       return 0
@@ -178,8 +178,8 @@ reconcile_stale_labels() {
   local active_issues="$2"
   local in_progress_label issues_json actions issue_number message
 
-  in_progress_label="$(agendev::label_for_status "in-progress")"
-  issues_json="$(agendev::gh issue list --repo "$repo" --label "$in_progress_label" --state open --limit 200 --json number,title,labels)"
+  in_progress_label="$(runoq::label_for_status "in-progress")"
+  issues_json="$(runoq::gh issue list --repo "$repo" --label "$in_progress_label" --state open --limit 200 --json number,title,labels)"
   actions='[]'
 
   while IFS= read -r issue; do
@@ -190,7 +190,7 @@ reconcile_stale_labels() {
     fi
 
     set_issue_status "$repo" "$issue_number" "ready"
-    message="Found stale agendev:in-progress label with no active run. Reset to agendev:ready."
+    message="Found stale runoq:in-progress label with no active run. Reset to runoq:ready."
     issue_comment "$repo" "$issue_number" "$message"
     actions="$(jq -n \
       --argjson actions "$actions" \
@@ -232,21 +232,21 @@ dependency_reason() {
   local repo="$1"
   local dependency="$2"
   local done_label dependency_json
-  done_label="$(agendev::config_get '.labels.done')"
-  dependency_json="$(agendev::gh issue view "$dependency" --repo "$repo" --json labels)"
+  done_label="$(runoq::config_get '.labels.done')"
+  dependency_json="$(runoq::gh issue view "$dependency" --repo "$repo" --json labels)"
 
   if printf '%s' "$dependency_json" | jq -e --arg done_label "$done_label" '.labels | map(.name) | index($done_label) != null' >/dev/null; then
     return 1
   fi
 
-  printf 'dependency #%s is not agendev:done\n' "$dependency"
+  printf 'dependency #%s is not runoq:done\n' "$dependency"
 }
 
 open_pr_reason() {
   local repo="$1"
   local branch="$2"
   local pr_json pr_number
-  pr_json="$(agendev::gh pr list --repo "$repo" --state open --head "$branch" --json number,url)"
+  pr_json="$(runoq::gh pr list --repo "$repo" --state open --head "$branch" --json number,url)"
   pr_number="$(printf '%s' "$pr_json" | jq -r '.[0].number // empty')"
   if [[ -n "$pr_number" ]]; then
     printf 'existing open PR #%s already tracks this issue\n' "$pr_number"
@@ -256,7 +256,7 @@ open_pr_reason() {
 branch_has_conflicts() {
   local branch="$1"
   local target_root remote_sha merge_base
-  target_root="$(agendev::target_root)"
+  target_root="$(runoq::target_root)"
   remote_sha="$(git -C "$target_root" ls-remote --heads origin "$branch" 2>/dev/null | awk '{print $1}' | head -n1)"
   [[ -n "$remote_sha" ]] || return 1
 
@@ -272,11 +272,11 @@ eligibility() {
   local issue_number="$2"
   local issue_json body_file metadata branch reasons reason message
 
-  issue_json="$(agendev::gh issue view "$issue_number" --repo "$repo" --json number,title,body,labels,url)"
-  body_file="$(mktemp "${TMPDIR:-/tmp}/agendev-eligibility.XXXXXX.md")"
+  issue_json="$(runoq::gh issue view "$issue_number" --repo "$repo" --json number,title,body,labels,url)"
+  body_file="$(mktemp "${TMPDIR:-/tmp}/runoq-eligibility.XXXXXX.md")"
   printf '%s' "$issue_json" | jq -r '.body // ""' >"$body_file"
   metadata="$(parse_issue_metadata "$body_file")"
-  branch="$(agendev::branch_name "$issue_number" "$(printf '%s' "$issue_json" | jq -r '.title // ""')")"
+  branch="$(runoq::branch_name "$issue_number" "$(printf '%s' "$issue_json" | jq -r '.title // ""')")"
   reasons='[]'
 
   if [[ -z "$(printf '%s' "$issue_json" | jq -r '.title // empty')" ]] || ! has_acceptance_criteria "$body_file"; then

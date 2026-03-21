@@ -34,7 +34,7 @@ You receive a typed payload from `issue-runner` containing:
 
 ## Process
 
-1. Read `"$AGENDEV_ROOT/.claude/skills/diff-review/SKILL.md"` and follow it.
+1. Read `"$RUNOQ_ROOT/.claude/skills/diff-review/SKILL.md"` and follow it.
 2. Run the combined diff from within `worktree`:
 
    ```bash

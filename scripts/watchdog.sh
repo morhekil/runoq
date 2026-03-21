@@ -12,7 +12,7 @@ Usage:
 EOF
 }
 
-timeout_seconds="$(agendev::config_get '.stall.timeoutSeconds')"
+timeout_seconds="$(runoq::config_get '.stall.timeoutSeconds')"
 issue_number=""
 state_dir_override=""
 
@@ -28,7 +28,7 @@ write_stall_marker() {
   if [[ -n "$state_dir_override" ]]; then
     state_dir="$state_dir_override"
   else
-    state_dir="$(agendev::state_dir)"
+    state_dir="$(runoq::state_dir)"
   fi
 
   mkdir -p "$state_dir"
@@ -86,17 +86,17 @@ parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --timeout)
-        [[ $# -ge 2 ]] || agendev::die "--timeout requires a value"
+        [[ $# -ge 2 ]] || runoq::die "--timeout requires a value"
         timeout_seconds="$2"
         shift 2
         ;;
       --issue)
-        [[ $# -ge 2 ]] || agendev::die "--issue requires a value"
+        [[ $# -ge 2 ]] || runoq::die "--issue requires a value"
         issue_number="$2"
         shift 2
         ;;
       --state-dir)
-        [[ $# -ge 2 ]] || agendev::die "--state-dir requires a value"
+        [[ $# -ge 2 ]] || runoq::die "--state-dir requires a value"
         state_dir_override="$2"
         shift 2
         ;;
@@ -112,15 +112,15 @@ parse_args() {
   done
 
   [[ $# -ge 1 ]] || { usage >&2; exit 1; }
-  [[ "$timeout_seconds" =~ ^[0-9]+$ ]] || agendev::die "--timeout must be an integer number of seconds"
-  (( timeout_seconds > 0 )) || agendev::die "--timeout must be greater than zero"
+  [[ "$timeout_seconds" =~ ^[0-9]+$ ]] || runoq::die "--timeout must be an integer number of seconds"
+  (( timeout_seconds > 0 )) || runoq::die "--timeout must be greater than zero"
 
   watchdog_command=("$@")
 }
 
 parse_args "$@"
 
-watchdog_output_file="$(mktemp "${TMPDIR:-/tmp}/agendev-watchdog.XXXXXX")"
+watchdog_output_file="$(mktemp "${TMPDIR:-/tmp}/runoq-watchdog.XXXXXX")"
 trap cleanup EXIT
 
 "${watchdog_command[@]}" >"$watchdog_output_file" 2>&1 &
@@ -174,7 +174,7 @@ fi
 
 if [[ "$timed_out" == "true" ]]; then
   write_stall_marker "$issue_number" "$timeout_seconds" "${watchdog_command[@]}"
-  printf 'agendev: watchdog stalled after %ss of inactivity\n' "$timeout_seconds" >&2
+  printf 'runoq: watchdog stalled after %ss of inactivity\n' "$timeout_seconds" >&2
   exit 124
 fi
 

@@ -13,7 +13,7 @@ EOF
 }
 
 comment_file() {
-  mktemp "${TMPDIR:-/tmp}/agendev-mention.XXXXXX"
+  mktemp "${TMPDIR:-/tmp}/runoq-mention.XXXXXX"
 }
 
 post_pr_event() {
@@ -23,10 +23,10 @@ post_pr_event() {
   local path
   path="$(comment_file)"
   {
-    echo "<!-- agendev:event -->"
+    echo "<!-- runoq:event -->"
     echo "$message"
   } >"$path"
-  "$(agendev::root)/scripts/gh-pr-lifecycle.sh" comment "$repo" "$pr_number" "$path" >/dev/null 2>&1 || true
+  "$(runoq::root)/scripts/gh-pr-lifecycle.sh" comment "$repo" "$pr_number" "$path" >/dev/null 2>&1 || true
   rm -f "$path"
 }
 
@@ -35,16 +35,16 @@ post_issue_event() {
   local issue_number="$2"
   local message="$3"
   local body
-  body="$(printf '<!-- agendev:event -->\n%s\n' "$message")"
-  agendev::gh issue comment "$issue_number" --repo "$repo" --body "$body" >/dev/null 2>&1 || true
+  body="$(printf '<!-- runoq:event -->\n%s\n' "$message")"
+  runoq::gh issue comment "$issue_number" --repo "$repo" --body "$body" >/dev/null 2>&1 || true
 }
 
 required_permission() {
-  agendev::config_get '.authorization.minimumPermission'
+  runoq::config_get '.authorization.minimumPermission'
 }
 
 deny_response() {
-  agendev::config_get '.authorization.denyResponse'
+  runoq::config_get '.authorization.denyResponse'
 }
 
 process_mentions() {
@@ -57,9 +57,9 @@ process_mentions() {
   required="$(required_permission)"
   deny_mode="$(deny_response)"
   if [[ -n "$since" ]]; then
-    mentions="$("$(agendev::root)/scripts/gh-pr-lifecycle.sh" poll-mentions "$repo" "$handle" --since "$since")"
+    mentions="$("$(runoq::root)/scripts/gh-pr-lifecycle.sh" poll-mentions "$repo" "$handle" --since "$since")"
   else
-    mentions="$("$(agendev::root)/scripts/gh-pr-lifecycle.sh" poll-mentions "$repo" "$handle")"
+    mentions="$("$(runoq::root)/scripts/gh-pr-lifecycle.sh" poll-mentions "$repo" "$handle")"
   fi
 
   while IFS= read -r mention; do
@@ -71,7 +71,7 @@ process_mentions() {
     issue_number="$(printf '%s' "$mention" | jq -r '.issue_number // empty')"
 
     set +e
-    permission_json="$("$(agendev::root)/scripts/gh-pr-lifecycle.sh" check-permission "$repo" "$author" "$required" 2>/dev/null)"
+    permission_json="$("$(runoq::root)/scripts/gh-pr-lifecycle.sh" check-permission "$repo" "$author" "$required" 2>/dev/null)"
     permission_status="$?"
     set -e
     permission="$(printf '%s' "$permission_json" | jq -r '.permission // "none"')"
@@ -91,7 +91,7 @@ process_mentions() {
       fi
     fi
 
-    "$(agendev::root)/scripts/state.sh" record-mention "$comment_id" >/dev/null
+    "$(runoq::root)/scripts/state.sh" record-mention "$comment_id" >/dev/null
     jq -n \
       --argjson mention "$mention" \
       --arg action "$action" \

@@ -1,7 +1,7 @@
-<!-- agendev:summary:start -->
+<!-- runoq:summary:start -->
 Implemented the queue selector and verified the happy path.
-<!-- agendev:summary:end -->
+<!-- runoq:summary:end -->
 
-<!-- agendev:attention:start -->
+<!-- runoq:attention:start -->
 - Review the retry policy around blocked issues.
-<!-- agendev:attention:end -->
+<!-- runoq:attention:end -->

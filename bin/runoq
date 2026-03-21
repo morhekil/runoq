@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SELF_PATH="$0"
+while [[ -L "$SELF_PATH" ]]; do
+  SELF_DIR="$(cd "$(dirname "$SELF_PATH")" && pwd)"
+  SELF_PATH="$(readlink "$SELF_PATH")"
+  [[ "$SELF_PATH" = /* ]] || SELF_PATH="${SELF_DIR}/${SELF_PATH}"
+done
+
+RUNOQ_ROOT="$(cd "$(dirname "$SELF_PATH")/.." && pwd)"
+export RUNOQ_ROOT
+export RUNOQ_CONFIG="${RUNOQ_CONFIG:-$RUNOQ_ROOT/config/runoq.json}"
+
+source "$RUNOQ_ROOT/scripts/lib/common.sh"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  runoq init
+  runoq plan <file>
+  runoq run [--issue N] [--dry-run]
+  runoq report <summary|issue|cost> [...]
+  runoq maintenance
+EOF
+}
+
+prepare_target_context() {
+  export TARGET_ROOT
+  export REPO
+  TARGET_ROOT="$(runoq::target_root)"
+  REPO="$(runoq::repo)"
+  export PATH="$RUNOQ_ROOT/scripts:$PATH"
+}
+
+prepare_auth() {
+  eval "$("$RUNOQ_ROOT/scripts/gh-auth.sh" export-token)"
+}
+
+claude_exec() {
+  local claude_bin="${RUNOQ_CLAUDE_BIN:-claude}"
+  command -v "$claude_bin" >/dev/null 2>&1 || runoq::die "Claude CLI not found: $claude_bin"
+  (
+    cd "$TARGET_ROOT"
+    "$claude_bin" "$@"
+  )
+}
+
+run_subcommand() {
+  prepare_target_context
+  prepare_auth
+  "$RUNOQ_ROOT/scripts/run.sh" "$@"
+}
+
+plan_subcommand() {
+  local plan_file
+  [[ $# -eq 1 ]] || runoq::die "Usage: runoq plan <file>"
+  prepare_target_context
+  prepare_auth
+  plan_file="$(runoq::absolute_path "$1")"
+  [[ -f "$plan_file" ]] || runoq::die "Plan file not found: $plan_file"
+  claude_exec --skill plan-to-issues --add-dir "$RUNOQ_ROOT" -- "$plan_file"
+}
+
+maintenance_subcommand() {
+  prepare_target_context
+  prepare_auth
+  claude_exec --agent maintenance-reviewer --add-dir "$RUNOQ_ROOT"
+}
+
+subcommand="${1:-}"
+shift || true
+
+case "$subcommand" in
+  init)
+    prepare_target_context
+    "$RUNOQ_ROOT/scripts/setup.sh" "$@"
+    ;;
+  plan)
+    plan_subcommand "$@"
+    ;;
+  run)
+    run_subcommand "$@"
+    ;;
+  report)
+    prepare_target_context
+    "$RUNOQ_ROOT/scripts/report.sh" "$@"
+    ;;
+  maintenance)
+    maintenance_subcommand "$@"
+    ;;
+  ""|-h|--help|help)
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 1
+    ;;
+esac

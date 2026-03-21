@@ -1,4 +1,4 @@
-# agendev
+# runoq
 
 This repository implements the deterministic shell/runtime layer for GitHub-backed agentic development orchestration.
 
@@ -7,7 +7,7 @@ This repository implements the deterministic shell/runtime layer for GitHub-back
 - Keep GitHub operations in scripts, not prompts.
 - Prefer structured JSON output over prose for script boundaries.
 - Preserve the target project's main working tree; use sibling worktrees for execution.
-- Treat `.agendev/state/*.json` as recovery breadcrumbs, not the audit trail.
+- Treat `.runoq/state/*.json` as recovery breadcrumbs, not the audit trail.
 
 ## Development guidelines
 

@@ -20,7 +20,7 @@ state_dir_arg=""
 
 parse_state_dir_arg() {
   if [[ "${1:-}" == "--state-dir" ]]; then
-    [[ $# -ge 2 ]] || agendev::die "--state-dir requires a value"
+    [[ $# -ge 2 ]] || runoq::die "--state-dir requires a value"
     state_dir_arg="$2"
     shift 2
   fi
@@ -31,7 +31,7 @@ state_dir_resolved() {
   if [[ -n "$state_dir_arg" ]]; then
     printf '%s\n' "$state_dir_arg"
   else
-    agendev::state_dir
+    runoq::state_dir
   fi
 }
 
@@ -51,10 +51,10 @@ validate_phase_transition() {
       return 0
       ;;
     DONE:*|FAILED:*)
-      agendev::die "Invalid transition from terminal phase $from to $to"
+      runoq::die "Invalid transition from terminal phase $from to $to"
       ;;
     *)
-      agendev::die "Invalid phase transition: $from -> $to"
+      runoq::die "Invalid phase transition: $from -> $to"
       ;;
   esac
 }
@@ -63,19 +63,19 @@ load_state_raw() {
   local issue="$1"
   local file
   file="$(state_file "$issue")"
-  [[ -f "$file" ]] || agendev::die "State file not found for issue $issue"
-  jq -e '.' "$file" 2>/dev/null || agendev::die "State file is corrupted for issue $issue"
+  [[ -f "$file" ]] || runoq::die "State file not found for issue $issue"
+  jq -e '.' "$file" 2>/dev/null || runoq::die "State file is corrupted for issue $issue"
 }
 
 save_state() {
   local issue="$1"
   local file current_phase current_started payload tmp now
-  agendev::ensure_state_dir
+  runoq::ensure_state_dir
   file="$(state_file "$issue")"
   payload="$(cat)"
   now="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
-  printf '%s' "$payload" | jq -e --argjson issue "$issue" '. + {issue:$issue}' >/dev/null || agendev::die "State payload must be valid JSON"
+  printf '%s' "$payload" | jq -e --argjson issue "$issue" '. + {issue:$issue}' >/dev/null || runoq::die "State payload must be valid JSON"
 
   if [[ -f "$file" ]]; then
     current_phase="$(jq -r '.phase' "$file")"
@@ -110,7 +110,7 @@ extract_payload_block() {
   local marked_block
   marked_block="$(
     awk '
-      /^<!-- agendev:payload:codex-return -->$/ {
+      /^<!-- runoq:payload:codex-return -->$/ {
         saw_marker = 1
         next
       }
@@ -292,7 +292,7 @@ extract_payload() {
   local source_file="$1"
   local block
   block="$(extract_payload_block "$source_file")"
-  [[ -n "$block" ]] || agendev::die "No fenced payload block found"
+  [[ -n "$block" ]] || runoq::die "No fenced payload block found"
   printf '%s' "$block"
 }
 
@@ -302,8 +302,8 @@ validate_payload() {
   local source_file="$3"
   local extracted_file truth_file
 
-  extracted_file="$(mktemp "${TMPDIR:-/tmp}/agendev-payload.XXXXXX.json")"
-  truth_file="$(mktemp "${TMPDIR:-/tmp}/agendev-truth.XXXXXX.json")"
+  extracted_file="$(mktemp "${TMPDIR:-/tmp}/runoq-payload.XXXXXX.json")"
+  truth_file="$(mktemp "${TMPDIR:-/tmp}/runoq-truth.XXXXXX.json")"
   ground_truth_json "$worktree" "$base_sha" >"$truth_file"
 
   if ! extract_payload_block "$source_file" >"$extracted_file" || [[ ! -s "$extracted_file" ]]; then
@@ -333,13 +333,13 @@ read_mentions() {
     printf '[]\n'
     return
   fi
-  jq -e '.' "$file" 2>/dev/null || agendev::die "Processed mentions file is corrupted"
+  jq -e '.' "$file" 2>/dev/null || runoq::die "Processed mentions file is corrupted"
 }
 
 record_mention() {
   local comment_id="$1"
   local file tmp
-  agendev::ensure_state_dir
+  runoq::ensure_state_dir
   file="$(mentions_file)"
   tmp="$(mktemp "$(state_dir_resolved)/.mentions.XXXXXX")"
   read_mentions | jq --argjson id "$comment_id" '

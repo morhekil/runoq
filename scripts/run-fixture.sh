@@ -11,15 +11,15 @@ source "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
 # ---------------------------------------------------------------------------
 
 issue_body_file() {
-  mktemp "${TMPDIR:-/tmp}/agendev-issue.XXXXXX"
+  mktemp "${TMPDIR:-/tmp}/runoq-issue.XXXXXX"
 }
 
 comment_file() {
-  mktemp "${TMPDIR:-/tmp}/agendev-comment.XXXXXX"
+  mktemp "${TMPDIR:-/tmp}/runoq-comment.XXXXXX"
 }
 
 summary_file() {
-  mktemp "${TMPDIR:-/tmp}/agendev-summary.XXXXXX"
+  mktemp "${TMPDIR:-/tmp}/runoq-summary.XXXXXX"
 }
 
 event_comment_file() {
@@ -27,7 +27,7 @@ event_comment_file() {
   local path
   path="$(comment_file)"
   {
-    echo "<!-- agendev:event -->"
+    echo "<!-- runoq:event -->"
     echo "$message"
   } >"$path"
   printf '%s\n' "$path"
@@ -35,7 +35,7 @@ event_comment_file() {
 
 issue_json() {
   local issue="$1"
-  agendev::gh issue view "$issue" --repo "$REPO" --json number,title,body,labels,url
+  runoq::gh issue view "$issue" --repo "$REPO" --json number,title,body,labels,url
 }
 
 body_summary() {
@@ -46,7 +46,7 @@ body_summary() {
 metadata_complexity() {
   local body_file="$1"
   awk '
-    /<!-- agendev:meta/ { in_block = 1; next }
+    /<!-- runoq:meta/ { in_block = 1; next }
     in_block && /-->/ { exit }
     in_block && /^estimated_complexity:/ {
       sub(/^estimated_complexity:[[:space:]]*/, "", $0)
@@ -59,7 +59,7 @@ metadata_complexity() {
 save_state_json() {
   local issue="$1"
   local payload="$2"
-  printf '%s\n' "$payload" | "$(agendev::root)/scripts/state.sh" save "$issue" >/dev/null
+  printf '%s\n' "$payload" | "$(runoq::root)/scripts/state.sh" save "$issue" >/dev/null
 }
 
 post_pr_event() {
@@ -67,7 +67,7 @@ post_pr_event() {
   local message="$2"
   local comment_path
   comment_path="$(event_comment_file "$message")"
-  "$(agendev::root)/scripts/gh-pr-lifecycle.sh" comment "$REPO" "$pr_number" "$comment_path" >/dev/null 2>&1 || true
+  "$(runoq::root)/scripts/gh-pr-lifecycle.sh" comment "$REPO" "$pr_number" "$comment_path" >/dev/null 2>&1 || true
   rm -f "$comment_path"
 }
 
@@ -75,12 +75,12 @@ post_issue_event() {
   local issue="$1"
   local message="$2"
   local body
-  body="$(printf '<!-- agendev:event -->\n%s\n' "$message")"
-  agendev::gh issue comment "$issue" --repo "$REPO" --body "$body" >/dev/null 2>&1 || true
+  body="$(printf '<!-- runoq:event -->\n%s\n' "$message")"
+  runoq::gh issue comment "$issue" --repo "$REPO" --body "$body" >/dev/null 2>&1 || true
 }
 
 first_reviewer() {
-  jq -r '.reviewers[0] // empty' "$(agendev::config_path)" 2>/dev/null || true
+  jq -r '.reviewers[0] // empty' "$(runoq::config_path)" 2>/dev/null || true
 }
 
 fixture_env_value() {
@@ -95,7 +95,7 @@ fixture_env_value() {
 }
 
 ready_label() {
-  agendev::config_get '.labels.ready'
+  runoq::config_get '.labels.ready'
 }
 
 write_dispatch_comment() {
@@ -104,14 +104,14 @@ write_dispatch_comment() {
   local comment_path
   comment_path="$(comment_file)"
   {
-    echo "<!-- agendev:payload:github-orchestrator-dispatch -->"
+    echo "<!-- runoq:payload:github-orchestrator-dispatch -->"
     echo
     echo '```json'
     cat "$payload_file"
     echo
     echo '```'
   } >"$comment_path"
-  "$(agendev::root)/scripts/gh-pr-lifecycle.sh" comment "$REPO" "$pr_number" "$comment_path" >/dev/null
+  "$(runoq::root)/scripts/gh-pr-lifecycle.sh" comment "$REPO" "$pr_number" "$comment_path" >/dev/null
   rm -f "$comment_path"
 }
 
@@ -125,7 +125,7 @@ write_codex_comment() {
   tests_summary="$(jq -r '.test_summary' "$payload_file")"
   status="$(jq -r '.status' "$payload_file")"
   {
-    echo "<!-- agendev:payload:codex-return -->"
+    echo "<!-- runoq:payload:codex-return -->"
     printf '**Dev round 1 complete:** status=%s, %s commits, %s files changed, tests %s\n' "$status" "$commits_count" "$files_count" "$tests_summary"
     echo
     echo '<details>'
@@ -137,7 +137,7 @@ write_codex_comment() {
     echo '```'
     echo '</details>'
   } >"$comment_path"
-  "$(agendev::root)/scripts/gh-pr-lifecycle.sh" comment "$REPO" "$pr_number" "$comment_path" >/dev/null
+  "$(runoq::root)/scripts/gh-pr-lifecycle.sh" comment "$REPO" "$pr_number" "$comment_path" >/dev/null
   rm -f "$comment_path"
 }
 
@@ -147,14 +147,14 @@ write_orchestrator_comment() {
   local comment_path
   comment_path="$(comment_file)"
   {
-    echo "<!-- agendev:payload:orchestrator-return -->"
+    echo "<!-- runoq:payload:orchestrator-return -->"
     echo
     echo '```json'
     cat "$payload_file"
     echo
     echo '```'
   } >"$comment_path"
-  "$(agendev::root)/scripts/gh-pr-lifecycle.sh" comment "$REPO" "$pr_number" "$comment_path" >/dev/null
+  "$(runoq::root)/scripts/gh-pr-lifecycle.sh" comment "$REPO" "$pr_number" "$comment_path" >/dev/null
   rm -f "$comment_path"
 }
 
@@ -163,17 +163,17 @@ write_summary_update() {
   local summary_path
   summary_path="$(summary_file)"
   {
-    echo "<!-- agendev:summary:start -->"
+    echo "<!-- runoq:summary:start -->"
     jq -r '.summary' "$orchestrator_file"
-    echo "<!-- agendev:summary:end -->"
+    echo "<!-- runoq:summary:end -->"
     echo
-    echo "<!-- agendev:attention:start -->"
+    echo "<!-- runoq:attention:start -->"
     if [[ "$(jq -r '.caveats | length' "$orchestrator_file")" -eq 0 ]]; then
       echo "None."
     else
       jq -r '.caveats[]' "$orchestrator_file"
     fi
-    echo "<!-- agendev:attention:end -->"
+    echo "<!-- runoq:attention:end -->"
   } >"$summary_path"
   printf '%s\n' "$summary_path"
 }
@@ -207,7 +207,7 @@ write_failure_result() {
   local summary="$1"
   local reason="$2"
   local output_file
-  output_file="$(mktemp "${TMPDIR:-/tmp}/agendev-orchestrator-failure.XXXXXX")"
+  output_file="$(mktemp "${TMPDIR:-/tmp}/runoq-orchestrator-failure.XXXXXX")"
   jq -n \
     --arg verdict "FAIL" \
     --arg summary "$summary" \
@@ -259,15 +259,15 @@ finalize_needs_review() {
     cleanup_outcome=true
   fi
   summary_path="$(write_summary_update "$orchestrator_file")"
-  "$(agendev::root)/scripts/gh-pr-lifecycle.sh" update-summary "$REPO" "$pr_number" "$summary_path" >/dev/null
+  "$(runoq::root)/scripts/gh-pr-lifecycle.sh" update-summary "$REPO" "$pr_number" "$summary_path" >/dev/null
   if [[ -n "$reviewer" ]]; then
     post_pr_event "$pr_number" "Assigned to @${reviewer} for human review. Reason: ${reason}."
-    "$(agendev::root)/scripts/gh-pr-lifecycle.sh" finalize "$REPO" "$pr_number" needs-review --reviewer "$reviewer" >/dev/null
+    "$(runoq::root)/scripts/gh-pr-lifecycle.sh" finalize "$REPO" "$pr_number" needs-review --reviewer "$reviewer" >/dev/null
   else
     post_pr_event "$pr_number" "Marked for human review. Reason: ${reason}."
-    "$(agendev::root)/scripts/gh-pr-lifecycle.sh" finalize "$REPO" "$pr_number" needs-review >/dev/null
+    "$(runoq::root)/scripts/gh-pr-lifecycle.sh" finalize "$REPO" "$pr_number" needs-review >/dev/null
   fi
-  "$(agendev::root)/scripts/gh-issue-queue.sh" set-status "$REPO" "$issue" "needs-review" >/dev/null
+  "$(runoq::root)/scripts/gh-issue-queue.sh" set-status "$REPO" "$issue" "needs-review" >/dev/null
   post_issue_event "$issue" "Escalated to human review: ${reason}."
   save_failed_state "$issue" "$branch" "$worktree" "$pr_number" "$orchestrator_file"
   if [[ "$cleanup_outcome" == "true" ]]; then
@@ -293,14 +293,14 @@ run_dev_command() {
   local worktree="$1"
   local issue="$2"
   local timeout dev_command
-  timeout="$(agendev::config_get '.stall.timeoutSeconds')"
-  dev_command="$(fixture_env_value "AGENDEV_TEST_DEV_COMMAND" "$issue")"
+  timeout="$(runoq::config_get '.stall.timeoutSeconds')"
+  dev_command="$(fixture_env_value "RUNOQ_TEST_DEV_COMMAND" "$issue")"
   [[ -n "$dev_command" ]] || dev_command="true"
-  "$(agendev::root)/scripts/watchdog.sh" \
+  "$(runoq::root)/scripts/watchdog.sh" \
     --timeout "$timeout" \
     --issue "$issue" \
-    --state-dir "$(agendev::state_dir)" \
-    -- env AGENDEV_TEST_CURRENT_ISSUE="$issue" bash -lc "cd \"$worktree\" && ${dev_command}"
+    --state-dir "$(runoq::state_dir)" \
+    -- env RUNOQ_TEST_CURRENT_ISSUE="$issue" bash -lc "cd \"$worktree\" && ${dev_command}"
 }
 
 post_circuit_breaker_event() {
@@ -361,7 +361,7 @@ generate_fixture_codex_output() {
   ' >"${output_file}.json"
 
   {
-    echo "<!-- agendev:payload:codex-return -->"
+    echo "<!-- runoq:payload:codex-return -->"
     echo '```json'
     cat "${output_file}.json"
     echo
@@ -383,14 +383,14 @@ fixture_run_issue() {
   complexity="$(metadata_complexity "$body_file")"
   [[ -n "$complexity" ]] || complexity="medium"
 
-  "$(agendev::root)/scripts/dispatch-safety.sh" eligibility "$REPO" "$current_issue" >/dev/null
-  "$(agendev::root)/scripts/gh-issue-queue.sh" set-status "$REPO" "$current_issue" in-progress >/dev/null
+  "$(runoq::root)/scripts/dispatch-safety.sh" eligibility "$REPO" "$current_issue" >/dev/null
+  "$(runoq::root)/scripts/gh-issue-queue.sh" set-status "$REPO" "$current_issue" in-progress >/dev/null
 
-  worktree_json="$("$(agendev::root)/scripts/worktree.sh" create "$current_issue" "$title")"
+  worktree_json="$("$(runoq::root)/scripts/worktree.sh" create "$current_issue" "$title")"
   branch_name="$(printf '%s' "$worktree_json" | jq -r '.branch')"
   worktree_path="$(printf '%s' "$worktree_json" | jq -r '.worktree')"
 
-  pr_json="$("$(agendev::root)/scripts/gh-pr-lifecycle.sh" create "$REPO" "$branch_name" "$current_issue" "$title")"
+  pr_json="$("$(runoq::root)/scripts/gh-pr-lifecycle.sh" create "$REPO" "$branch_name" "$current_issue" "$title")"
   pr_number="$(printf '%s' "$pr_json" | jq -r '.number')"
   base_sha="$(git -C "$worktree_path" rev-parse HEAD)"
 
@@ -402,7 +402,7 @@ fixture_run_issue() {
     {phase:$phase, round:0, branch:$branch, worktree:$worktree, pr_number:$pr_number}
   ')"
 
-  dispatch_payload_file="$(mktemp "${TMPDIR:-/tmp}/agendev-dispatch.XXXXXX")"
+  dispatch_payload_file="$(mktemp "${TMPDIR:-/tmp}/runoq-dispatch.XXXXXX")"
   jq -n \
     --argjson issue_number "$current_issue" \
     --arg issue_title "$title" \
@@ -411,8 +411,8 @@ fixture_run_issue() {
     --argjson pr_number "$pr_number" \
     --arg repo "$REPO" \
     --arg worktree "$worktree_path" \
-    --argjson max_rounds "$(agendev::config_get '.maxRounds')" \
-    --argjson max_token_budget "$(agendev::config_get '.maxTokenBudget')" '
+    --argjson max_rounds "$(runoq::config_get '.maxRounds')" \
+    --argjson max_token_budget "$(runoq::config_get '.maxTokenBudget')" '
     {
       issue_number: $issue_number,
       issue_title: $issue_title,
@@ -440,7 +440,7 @@ fixture_run_issue() {
   dev_exit="$?"
   set -e
   if [[ "$dev_exit" -ne 0 ]]; then
-    timeout_seconds="$(agendev::config_get '.stall.timeoutSeconds')"
+    timeout_seconds="$(runoq::config_get '.stall.timeoutSeconds')"
     if [[ "$dev_exit" -eq 124 ]]; then
       failure_reason="Agent stalled after ${timeout_seconds} seconds of inactivity. Process terminated. State preserved for resume."
     else
@@ -452,23 +452,23 @@ fixture_run_issue() {
     exit "$dev_exit"
   fi
 
-  codex_output_file="$(mktemp "${TMPDIR:-/tmp}/agendev-codex-output.XXXXXX")"
-  codex_output_source="$(fixture_env_value "AGENDEV_TEST_CODEX_OUTPUT_FILE" "$current_issue")"
+  codex_output_file="$(mktemp "${TMPDIR:-/tmp}/runoq-codex-output.XXXXXX")"
+  codex_output_source="$(fixture_env_value "RUNOQ_TEST_CODEX_OUTPUT_FILE" "$current_issue")"
   if [[ -n "$codex_output_source" ]]; then
     cp "$codex_output_source" "$codex_output_file"
   else
     generate_fixture_codex_output "$worktree_path" "$base_sha" "$codex_output_file"
   fi
 
-  payload_file="$(mktemp "${TMPDIR:-/tmp}/agendev-codex-payload.XXXXXX")"
-  "$(agendev::root)/scripts/state.sh" validate-payload "$worktree_path" "$base_sha" "$codex_output_file" >"$payload_file"
+  payload_file="$(mktemp "${TMPDIR:-/tmp}/runoq-codex-payload.XXXXXX")"
+  "$(runoq::root)/scripts/state.sh" validate-payload "$worktree_path" "$base_sha" "$codex_output_file" >"$payload_file"
   if [[ "$(jq -r '((.patched_fields // []) | length > 0) or ((.discrepancies // []) | length > 0)' "$payload_file")" == "true" ]]; then
     write_payload_reconstruction_comment "$pr_number" "$payload_file"
   fi
   write_codex_comment "$pr_number" "$payload_file"
 
-  verification_file="$(mktemp "${TMPDIR:-/tmp}/agendev-verify.XXXXXX")"
-  "$(agendev::root)/scripts/verify.sh" round "$worktree_path" "$branch_name" "$base_sha" "$payload_file" >"$verification_file"
+  verification_file="$(mktemp "${TMPDIR:-/tmp}/runoq-verify.XXXXXX")"
+  "$(runoq::root)/scripts/verify.sh" round "$worktree_path" "$branch_name" "$base_sha" "$payload_file" >"$verification_file"
   if [[ "$(jq -r '.ok' "$verification_file")" != "true" ]]; then
     write_verification_failure_comment "$pr_number" "$verification_file"
     failure_reason="post-dev verification failed: $(jq -r '.failures | join(", ")' "$verification_file")"
@@ -501,8 +501,8 @@ fixture_run_issue() {
     {phase:$phase, round:1, branch:$branch, worktree:$worktree, pr_number:$pr_number}
   ')"
 
-  orchestrator_file="$(mktemp "${TMPDIR:-/tmp}/agendev-orchestrator.XXXXXX")"
-  orchestrator_result_source="$(fixture_env_value "AGENDEV_TEST_ORCHESTRATOR_RETURN_FILE" "$current_issue")"
+  orchestrator_file="$(mktemp "${TMPDIR:-/tmp}/runoq-orchestrator.XXXXXX")"
+  orchestrator_result_source="$(fixture_env_value "RUNOQ_TEST_ORCHESTRATOR_RETURN_FILE" "$current_issue")"
   if [[ -n "$orchestrator_result_source" ]]; then
     cp "$orchestrator_result_source" "$orchestrator_file"
   else
@@ -511,12 +511,12 @@ fixture_run_issue() {
   write_orchestrator_comment "$pr_number" "$orchestrator_file"
 
   summary_path="$(write_summary_update "$orchestrator_file")"
-  "$(agendev::root)/scripts/gh-pr-lifecycle.sh" update-summary "$REPO" "$pr_number" "$summary_path" >/dev/null
+  "$(runoq::root)/scripts/gh-pr-lifecycle.sh" update-summary "$REPO" "$pr_number" "$summary_path" >/dev/null
   verdict="$(jq -r '.verdict' "$orchestrator_file")"
 
   if [[ "$verdict" == "PASS" && "$complexity" == "low" && "$(jq -r '.caveats | length' "$orchestrator_file")" -eq 0 ]]; then
-    "$(agendev::root)/scripts/gh-pr-lifecycle.sh" finalize "$REPO" "$pr_number" auto-merge >/dev/null
-    "$(agendev::root)/scripts/gh-issue-queue.sh" set-status "$REPO" "$current_issue" "done" >/dev/null
+    "$(runoq::root)/scripts/gh-pr-lifecycle.sh" finalize "$REPO" "$pr_number" auto-merge >/dev/null
+    "$(runoq::root)/scripts/gh-issue-queue.sh" set-status "$REPO" "$current_issue" "done" >/dev/null
     save_state_json "$current_issue" "$(jq -n \
       --arg phase "DONE" \
       --arg branch "$branch_name" \
@@ -525,7 +525,7 @@ fixture_run_issue() {
       --slurpfile outcome "$orchestrator_file" '
       {phase:$phase, round:1, branch:$branch, worktree:$worktree, pr_number:$pr_number, outcome:$outcome[0]}
     ')"
-    "$(agendev::root)/scripts/worktree.sh" remove "$current_issue" >/dev/null
+    "$(runoq::root)/scripts/worktree.sh" remove "$current_issue" >/dev/null
   else
     if [[ "$verdict" != "PASS" ]]; then
       failure_reason="orchestrator returned ${verdict}: $(jq -r '.summary' "$orchestrator_file")"
@@ -560,7 +560,7 @@ fixture_mode_run() {
   local reconcile_output queue_listing selection current_issue result status runs
   local consecutive_failures failure_limit failed_streak latest_pr latest_issue
 
-  reconcile_output="$("$(agendev::root)/scripts/dispatch-safety.sh" reconcile "$REPO")"
+  reconcile_output="$("$(runoq::root)/scripts/dispatch-safety.sh" reconcile "$REPO")"
 
   if [[ "$dry_run" == "true" && -n "$issue_number" ]]; then
     jq -n \
@@ -576,8 +576,8 @@ fixture_mode_run() {
   fi
 
   if [[ "$dry_run" == "true" ]]; then
-    queue_listing="$("$(agendev::root)/scripts/gh-issue-queue.sh" list "$REPO" "$(ready_label)")"
-    selection="$("$(agendev::root)/scripts/gh-issue-queue.sh" next "$REPO" "$(ready_label)")"
+    queue_listing="$("$(runoq::root)/scripts/gh-issue-queue.sh" list "$REPO" "$(ready_label)")"
+    selection="$("$(runoq::root)/scripts/gh-issue-queue.sh" next "$REPO" "$(ready_label)")"
     jq -n \
       --argjson reconciliation "$reconcile_output" \
       --argjson queue "$queue_listing" \
@@ -599,13 +599,13 @@ fixture_mode_run() {
 
   runs='[]'
   consecutive_failures=0
-  failure_limit="$(agendev::config_get '.consecutiveFailureLimit')"
+  failure_limit="$(runoq::config_get '.consecutiveFailureLimit')"
   failed_streak='[]'
   latest_pr=""
   latest_issue=""
 
   while true; do
-    selection="$("$(agendev::root)/scripts/gh-issue-queue.sh" next "$REPO" "$(ready_label)")"
+    selection="$("$(runoq::root)/scripts/gh-issue-queue.sh" next "$REPO" "$(ready_label)")"
     current_issue="$(printf '%s' "$selection" | jq -r '.issue.number // empty')"
     if [[ -z "$current_issue" ]]; then
       jq -n \

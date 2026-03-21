@@ -22,7 +22,7 @@ You receive:
 ### Step 1 — Setup
 
 1. Read all guideline files and the spec (if provided).
-2. Read `"$AGENDEV_ROOT/config/agendev.json"` for project configuration.
+2. Read `"$RUNOQ_ROOT/config/runoq.json"` for project configuration.
 3. Checkout or confirm you are on a clean `main` branch.
 
 ### Step 2 — Full review
@@ -37,7 +37,7 @@ This produces the complete Code Metrics table, PERFECT-D Scorecard, and Agent Fe
 
 ### Step 3 — Post findings
 
-Post the review output to the tracking issue as a comment via `pr-lifecycle` skill (`comment` action) or directly via `"$AGENDEV_ROOT/scripts/gh-issue-queue.sh"`.
+Post the review output to the tracking issue as a comment via `pr-lifecycle` skill (`comment` action) or directly via `"$RUNOQ_ROOT/scripts/gh-issue-queue.sh"`.
 
 Structure the comment as:
 

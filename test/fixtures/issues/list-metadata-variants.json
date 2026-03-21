@@ -4,16 +4,16 @@
     "title": "No metadata block",
     "body": "## Acceptance Criteria\n\n- [ ] Add a metadata block later.",
     "labels": [
-      { "name": "agendev:ready" }
+      { "name": "runoq:ready" }
     ],
     "url": "https://github.com/owner/repo/issues/11"
   },
   {
     "number": 12,
     "title": "Malformed metadata block",
-    "body": "<!-- agendev:meta\ndepends_on: nope\npriority: urgent\nestimated_complexity:\n-->\n\n## Acceptance Criteria\n\n- [ ] Fix metadata parsing.",
+    "body": "<!-- runoq:meta\ndepends_on: nope\npriority: urgent\nestimated_complexity:\n-->\n\n## Acceptance Criteria\n\n- [ ] Fix metadata parsing.",
     "labels": [
-      { "name": "agendev:ready" },
+      { "name": "runoq:ready" },
       { "name": "bug" }
     ],
     "url": "https://github.com/owner/repo/issues/12"

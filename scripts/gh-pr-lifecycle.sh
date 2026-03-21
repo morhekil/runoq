@@ -68,10 +68,10 @@ create_pr() {
   local issue_number="$3"
   local title="$4"
   local template tmp result number
-  template="$(agendev::root)/templates/pr-template.md"
-  tmp="$(mktemp "${TMPDIR:-/tmp}/agendev-pr-create.XXXXXX")"
+  template="$(runoq::root)/templates/pr-template.md"
+  tmp="$(mktemp "${TMPDIR:-/tmp}/runoq-pr-create.XXXXXX")"
   sed "s/ISSUE_NUMBER/${issue_number}/g" "$template" >"$tmp"
-  result="$(agendev::gh pr create --repo "$repo" --draft --title "$title" --head "$branch" --body-file "$tmp")"
+  result="$(runoq::gh pr create --repo "$repo" --draft --title "$title" --head "$branch" --body-file "$tmp")"
   rm -f "$tmp"
   number="$(printf '%s' "$result" | sed -n 's#.*/pull/\([0-9][0-9]*\).*#\1#p')"
   jq -n --arg url "$result" --argjson number "${number:-null}" '{url:$url, number:$number}'
@@ -81,7 +81,7 @@ comment_pr() {
   local repo="$1"
   local pr_number="$2"
   local comment_file="$3"
-  agendev::gh pr comment "$pr_number" --repo "$repo" --body-file "$comment_file" >/dev/null
+  runoq::gh pr comment "$pr_number" --repo "$repo" --body-file "$comment_file" >/dev/null
   jq -n --argjson pr "$pr_number" '{commented:true, pr:$pr}'
 }
 
@@ -90,14 +90,14 @@ update_summary() {
   local pr_number="$2"
   local update_file="$3"
   local current_body_file summary_file attention_file body_file temp_body
-  current_body_file="$(mktemp "${TMPDIR:-/tmp}/agendev-pr-body.XXXXXX")"
-  summary_file="$(mktemp "${TMPDIR:-/tmp}/agendev-pr-summary.XXXXXX")"
-  attention_file="$(mktemp "${TMPDIR:-/tmp}/agendev-pr-attention.XXXXXX")"
-  temp_body="$(mktemp "${TMPDIR:-/tmp}/agendev-pr-updated.XXXXXX")"
+  current_body_file="$(mktemp "${TMPDIR:-/tmp}/runoq-pr-body.XXXXXX")"
+  summary_file="$(mktemp "${TMPDIR:-/tmp}/runoq-pr-summary.XXXXXX")"
+  attention_file="$(mktemp "${TMPDIR:-/tmp}/runoq-pr-attention.XXXXXX")"
+  temp_body="$(mktemp "${TMPDIR:-/tmp}/runoq-pr-updated.XXXXXX")"
 
-  agendev::gh pr view "$pr_number" --repo "$repo" --json body | jq -r '.body' >"$current_body_file"
-  extract_replacement_block "$update_file" "<!-- agendev:summary:start -->" "<!-- agendev:summary:end -->" >"$summary_file"
-  extract_replacement_block "$update_file" "<!-- agendev:attention:start -->" "<!-- agendev:attention:end -->" >"$attention_file"
+  runoq::gh pr view "$pr_number" --repo "$repo" --json body | jq -r '.body' >"$current_body_file"
+  extract_replacement_block "$update_file" "<!-- runoq:summary:start -->" "<!-- runoq:summary:end -->" >"$summary_file"
+  extract_replacement_block "$update_file" "<!-- runoq:attention:start -->" "<!-- runoq:attention:end -->" >"$attention_file"
 
   if [[ ! -s "$summary_file" ]]; then
     cat "$update_file" >"$summary_file"
@@ -106,13 +106,13 @@ update_summary() {
     printf 'None.\n' >"$attention_file"
   fi
 
-  replace_marker_block "$current_body_file" "<!-- agendev:summary:start -->" "<!-- agendev:summary:end -->" "$summary_file" "$temp_body"
+  replace_marker_block "$current_body_file" "<!-- runoq:summary:start -->" "<!-- runoq:summary:end -->" "$summary_file" "$temp_body"
   mv "$temp_body" "$current_body_file"
-  temp_body="$(mktemp "${TMPDIR:-/tmp}/agendev-pr-updated.XXXXXX")"
-  replace_marker_block "$current_body_file" "<!-- agendev:attention:start -->" "<!-- agendev:attention:end -->" "$attention_file" "$temp_body"
+  temp_body="$(mktemp "${TMPDIR:-/tmp}/runoq-pr-updated.XXXXXX")"
+  replace_marker_block "$current_body_file" "<!-- runoq:attention:start -->" "<!-- runoq:attention:end -->" "$attention_file" "$temp_body"
   mv "$temp_body" "$current_body_file"
 
-  agendev::gh pr edit "$pr_number" --repo "$repo" --body-file "$current_body_file" >/dev/null
+  runoq::gh pr edit "$pr_number" --repo "$repo" --body-file "$current_body_file" >/dev/null
   rm -f "$current_body_file" "$summary_file" "$attention_file"
   jq -n --argjson pr "$pr_number" '{updated:true, pr:$pr}'
 }
@@ -131,7 +131,7 @@ finalize_pr() {
   ready_pr() {
     local output status
     set +e
-    output="$(agendev::gh pr ready "$pr_number" --repo "$repo" 2>&1)"
+    output="$(runoq::gh pr ready "$pr_number" --repo "$repo" 2>&1)"
     status=$?
     set -e
     if [[ "$status" -eq 0 ]]; then
@@ -150,14 +150,14 @@ finalize_pr() {
       local merge_output merge_status
       ready_pr
       set +e
-      merge_output="$(agendev::gh pr merge "$pr_number" --repo "$repo" --auto --squash 2>&1)"
+      merge_output="$(runoq::gh pr merge "$pr_number" --repo "$repo" --auto --squash 2>&1)"
       merge_status=$?
       set -e
       if [[ "$merge_status" -eq 0 ]]; then
         :
       elif [[ "$merge_output" == *"Protected branch rules not configured for this branch"* ]] || [[ "$merge_output" == *"enablePullRequestAutoMerge"* ]]; then
         printf '%s\n' "$merge_output" >&2
-        agendev::gh pr merge "$pr_number" --repo "$repo" --squash --delete-branch >/dev/null
+        runoq::gh pr merge "$pr_number" --repo "$repo" --squash --delete-branch >/dev/null
       else
         printf '%s\n' "$merge_output" >&2
         return "$merge_status"
@@ -168,7 +168,7 @@ finalize_pr() {
       ready_pr
       if [[ -n "$reviewer" ]]; then
         set +e
-        edit_output="$(agendev::gh pr edit "$pr_number" --repo "$repo" --add-reviewer "$reviewer" --add-assignee "$reviewer" 2>&1)"
+        edit_output="$(runoq::gh pr edit "$pr_number" --repo "$repo" --add-reviewer "$reviewer" --add-assignee "$reviewer" 2>&1)"
         edit_status=$?
         set -e
         if [[ "$edit_status" -eq 0 ]]; then
@@ -179,7 +179,7 @@ finalize_pr() {
       fi
       ;;
     *)
-      agendev::die "Unknown finalize verdict: $verdict"
+      runoq::die "Unknown finalize verdict: $verdict"
       ;;
   esac
 
@@ -198,7 +198,7 @@ line_comment() {
   local end_line="$5"
   local body="$6"
   local head_sha args
-  head_sha="$(agendev::gh pr view "$pr_number" --repo "$repo" --json headRefOid | jq -r '.headRefOid')"
+  head_sha="$(runoq::gh pr view "$pr_number" --repo "$repo" --json headRefOid | jq -r '.headRefOid')"
   args=(
     "repos/${repo}/pulls/${pr_number}/comments"
     --method POST
@@ -211,7 +211,7 @@ line_comment() {
   if [[ "$start_line" != "$end_line" ]]; then
     args+=(-F start_line="$start_line" -F start_side=RIGHT)
   fi
-  agendev::gh api "${args[@]}" >/dev/null
+  runoq::gh api "${args[@]}" >/dev/null
   jq -n --arg path "$file" --argjson start "$start_line" --argjson end "$end_line" '{path:$path, start_line:$start, end_line:$end}'
 }
 
@@ -220,8 +220,8 @@ read_actionable() {
   local pr_number="$2"
   local handle="$3"
   local issue_comments review_comments
-  issue_comments="$(agendev::gh api "repos/${repo}/issues/${pr_number}/comments")"
-  review_comments="$(agendev::gh api "repos/${repo}/pulls/${pr_number}/comments")"
+  issue_comments="$(runoq::gh api "repos/${repo}/issues/${pr_number}/comments")"
+  review_comments="$(runoq::gh api "repos/${repo}/pulls/${pr_number}/comments")"
 
   jq -n \
     --arg handle "@${handle}" \
@@ -231,8 +231,8 @@ read_actionable() {
       $issue_comments
       | map(
           select(.body | contains($handle))
-          | select(.body | contains("agendev:payload") | not)
-          | select(.body | contains("agendev:event") | not)
+          | select(.body | contains("runoq:payload") | not)
+          | select(.body | contains("runoq:event") | not)
           | {
               id: .id,
               author: .user.login,
@@ -260,7 +260,7 @@ poll_mentions() {
   local handle="$2"
   local since="${3:-}"
   local issues open_items item_number endpoint comments comment mention_state_args
-  open_items="$(agendev::gh api "repos/${repo}/issues?state=open&per_page=100")"
+  open_items="$(runoq::gh api "repos/${repo}/issues?state=open&per_page=100")"
 
   while IFS= read -r item; do
     [[ -z "$item" ]] && continue
@@ -269,18 +269,18 @@ poll_mentions() {
     if [[ -n "$since" ]]; then
       endpoint="${endpoint}?since=${since}"
     fi
-    comments="$(agendev::gh api "$endpoint")"
+    comments="$(runoq::gh api "$endpoint")"
 
     while IFS= read -r comment; do
       [[ -z "$comment" ]] && continue
       comment_id="$(printf '%s' "$comment" | jq -r '.id')"
-      if "$(agendev::root)/scripts/state.sh" has-mention "$comment_id" >/dev/null 2>&1; then
+      if "$(runoq::root)/scripts/state.sh" has-mention "$comment_id" >/dev/null 2>&1; then
         continue
       fi
       if [[ "$(printf '%s' "$comment" | jq -r --arg handle "@${handle}" '
         (.body | contains($handle)) and
-        (.body | contains("agendev:payload") | not) and
-        (.body | contains("agendev:event") | not)
+        (.body | contains("runoq:payload") | not) and
+        (.body | contains("runoq:event") | not)
       ')" != "true" ]]; then
         continue
       fi
@@ -307,7 +307,7 @@ check_permission() {
   local username="$2"
   local required="$3"
   local permission rank required_rank
-  permission="$(agendev::gh api "repos/${repo}/collaborators/${username}/permission" | jq -r '.permission')"
+  permission="$(runoq::gh api "repos/${repo}/collaborators/${username}/permission" | jq -r '.permission')"
 
   case "$permission" in
     admin) rank=3 ;;
@@ -320,7 +320,7 @@ check_permission() {
     admin) required_rank=3 ;;
     write) required_rank=2 ;;
     read) required_rank=1 ;;
-    *) agendev::die "Unknown permission level: $required" ;;
+    *) runoq::die "Unknown permission level: $required" ;;
   esac
 
   if (( rank >= required_rank )); then

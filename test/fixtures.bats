@@ -22,10 +22,10 @@ load test_helper
 }
 
 @test "audit comment fixtures include required markers" {
-  run grep -n "agendev:payload:codex-return" "$(fixture_path "comments/audit-codex-return.md")"
+  run grep -n "runoq:payload:codex-return" "$(fixture_path "comments/audit-codex-return.md")"
   [ "$status" -eq 0 ]
 
-  run grep -n "agendev:event" "$(fixture_path "comments/audit-event.md")"
+  run grep -n "runoq:event" "$(fixture_path "comments/audit-event.md")"
   [ "$status" -eq 0 ]
 }
 

@@ -11,74 +11,74 @@ write_empty_key() {
   project_dir="$TEST_TMPDIR/project"
   make_git_repo "$project_dir" "git@github.com:owner/repo.git"
   export TARGET_ROOT="$project_dir"
-  export AGENDEV_SYMLINK_DIR="$TEST_TMPDIR/bin"
-  export AGENDEV_APP_KEY="$TEST_TMPDIR/app-key.pem"
-  export AGENDEV_APP_ID="123"
-  write_empty_key "$AGENDEV_APP_KEY"
+  export RUNOQ_SYMLINK_DIR="$TEST_TMPDIR/bin"
+  export RUNOQ_APP_KEY="$TEST_TMPDIR/app-key.pem"
+  export RUNOQ_APP_ID="123"
+  write_empty_key "$RUNOQ_APP_KEY"
 
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<EOF
 [
   {
     "contains": ["api", "/repos/owner/repo/installation"],
-    "stdout": "{\"id\":789,\"app_id\":123,\"app_slug\":\"agendevapp\"}"
+    "stdout": "{\"id\":789,\"app_id\":123,\"app_slug\":\"runoqapp\"}"
   },
   {
     "contains": ["label", "list", "--repo owner/repo"],
     "stdout": "[]"
   },
   {
-    "contains": ["label", "create", "agendev:ready", "--repo owner/repo"],
+    "contains": ["label", "create", "runoq:ready", "--repo owner/repo"],
     "stdout": ""
   },
   {
-    "contains": ["label", "create", "agendev:in-progress", "--repo owner/repo"],
+    "contains": ["label", "create", "runoq:in-progress", "--repo owner/repo"],
     "stdout": ""
   },
   {
-    "contains": ["label", "create", "agendev:done", "--repo owner/repo"],
+    "contains": ["label", "create", "runoq:done", "--repo owner/repo"],
     "stdout": ""
   },
   {
-    "contains": ["label", "create", "agendev:needs-human-review", "--repo owner/repo"],
+    "contains": ["label", "create", "runoq:needs-human-review", "--repo owner/repo"],
     "stdout": ""
   },
   {
-    "contains": ["label", "create", "agendev:blocked", "--repo owner/repo"],
+    "contains": ["label", "create", "runoq:blocked", "--repo owner/repo"],
     "stdout": ""
   },
   {
-    "contains": ["label", "create", "agendev:maintenance-review", "--repo owner/repo"],
+    "contains": ["label", "create", "runoq:maintenance-review", "--repo owner/repo"],
     "stdout": ""
   }
 ]
 EOF
   use_fake_gh "$scenario"
 
-  run "$AGENDEV_ROOT/scripts/setup.sh"
+  run "$RUNOQ_ROOT/scripts/setup.sh"
 
   [ "$status" -eq 0 ]
-  [ -d "$project_dir/.agendev/state" ]
-  [ -f "$project_dir/.agendev/identity.json" ]
+  [ -d "$project_dir/.runoq/state" ]
+  [ -f "$project_dir/.runoq/identity.json" ]
   [ -f "$project_dir/package.json" ]
   [ -f "$project_dir/.claude/agents/github-orchestrator.md" ]
   [ -f "$project_dir/.claude/agents/issue-runner.md" ]
   [ -f "$project_dir/.claude/skills/plan-to-issues/SKILL.md" ]
   [ -L "$project_dir/.claude/agents/github-orchestrator.md" ]
-  [ "$(readlink "$project_dir/.claude/agents/github-orchestrator.md")" = "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md" ]
-  [ "$(readlink "$project_dir/.claude/skills/plan-to-issues/SKILL.md")" = "$AGENDEV_ROOT/.claude/skills/plan-to-issues/SKILL.md" ]
-  [ -L "$AGENDEV_SYMLINK_DIR/agendev" ]
-  [ "$(jq -r '.appId' "$project_dir/.agendev/identity.json")" = "123" ]
+  [ "$(readlink "$project_dir/.claude/agents/github-orchestrator.md")" = "$RUNOQ_ROOT/.claude/agents/github-orchestrator.md" ]
+  [ "$(readlink "$project_dir/.claude/skills/plan-to-issues/SKILL.md")" = "$RUNOQ_ROOT/.claude/skills/plan-to-issues/SKILL.md" ]
+  [ -L "$RUNOQ_SYMLINK_DIR/runoq" ]
+  [ "$(jq -r '.appId' "$project_dir/.runoq/identity.json")" = "123" ]
 }
 
 @test "setup init rejects repo installations for a different app slug" {
   project_dir="$TEST_TMPDIR/project"
   make_git_repo "$project_dir" "git@github.com:owner/repo.git"
   export TARGET_ROOT="$project_dir"
-  export AGENDEV_SYMLINK_DIR="$TEST_TMPDIR/bin"
-  export AGENDEV_APP_KEY="$TEST_TMPDIR/app-key.pem"
-  export AGENDEV_APP_ID="123"
-  write_empty_key "$AGENDEV_APP_KEY"
+  export RUNOQ_SYMLINK_DIR="$TEST_TMPDIR/bin"
+  export RUNOQ_APP_KEY="$TEST_TMPDIR/app-key.pem"
+  export RUNOQ_APP_ID="123"
+  write_empty_key "$RUNOQ_APP_KEY"
 
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<EOF
@@ -91,21 +91,21 @@ EOF
 EOF
   use_fake_gh "$scenario"
 
-  run "$AGENDEV_ROOT/scripts/setup.sh"
+  run "$RUNOQ_ROOT/scripts/setup.sh"
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"Repository installation app slug wrong-app did not match configured identity.appSlug agendevapp."* ]]
+  [[ "$output" == *"Repository installation app slug wrong-app did not match configured identity.appSlug runoqapp."* ]]
 }
 
 @test "setup init resolves installation with an app JWT even when GH_TOKEN is set" {
   project_dir="$TEST_TMPDIR/project"
   make_git_repo "$project_dir" "git@github.com:owner/repo.git"
   export TARGET_ROOT="$project_dir"
-  export AGENDEV_SYMLINK_DIR="$TEST_TMPDIR/bin"
-  export AGENDEV_APP_KEY="$TEST_TMPDIR/app-key.pem"
-  export AGENDEV_APP_ID="123"
+  export RUNOQ_SYMLINK_DIR="$TEST_TMPDIR/bin"
+  export RUNOQ_APP_KEY="$TEST_TMPDIR/app-key.pem"
+  export RUNOQ_APP_ID="123"
   export GH_TOKEN="bogus-app-token"
-  write_empty_key "$AGENDEV_APP_KEY"
+  write_empty_key "$RUNOQ_APP_KEY"
 
   gh_wrapper="$TEST_TMPDIR/gh-wrapper"
   cat >"$gh_wrapper" <<'EOF'
@@ -121,7 +121,7 @@ if [[ "${1:-}" == "api" && "$*" == *"/repos/owner/repo/installation"* ]]; then
     echo "expected setup.sh to call installation lookup with Authorization: Bearer <jwt>" >&2
     exit 1
   fi
-  printf '%s' '{"id":789,"app_id":123,"app_slug":"agendevapp"}'
+  printf '%s' '{"id":789,"app_id":123,"app_slug":"runoqapp"}'
   exit 0
 fi
 
@@ -148,19 +148,19 @@ EOF
   chmod +x "$gh_wrapper"
   export GH_BIN="$gh_wrapper"
 
-  run "$AGENDEV_ROOT/scripts/setup.sh"
+  run "$RUNOQ_ROOT/scripts/setup.sh"
 
   [ "$status" -eq 0 ]
-  [ "$(jq -r '.appId' "$project_dir/.agendev/identity.json")" = "123" ]
+  [ "$(jq -r '.appId' "$project_dir/.runoq/identity.json")" = "123" ]
 }
 
 @test "setup init is idempotent on repeated runs" {
   project_dir="$TEST_TMPDIR/project"
   make_git_repo "$project_dir" "git@github.com:owner/repo.git"
   export TARGET_ROOT="$project_dir"
-  export AGENDEV_SYMLINK_DIR="$TEST_TMPDIR/bin"
-  mkdir -p "$project_dir/.agendev"
-  cat >"$project_dir/.agendev/identity.json" <<EOF
+  export RUNOQ_SYMLINK_DIR="$TEST_TMPDIR/bin"
+  mkdir -p "$project_dir/.runoq"
+  cat >"$project_dir/.runoq/identity.json" <<EOF
 {
   "appId": 123,
   "installationId": 789,
@@ -185,34 +185,34 @@ EOF
 [
   {
     "contains": ["label", "list", "--repo owner/repo"],
-    "stdout": "[{\"name\":\"agendev:ready\"},{\"name\":\"agendev:in-progress\"},{\"name\":\"agendev:done\"},{\"name\":\"agendev:needs-human-review\"},{\"name\":\"agendev:blocked\"},{\"name\":\"agendev:maintenance-review\"}]"
+    "stdout": "[{\"name\":\"runoq:ready\"},{\"name\":\"runoq:in-progress\"},{\"name\":\"runoq:done\"},{\"name\":\"runoq:needs-human-review\"},{\"name\":\"runoq:blocked\"},{\"name\":\"runoq:maintenance-review\"}]"
   },
   {
     "contains": ["label", "list", "--repo owner/repo"],
-    "stdout": "[{\"name\":\"agendev:ready\"},{\"name\":\"agendev:in-progress\"},{\"name\":\"agendev:done\"},{\"name\":\"agendev:needs-human-review\"},{\"name\":\"agendev:blocked\"},{\"name\":\"agendev:maintenance-review\"}]"
+    "stdout": "[{\"name\":\"runoq:ready\"},{\"name\":\"runoq:in-progress\"},{\"name\":\"runoq:done\"},{\"name\":\"runoq:needs-human-review\"},{\"name\":\"runoq:blocked\"},{\"name\":\"runoq:maintenance-review\"}]"
   }
 ]
 EOF
   use_fake_gh "$scenario"
 
-  run "$AGENDEV_ROOT/scripts/setup.sh"
+  run "$RUNOQ_ROOT/scripts/setup.sh"
   [ "$status" -eq 0 ]
-  run "$AGENDEV_ROOT/scripts/setup.sh"
+  run "$RUNOQ_ROOT/scripts/setup.sh"
   [ "$status" -eq 0 ]
   [ "$(jq -r '.name' "$project_dir/package.json")" = "existing" ]
   [ "$(cat "$project_dir/.claude/agents/custom.md")" = "custom agent" ]
   [ -f "$project_dir/.claude/agents/github-orchestrator.md" ]
   [ -L "$project_dir/.claude/agents/github-orchestrator.md" ]
-  [ "$(readlink "$project_dir/.claude/agents/github-orchestrator.md")" = "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md" ]
+  [ "$(readlink "$project_dir/.claude/agents/github-orchestrator.md")" = "$RUNOQ_ROOT/.claude/agents/github-orchestrator.md" ]
 }
 
 @test "setup init replaces old copied Claude files with managed symlinks" {
   project_dir="$TEST_TMPDIR/project"
   make_git_repo "$project_dir" "git@github.com:owner/repo.git"
   export TARGET_ROOT="$project_dir"
-  export AGENDEV_SYMLINK_DIR="$TEST_TMPDIR/bin"
-  mkdir -p "$project_dir/.agendev" "$project_dir/.claude/agents" "$project_dir/.claude/skills/plan-to-issues"
-  cat >"$project_dir/.agendev/identity.json" <<EOF
+  export RUNOQ_SYMLINK_DIR="$TEST_TMPDIR/bin"
+  mkdir -p "$project_dir/.runoq" "$project_dir/.claude/agents" "$project_dir/.claude/skills/plan-to-issues"
+  cat >"$project_dir/.runoq/identity.json" <<EOF
 {
   "appId": 123,
   "installationId": 789,
@@ -220,7 +220,7 @@ EOF
 }
 EOF
   write_empty_key "$TEST_TMPDIR/app-key.pem"
-  cp "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md" "$project_dir/.claude/agents/github-orchestrator.md"
+  cp "$RUNOQ_ROOT/.claude/agents/github-orchestrator.md" "$project_dir/.claude/agents/github-orchestrator.md"
   echo "stale skill content" >"$project_dir/.claude/skills/plan-to-issues/SKILL.md"
 
   scenario="$TEST_TMPDIR/scenario.json"
@@ -228,17 +228,17 @@ EOF
 [
   {
     "contains": ["label", "list", "--repo owner/repo"],
-    "stdout": "[{\"name\":\"agendev:ready\"},{\"name\":\"agendev:in-progress\"},{\"name\":\"agendev:done\"},{\"name\":\"agendev:needs-human-review\"},{\"name\":\"agendev:blocked\"},{\"name\":\"agendev:maintenance-review\"}]"
+    "stdout": "[{\"name\":\"runoq:ready\"},{\"name\":\"runoq:in-progress\"},{\"name\":\"runoq:done\"},{\"name\":\"runoq:needs-human-review\"},{\"name\":\"runoq:blocked\"},{\"name\":\"runoq:maintenance-review\"}]"
   }
 ]
 EOF
   use_fake_gh "$scenario"
 
-  run "$AGENDEV_ROOT/scripts/setup.sh"
+  run "$RUNOQ_ROOT/scripts/setup.sh"
 
   [ "$status" -eq 0 ]
   [ -f "$project_dir/.claude/agents/github-orchestrator.md" ]
   [ -L "$project_dir/.claude/agents/github-orchestrator.md" ]
-  [ "$(readlink "$project_dir/.claude/agents/github-orchestrator.md")" = "$AGENDEV_ROOT/.claude/agents/github-orchestrator.md" ]
-  [ "$(readlink "$project_dir/.claude/skills/plan-to-issues/SKILL.md")" = "$AGENDEV_ROOT/.claude/skills/plan-to-issues/SKILL.md" ]
+  [ "$(readlink "$project_dir/.claude/agents/github-orchestrator.md")" = "$RUNOQ_ROOT/.claude/agents/github-orchestrator.md" ]
+  [ "$(readlink "$project_dir/.claude/skills/plan-to-issues/SKILL.md")" = "$RUNOQ_ROOT/.claude/skills/plan-to-issues/SKILL.md" ]
 }

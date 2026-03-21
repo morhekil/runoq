@@ -1,14 +1,14 @@
 [
   {
     "id": 1001,
-    "body": "@agendev please re-run verification",
+    "body": "@runoq please re-run verification",
     "user": { "login": "reviewer1" },
     "html_url": "https://github.com/owner/repo/pull/87#issuecomment-1001"
   },
   {
     "id": 1002,
-    "body": "<!-- agendev:payload:codex-return -->",
-    "user": { "login": "agendev[bot]" },
+    "body": "<!-- runoq:payload:codex-return -->",
+    "user": { "login": "runoq[bot]" },
     "html_url": "https://github.com/owner/repo/pull/87#issuecomment-1002"
   },
   {

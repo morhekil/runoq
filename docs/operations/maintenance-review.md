@@ -1,6 +1,6 @@
 # Maintenance Review Operations
 
-This guide explains how to run and triage `agendev` maintenance review safely.
+This guide explains how to run and triage `runoq` maintenance review safely.
 
 The core rule is simple: maintenance review is read-only until a human explicitly approves filing work from a finding.
 
@@ -11,7 +11,7 @@ Maintenance review is a separate workflow from the normal implementation queue.
 It:
 
 - derives partitions from the target repo structure
-- creates a tracking issue labeled `agendev:maintenance-review`
+- creates a tracking issue labeled `runoq:maintenance-review`
 - posts one finding comment per finding
 - waits for human triage comments
 - creates queue issues only for findings a human approves
@@ -23,7 +23,7 @@ It does not modify source files or open PRs.
 Launch it from a clean target repository checkout:
 
 ```bash
-agendev maintenance
+runoq maintenance
 ```
 
 Behind the scenes, the maintenance reviewer agent uses `maintenance.sh` to start or resume the workflow.
@@ -68,7 +68,7 @@ Maintenance review 2026-03-17
 
 The body includes:
 
-- `<!-- agendev:event -->`
+- `<!-- runoq:event -->`
 - timestamp
 - current branch
 - current commit SHA
@@ -84,13 +84,13 @@ This gives operators a lightweight progress log before any findings are filed.
 
 ## Local Maintenance State
 
-Maintenance review writes `.agendev/state/maintenance.json` and advances it through:
+Maintenance review writes `.runoq/state/maintenance.json` and advances it through:
 
 - `STARTED`
 - `FINDINGS_POSTED`
 - `COMPLETED`
 
-It also reuses `.agendev/state/processed-mentions.json` so triage comments are only handled once.
+It also reuses `.runoq/state/processed-mentions.json` so triage comments are only handled once.
 
 ## Findings Format
 
@@ -121,8 +121,8 @@ Triage happens through comments on the tracking issue.
 Examples:
 
 ```text
-@agendev approve F1
-@agendev file this F1
+@runoq approve F1
+@runoq file this F1
 ```
 
 Effect:
@@ -137,7 +137,7 @@ Effect:
 Example:
 
 ```text
-@agendev file this F3 but lower priority
+@runoq file this F3 but lower priority
 ```
 
 Effect:
@@ -151,8 +151,8 @@ Effect:
 Examples:
 
 ```text
-@agendev skip F2
-@agendev won't fix F2
+@runoq skip F2
+@runoq won't fix F2
 ```
 
 Effect:
@@ -187,7 +187,7 @@ A queue issue is created only when all of the following are true:
 
 Created issues:
 
-- are labeled `agendev:ready`
+- are labeled `runoq:ready`
 - use the normal queue-issue metadata block
 - default to `estimated_complexity: medium`
 - include the finding description plus `Suggested fix: ...`
@@ -242,17 +242,17 @@ If the maintenance state is already complete:
 
 A safe operator loop looks like this:
 
-1. Run `agendev maintenance`.
+1. Run `runoq maintenance`.
 2. Open the tracking issue and read the partition comments and finding comments.
 3. Approve only the findings you want filed as normal queue work.
 4. Decline the findings you do not want filed.
 5. Wait for the completion summary and confirm that all findings left `pending`.
-6. Switch back to normal queue operations for any new `agendev:ready` issues created from approved findings.
+6. Switch back to normal queue operations for any new `runoq:ready` issues created from approved findings.
 
 ## What To Inspect If Something Looks Wrong
 
-- `.agendev/state/maintenance.json` for the current phase and finding statuses
-- `.agendev/state/processed-mentions.json` for whether a triage comment was already handled
+- `.runoq/state/maintenance.json` for the current phase and finding statuses
+- `.runoq/state/processed-mentions.json` for whether a triage comment was already handled
 - tracking issue comments for approval, denial, recurring-pattern, and completion messages
 - newly created queue issues when a finding was approved
 

@@ -10,7 +10,7 @@ The runtime needs local data to resume interrupted runs, deduplicate mentions, a
 
 ## Decision
 
-Use `.agendev/state/*.json` only as local resumability breadcrumbs and short-term execution state, not as the system audit trail.
+Use `.runoq/state/*.json` only as local resumability breadcrumbs and short-term execution state, not as the system audit trail.
 
 ## Consequences
 

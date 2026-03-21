@@ -7,14 +7,14 @@ load test_helper
   write_fake_gh_scenario "$scenario" <<EOF
 [
   {
-    "contains": ["pr", "create", "--repo owner/repo", "--draft", "--title Implement queue", "--head agendev/42-implement-queue"],
+    "contains": ["pr", "create", "--repo owner/repo", "--draft", "--title Implement queue", "--head runoq/42-implement-queue"],
     "stdout": "https://github.com/owner/repo/pull/87"
   }
 ]
 EOF
   use_fake_gh "$scenario"
 
-  run "$AGENDEV_ROOT/scripts/gh-pr-lifecycle.sh" create owner/repo agendev/42-implement-queue 42 "Implement queue"
+  run "$RUNOQ_ROOT/scripts/gh-pr-lifecycle.sh" create owner/repo runoq/42-implement-queue 42 "Implement queue"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *'"number": 87'* ]]
@@ -35,7 +35,7 @@ EOF
   use_fake_gh "$scenario"
   comment_file="$(fixture_path "comments/audit-event.md")"
 
-  run "$AGENDEV_ROOT/scripts/gh-pr-lifecycle.sh" comment owner/repo 87 "$comment_file"
+  run "$RUNOQ_ROOT/scripts/gh-pr-lifecycle.sh" comment owner/repo 87 "$comment_file"
 
   [ "$status" -eq 0 ]
   run diff -u "$comment_file" "$FAKE_GH_CAPTURE_DIR/0.body"
@@ -58,7 +58,7 @@ EOF
 EOF
   use_fake_gh "$scenario"
 
-  run "$AGENDEV_ROOT/scripts/gh-pr-lifecycle.sh" update-summary owner/repo 87 "$(fixture_path "comments/update-summary.md")"
+  run "$RUNOQ_ROOT/scripts/gh-pr-lifecycle.sh" update-summary owner/repo 87 "$(fixture_path "comments/update-summary.md")"
 
   [ "$status" -eq 0 ]
   run grep -n "Implemented the queue selector" "$FAKE_GH_CAPTURE_DIR/1.body"
@@ -95,11 +95,11 @@ EOF
 EOF
   use_fake_gh "$scenario"
 
-  run "$AGENDEV_ROOT/scripts/gh-pr-lifecycle.sh" finalize owner/repo 87 auto-merge
+  run "$RUNOQ_ROOT/scripts/gh-pr-lifecycle.sh" finalize owner/repo 87 auto-merge
   [ "$status" -eq 0 ]
   [[ "$output" == *'"verdict": "auto-merge"'* ]]
 
-  run "$AGENDEV_ROOT/scripts/gh-pr-lifecycle.sh" finalize owner/repo 88 needs-review --reviewer reviewer1
+  run "$RUNOQ_ROOT/scripts/gh-pr-lifecycle.sh" finalize owner/repo 88 needs-review --reviewer reviewer1
   [ "$status" -eq 0 ]
   [[ "$output" == *'"reviewer": "reviewer1"'* ]]
 }
@@ -125,7 +125,7 @@ EOF
 EOF
   use_fake_gh "$scenario"
 
-  run "$AGENDEV_ROOT/scripts/gh-pr-lifecycle.sh" finalize owner/repo 87 auto-merge
+  run "$RUNOQ_ROOT/scripts/gh-pr-lifecycle.sh" finalize owner/repo 87 auto-merge
 
   [ "$status" -eq 0 ]
   [[ "$output" == *'"verdict": "auto-merge"'* ]]
@@ -149,7 +149,7 @@ EOF
 EOF
   use_fake_gh "$scenario"
 
-  run "$AGENDEV_ROOT/scripts/gh-pr-lifecycle.sh" finalize owner/repo 88 needs-review --reviewer reviewer1
+  run "$RUNOQ_ROOT/scripts/gh-pr-lifecycle.sh" finalize owner/repo 88 needs-review --reviewer reviewer1
 
   [ "$status" -eq 0 ]
   [[ "$output" == *'"verdict": "needs-review"'* ]]
@@ -172,7 +172,7 @@ EOF
 EOF
   use_fake_gh "$scenario"
 
-  run "$AGENDEV_ROOT/scripts/gh-pr-lifecycle.sh" line-comment owner/repo 87 src/retry.ts 10 14 "Needs a guard clause"
+  run "$RUNOQ_ROOT/scripts/gh-pr-lifecycle.sh" line-comment owner/repo 87 src/retry.ts 10 14 "Needs a guard clause"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *'"start_line": 10'* ]]
@@ -196,7 +196,7 @@ EOF
   use_fake_gh "$scenario"
 
   result_file="$TEST_TMPDIR/actionable.json"
-  "$AGENDEV_ROOT/scripts/gh-pr-lifecycle.sh" read-actionable owner/repo 87 agendev >"$result_file"
+  "$RUNOQ_ROOT/scripts/gh-pr-lifecycle.sh" read-actionable owner/repo 87 runoq >"$result_file"
 
   [ "$?" -eq 0 ]
   [ "$(jq -r 'length' "$result_file")" = "2" ]
@@ -224,12 +224,12 @@ EOF
 EOF
   use_fake_gh "$scenario"
   export TARGET_ROOT="$TEST_TMPDIR/project"
-  export AGENDEV_STATE_DIR="$TARGET_ROOT/.agendev/state"
-  mkdir -p "$AGENDEV_STATE_DIR"
-  "$AGENDEV_ROOT/scripts/state.sh" record-mention 3001 >/dev/null
+  export RUNOQ_STATE_DIR="$TARGET_ROOT/.runoq/state"
+  mkdir -p "$RUNOQ_STATE_DIR"
+  "$RUNOQ_ROOT/scripts/state.sh" record-mention 3001 >/dev/null
 
   result_file="$TEST_TMPDIR/poll.json"
-  "$AGENDEV_ROOT/scripts/gh-pr-lifecycle.sh" poll-mentions owner/repo agendev >"$result_file"
+  "$RUNOQ_ROOT/scripts/gh-pr-lifecycle.sh" poll-mentions owner/repo runoq >"$result_file"
 
   [ "$?" -eq 0 ]
   [ "$(jq -r 'length' "$result_file")" = "1" ]
@@ -253,11 +253,11 @@ EOF
 EOF
   use_fake_gh "$scenario"
 
-  run "$AGENDEV_ROOT/scripts/gh-pr-lifecycle.sh" check-permission owner/repo reviewer1 write
+  run "$RUNOQ_ROOT/scripts/gh-pr-lifecycle.sh" check-permission owner/repo reviewer1 write
   [ "$status" -eq 0 ]
   [[ "$output" == *'"allowed": true'* ]]
 
-  run "$AGENDEV_ROOT/scripts/gh-pr-lifecycle.sh" check-permission owner/repo reviewer2 admin
+  run "$RUNOQ_ROOT/scripts/gh-pr-lifecycle.sh" check-permission owner/repo reviewer2 admin
   [ "$status" -ne 0 ]
   [[ "$output" == *'"allowed": false'* ]]
 }

@@ -1,21 +1,21 @@
 # Configuration And Authentication Reference
 
-This document explains how `agendev` resolves configuration, repository identity, GitHub authentication, and mention authorization.
+This document explains how `runoq` resolves configuration, repository identity, GitHub authentication, and mention authorization.
 
 ## Resolution Order
 
-At runtime, `agendev` resolves configuration and identity in this order:
+At runtime, `runoq` resolves configuration and identity in this order:
 
-1. `AGENDEV_ROOT` if already exported, otherwise from the CLI/script location
-2. `AGENDEV_CONFIG` if set, otherwise `config/agendev.json` under `AGENDEV_ROOT`
+1. `RUNOQ_ROOT` if already exported, otherwise from the CLI/script location
+2. `RUNOQ_CONFIG` if set, otherwise `config/runoq.json` under `RUNOQ_ROOT`
 3. `TARGET_ROOT` if set, otherwise the current git toplevel
-4. `AGENDEV_REPO` if set, otherwise the `origin` GitHub remote converted to `owner/repo`
-5. `GH_TOKEN` if already present and `AGENDEV_FORCE_REFRESH_TOKEN` is unset
-6. `.agendev/identity.json` plus the GitHub App private key when a fresh installation token must be minted
+4. `RUNOQ_REPO` if set, otherwise the `origin` GitHub remote converted to `owner/repo`
+5. `GH_TOKEN` if already present and `RUNOQ_FORCE_REFRESH_TOKEN` is unset
+6. `.runoq/identity.json` plus the GitHub App private key when a fresh installation token must be minted
 
-## `config/agendev.json`
+## `config/runoq.json`
 
-The default runtime config lives at [`config/agendev.json`](../../config/agendev.json).
+The default runtime config lives at [`config/runoq.json`](../../config/runoq.json).
 
 ### Keys And Consumers
 
@@ -58,9 +58,9 @@ If you change config in this area, verify whether the shell code also needs to c
 
 ## Identity Files
 
-### `.agendev/identity.json`
+### `.runoq/identity.json`
 
-`agendev init` creates [`TARGET_ROOT/.agendev/identity.json`](../../scripts/setup.sh) with this shape:
+`runoq init` creates [`TARGET_ROOT/.runoq/identity.json`](../../scripts/setup.sh) with this shape:
 
 ```json
 {
@@ -72,11 +72,11 @@ If you change config in this area, verify whether the shell code also needs to c
 
 Field meaning:
 
-- `appId`: numeric GitHub App ID supplied by `AGENDEV_APP_ID` or looked up from the public app slug
+- `appId`: numeric GitHub App ID supplied by `RUNOQ_APP_ID` or looked up from the public app slug
 - `installationId`: numeric installation ID for the target repo
-- `privateKeyPath`: path recorded during `init`; `gh-auth.sh` also allows `AGENDEV_APP_KEY` to override it later
+- `privateKeyPath`: path recorded during `init`; `gh-auth.sh` also allows `RUNOQ_APP_KEY` to override it later
 
-If the file is missing, `gh-auth.sh` exits with `Run 'agendev init' first.` unless an existing `GH_TOKEN` is already available.
+If the file is missing, `gh-auth.sh` exits with `Run 'runoq init' first.` unless an existing `GH_TOKEN` is already available.
 
 ## Environment Variables
 
@@ -84,45 +84,45 @@ If the file is missing, `gh-auth.sh` exits with `Run 'agendev init' first.` unle
 
 | Variable | Purpose | Notes |
 | --- | --- | --- |
-| `AGENDEV_ROOT` | Runtime repo root | Usually exported by `bin/agendev` automatically |
-| `AGENDEV_CONFIG` | Override config path | Useful for alternate config files and tests |
+| `RUNOQ_ROOT` | Runtime repo root | Usually exported by `bin/runoq` automatically |
+| `RUNOQ_CONFIG` | Override config path | Useful for alternate config files and tests |
 | `TARGET_ROOT` | Override target repo root | Skips git toplevel detection when set |
-| `AGENDEV_REPO` | Override `owner/repo` | Bypasses remote parsing |
-| `AGENDEV_STATE_DIR` | Override local state directory | Primarily useful for tests and specialized workflows |
-| `AGENDEV_BASE_REF` | Override the worktree base ref | Defaults to `origin/main` |
-| `AGENDEV_SYMLINK_DIR` | Override where `agendev init` writes the symlink | Defaults to `/usr/local/bin` |
-| `AGENDEV_CLAUDE_BIN` | Override the Claude executable name/path | Defaults to `claude` |
+| `RUNOQ_REPO` | Override `owner/repo` | Bypasses remote parsing |
+| `RUNOQ_STATE_DIR` | Override local state directory | Primarily useful for tests and specialized workflows |
+| `RUNOQ_BASE_REF` | Override the worktree base ref | Defaults to `origin/main` |
+| `RUNOQ_SYMLINK_DIR` | Override where `runoq init` writes the symlink | Defaults to `/usr/local/bin` |
+| `RUNOQ_CLAUDE_BIN` | Override the Claude executable name/path | Defaults to `claude` |
 
 ### Authentication variables
 
 | Variable | Purpose | Notes |
 | --- | --- | --- |
 | `GH_TOKEN` | Reused GitHub token | Preferred by `gh-auth.sh` unless refresh is forced |
-| `AGENDEV_APP_ID` | Bootstrap GitHub App ID for `agendev init` | Required for private GitHub Apps; optional for public apps if slug lookup works |
-| `AGENDEV_APP_KEY` | Override GitHub App private key path | Used by both `setup.sh` and `gh-auth.sh` |
-| `AGENDEV_FORCE_REFRESH_TOKEN` | Force minting a fresh installation token | Ignores an existing `GH_TOKEN` when set |
+| `RUNOQ_APP_ID` | Bootstrap GitHub App ID for `runoq init` | Required for private GitHub Apps; optional for public apps if slug lookup works |
+| `RUNOQ_APP_KEY` | Override GitHub App private key path | Used by both `setup.sh` and `gh-auth.sh` |
+| `RUNOQ_FORCE_REFRESH_TOKEN` | Force minting a fresh installation token | Ignores an existing `GH_TOKEN` when set |
 
 ### Auth precedence
 
 `gh-auth.sh export-token` behaves like this:
 
-1. If `GH_TOKEN` is set and `AGENDEV_FORCE_REFRESH_TOKEN` is unset, return it unchanged.
-2. Otherwise, if `AGENDEV_TEST_GH_TOKEN` is set, return that test token.
-3. Otherwise, load `.agendev/identity.json`, resolve the private key path, mint a JWT, and call `POST /app/installations/<installationId>/access_tokens`.
+1. If `GH_TOKEN` is set and `RUNOQ_FORCE_REFRESH_TOKEN` is unset, return it unchanged.
+2. Otherwise, if `RUNOQ_TEST_GH_TOKEN` is set, return that test token.
+3. Otherwise, load `.runoq/identity.json`, resolve the private key path, mint a JWT, and call `POST /app/installations/<installationId>/access_tokens`.
 
 This means a shell session with an exported `GH_TOKEN` will bypass GitHub App minting unless you explicitly force refresh.
 
 ## GitHub App Authentication Flow
 
-### During `agendev init`
+### During `runoq init`
 
-`agendev init` is the bootstrap phase:
+`runoq init` is the bootstrap phase:
 
 - It does not call `gh-auth.sh`.
-- It resolves the app ID from `AGENDEV_APP_ID` when present. If `AGENDEV_APP_ID` is unset, it falls back to looking up the public app by slug.
+- It resolves the app ID from `RUNOQ_APP_ID` when present. If `RUNOQ_APP_ID` is unset, it falls back to looking up the public app by slug.
 - It mints a short-lived app JWT from the app ID and private key, then resolves the repo installation ID from the GitHub App installation API.
 - It uses operator `gh` auth only for repository label listing and creation.
-- Private GitHub Apps should set `AGENDEV_APP_ID` explicitly before running `agendev init`.
+- Private GitHub Apps should set `RUNOQ_APP_ID` explicitly before running `runoq init`.
 
 If that bootstrap succeeds, later commands can mint installation tokens from the saved identity.
 
@@ -132,11 +132,11 @@ These commands call `gh-auth.sh export-token` before invoking the runtime flow o
 
 - If `GH_TOKEN` is already present, it is reused by default.
 - If not, `gh-auth.sh` signs a JWT with the private key and exchanges it for an installation token.
-- The resulting token is injected into the current `agendev` process environment via `eval`.
+- The resulting token is injected into the current `runoq` process environment via `eval`.
 
 ### Common auth failures
 
-- `.agendev/identity.json` missing: run `agendev init`
+- `.runoq/identity.json` missing: run `runoq init`
 - GitHub App private key path missing or unreadable
 - Token mint response missing a `token` field
 - `origin` remote missing or not hosted on `github.com`
@@ -167,7 +167,7 @@ A mention is authorized when the collaborator rank is greater than or equal to t
 
 `mentions.sh process` handles unauthorized mentions based on `authorization.denyResponse`:
 
-- `comment`: post an `<!-- agendev:event -->` denial comment on the PR or issue
+- `comment`: post an `<!-- runoq:event -->` denial comment on the PR or issue
 - any other value: ignore silently
 
 The current default config is:
@@ -183,7 +183,7 @@ The current default config is:
 
 ### Deduplication
 
-Every processed mention ID is appended to `.agendev/state/processed-mentions.json` through `state.sh record-mention`.
+Every processed mention ID is appended to `.runoq/state/processed-mentions.json` through `state.sh record-mention`.
 
 - Authorized mentions are recorded once and returned with `action: "process"`.
 - Unauthorized mentions are still recorded once, then returned with `action: "deny"` or `action: "ignore"`.
@@ -191,12 +191,12 @@ Every processed mention ID is appended to `.agendev/state/processed-mentions.jso
 
 ## Troubleshooting Checklist
 
-- Confirm the runtime config path: `echo "$AGENDEV_CONFIG"`
+- Confirm the runtime config path: `echo "$RUNOQ_CONFIG"`
 - Inspect saved identity: `scripts/gh-auth.sh print-identity`
 - Check whether `GH_TOKEN` is masking installation-token minting: `echo "${GH_TOKEN:+set}"`
-- Force a fresh token when debugging app auth: `export AGENDEV_FORCE_REFRESH_TOKEN=1`
-- Verify the private key path recorded in `.agendev/identity.json`
-- Verify repo resolution from `origin` or `AGENDEV_REPO`
+- Force a fresh token when debugging app auth: `export RUNOQ_FORCE_REFRESH_TOKEN=1`
+- Verify the private key path recorded in `.runoq/identity.json`
+- Verify repo resolution from `origin` or `RUNOQ_REPO`
 - Check `authorization.minimumPermission` and `authorization.denyResponse` when mentions are denied or ignored unexpectedly
 
 ## Related Docs

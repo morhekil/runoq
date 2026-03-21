@@ -18,14 +18,14 @@ create_worktree() {
   local issue="$1"
   local title="$2"
   local target_root branch path base_ref
-  target_root="$(agendev::target_root)"
-  branch="$(agendev::branch_name "$issue" "$title")"
-  path="$(agendev::worktree_path "$issue")"
-  base_ref="$(agendev::default_branch_ref)"
+  target_root="$(runoq::target_root)"
+  branch="$(runoq::branch_name "$issue" "$title")"
+  path="$(runoq::worktree_path "$issue")"
+  base_ref="$(runoq::default_branch_ref)"
 
   git -C "$target_root" fetch origin main >/dev/null 2>&1
   if [[ -d "$path/.git" || -e "$path" ]]; then
-    agendev::die "Worktree already exists: $path"
+    runoq::die "Worktree already exists: $path"
   fi
   git -C "$target_root" worktree add "$path" -b "$branch" "$base_ref" >/dev/null 2>&1
   jq -n --arg branch "$branch" --arg path "$path" --arg base_ref "$base_ref" '{
@@ -38,8 +38,8 @@ create_worktree() {
 remove_worktree() {
   local issue="$1"
   local target_root path
-  target_root="$(agendev::target_root)"
-  path="$(agendev::worktree_path "$issue")"
+  target_root="$(runoq::target_root)"
+  path="$(runoq::worktree_path "$issue")"
   if [[ ! -e "$path" ]]; then
     jq -n --arg worktree "$path" '{removed:false, worktree:$worktree}'
     return
@@ -51,7 +51,7 @@ remove_worktree() {
 inspect_worktree() {
   local issue="$1"
   local path
-  path="$(agendev::worktree_path "$issue")"
+  path="$(runoq::worktree_path "$issue")"
   jq -n --arg worktree "$path" --arg exists "$([[ -e "$path" ]] && echo true || echo false)" '{
     worktree: $worktree,
     exists: ($exists == "true")
@@ -73,7 +73,7 @@ case "${1:-}" in
     ;;
   branch-name)
     [[ $# -eq 3 ]] || { usage >&2; exit 1; }
-    agendev::branch_name "$2" "$3"
+    runoq::branch_name "$2" "$3"
     ;;
   *)
     usage >&2

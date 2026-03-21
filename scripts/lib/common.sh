@@ -2,64 +2,64 @@
 
 set -euo pipefail
 
-agendev::die() {
-  echo "agendev: $*" >&2
+runoq::die() {
+  echo "runoq: $*" >&2
   exit 1
 }
 
-agendev::script_dir() {
+runoq::script_dir() {
   cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd
 }
 
-agendev::root() {
-  if [[ -n "${AGENDEV_ROOT:-}" ]]; then
-    printf '%s\n' "$AGENDEV_ROOT"
+runoq::root() {
+  if [[ -n "${RUNOQ_ROOT:-}" ]]; then
+    printf '%s\n' "$RUNOQ_ROOT"
     return
   fi
-  agendev::script_dir
+  runoq::script_dir
 }
 
-agendev::config_path() {
-  if [[ -n "${AGENDEV_CONFIG:-}" ]]; then
-    printf '%s\n' "$AGENDEV_CONFIG"
+runoq::config_path() {
+  if [[ -n "${RUNOQ_CONFIG:-}" ]]; then
+    printf '%s\n' "$RUNOQ_CONFIG"
     return
   fi
-  printf '%s/config/agendev.json\n' "$(agendev::root)"
+  printf '%s/config/runoq.json\n' "$(runoq::root)"
 }
 
-agendev::require_cmd() {
+runoq::require_cmd() {
   local cmd
   for cmd in "$@"; do
-    command -v "$cmd" >/dev/null 2>&1 || agendev::die "Missing required command: $cmd"
+    command -v "$cmd" >/dev/null 2>&1 || runoq::die "Missing required command: $cmd"
   done
 }
 
-agendev::config_get() {
+runoq::config_get() {
   local filter="$1"
-  jq -er "$filter" "$(agendev::config_path)"
+  jq -er "$filter" "$(runoq::config_path)"
 }
 
-agendev::target_root() {
+runoq::target_root() {
   if [[ -n "${TARGET_ROOT:-}" ]]; then
     printf '%s\n' "$TARGET_ROOT"
     return
   fi
-  git rev-parse --show-toplevel 2>/dev/null || agendev::die "Run agendev from inside a git repository."
+  git rev-parse --show-toplevel 2>/dev/null || runoq::die "Run runoq from inside a git repository."
 }
 
-agendev::origin_url() {
-  git -C "$(agendev::target_root)" remote get-url origin 2>/dev/null || agendev::die "No 'origin' remote found. agendev requires a GitHub-hosted repo."
+runoq::origin_url() {
+  git -C "$(runoq::target_root)" remote get-url origin 2>/dev/null || runoq::die "No 'origin' remote found. runoq requires a GitHub-hosted repo."
 }
 
-agendev::repo_from_remote() {
+runoq::repo_from_remote() {
   local remote="${1:-}"
-  if [[ -n "${AGENDEV_REPO:-}" ]]; then
-    printf '%s\n' "$AGENDEV_REPO"
+  if [[ -n "${RUNOQ_REPO:-}" ]]; then
+    printf '%s\n' "$RUNOQ_REPO"
     return
   fi
 
   if [[ -z "$remote" ]]; then
-    remote="$(agendev::origin_url)"
+    remote="$(runoq::origin_url)"
   fi
 
   case "$remote" in
@@ -81,77 +81,77 @@ agendev::repo_from_remote() {
       printf '%s\n' "$remote"
       ;;
     *)
-      agendev::die "Origin remote is not a GitHub URL: $remote"
+      runoq::die "Origin remote is not a GitHub URL: $remote"
       ;;
   esac
 }
 
-agendev::repo() {
-  agendev::repo_from_remote "$(agendev::origin_url)"
+runoq::repo() {
+  runoq::repo_from_remote "$(runoq::origin_url)"
 }
 
-agendev::state_dir() {
-  if [[ -n "${AGENDEV_STATE_DIR:-}" ]]; then
-    printf '%s\n' "$AGENDEV_STATE_DIR"
+runoq::state_dir() {
+  if [[ -n "${RUNOQ_STATE_DIR:-}" ]]; then
+    printf '%s\n' "$RUNOQ_STATE_DIR"
     return
   fi
-  printf '%s/.agendev/state\n' "$(agendev::target_root)"
+  printf '%s/.runoq/state\n' "$(runoq::target_root)"
 }
 
-agendev::ensure_state_dir() {
-  mkdir -p "$(agendev::state_dir)"
+runoq::ensure_state_dir() {
+  mkdir -p "$(runoq::state_dir)"
 }
 
-agendev::gh() {
+runoq::gh() {
   local gh_bin="${GH_BIN:-gh}"
   "$gh_bin" "$@"
 }
 
-agendev::branch_slug() {
+runoq::branch_slug() {
   local raw="$1"
   raw="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
   raw="$(printf '%s' "$raw" | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//; s/-+/-/g')"
   printf '%s\n' "${raw:-issue}"
 }
 
-agendev::branch_name() {
+runoq::branch_name() {
   local issue="$1"
   local title="$2"
   local prefix
-  prefix="$(agendev::config_get '.branchPrefix')"
-  printf '%s%s-%s\n' "$prefix" "$issue" "$(agendev::branch_slug "$title")"
+  prefix="$(runoq::config_get '.branchPrefix')"
+  printf '%s%s-%s\n' "$prefix" "$issue" "$(runoq::branch_slug "$title")"
 }
 
-agendev::worktree_path() {
+runoq::worktree_path() {
   local issue="$1"
   local prefix target_root parent
-  prefix="$(agendev::config_get '.worktreePrefix')"
-  target_root="$(agendev::target_root)"
+  prefix="$(runoq::config_get '.worktreePrefix')"
+  target_root="$(runoq::target_root)"
   parent="$(cd "$target_root/.." && pwd)"
   printf '%s/%s%s\n' "$parent" "$prefix" "$issue"
 }
 
-agendev::json_tmp() {
-  mktemp "${TMPDIR:-/tmp}/agendev.XXXXXX.json"
+runoq::json_tmp() {
+  mktemp "${TMPDIR:-/tmp}/runoq.XXXXXX.json"
 }
 
-agendev::write_json_file() {
+runoq::write_json_file() {
   local path="$1"
   local tmp
-  tmp="$(mktemp "${TMPDIR:-/tmp}/agendev-write.XXXXXX")"
+  tmp="$(mktemp "${TMPDIR:-/tmp}/runoq-write.XXXXXX")"
   cat >"$tmp"
   mv "$tmp" "$path"
 }
 
-agendev::label_keys_json() {
-  jq '.labels' "$(agendev::config_path)"
+runoq::label_keys_json() {
+  jq '.labels' "$(runoq::config_path)"
 }
 
-agendev::all_state_labels() {
-  agendev::label_keys_json | jq -r '.[]'
+runoq::all_state_labels() {
+  runoq::label_keys_json | jq -r '.[]'
 }
 
-agendev::label_for_status() {
+runoq::label_for_status() {
   local status="$1"
   jq -er --arg status "$status" '
     .labels[
@@ -163,14 +163,14 @@ agendev::label_for_status() {
       else error("unknown status")
       end
     ]
-  ' "$(agendev::config_path)" 2>/dev/null || agendev::die "Unknown status: $status"
+  ' "$(runoq::config_path)" 2>/dev/null || runoq::die "Unknown status: $status"
 }
 
-agendev::default_branch_ref() {
-  printf '%s\n' "${AGENDEV_BASE_REF:-origin/main}"
+runoq::default_branch_ref() {
+  printf '%s\n' "${RUNOQ_BASE_REF:-origin/main}"
 }
 
-agendev::absolute_path() {
+runoq::absolute_path() {
   local path="$1"
   if [[ "$path" = /* ]]; then
     printf '%s\n' "$path"

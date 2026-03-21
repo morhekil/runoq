@@ -7,13 +7,13 @@ load test_helper
   local_dir="$TEST_TMPDIR/local"
   make_remote_backed_repo "$remote_dir" "$local_dir"
   export TARGET_ROOT="$local_dir"
-  export AGENDEV_REPO="owner/repo"
+  export RUNOQ_REPO="owner/repo"
 
   echo "local only" >"$local_dir/local-only.txt"
   git -C "$local_dir" add local-only.txt
   git -C "$local_dir" commit -m "Local-only commit" >/dev/null
 
-  run "$AGENDEV_ROOT/scripts/worktree.sh" create 42 "Implement queue"
+  run "$RUNOQ_ROOT/scripts/worktree.sh" create 42 "Implement queue"
 
   [ "$status" -eq 0 ]
   worktree_path="$(printf '%s' "$output" | jq -r '.worktree')"
@@ -27,14 +27,14 @@ load test_helper
   local_dir="$TEST_TMPDIR/local"
   make_remote_backed_repo "$remote_dir" "$local_dir"
   export TARGET_ROOT="$local_dir"
-  export AGENDEV_REPO="owner/repo"
+  export RUNOQ_REPO="owner/repo"
 
-  run "$AGENDEV_ROOT/scripts/worktree.sh" create 42 "Implement queue"
+  run "$RUNOQ_ROOT/scripts/worktree.sh" create 42 "Implement queue"
   [ "$status" -eq 0 ]
   worktree_path="$(printf '%s' "$output" | jq -r '.worktree')"
   [ -d "$worktree_path" ]
 
-  run "$AGENDEV_ROOT/scripts/worktree.sh" remove 42
+  run "$RUNOQ_ROOT/scripts/worktree.sh" remove 42
   [ "$status" -eq 0 ]
   [ ! -e "$worktree_path" ]
 }
@@ -44,12 +44,12 @@ load test_helper
   local_dir="$TEST_TMPDIR/local"
   make_remote_backed_repo "$remote_dir" "$local_dir"
   export TARGET_ROOT="$local_dir"
-  export AGENDEV_REPO="owner/repo"
+  export RUNOQ_REPO="owner/repo"
 
-  mkdir -p "$TEST_TMPDIR/agendev-wt-42"
-  export AGENDEV_CONFIG="$AGENDEV_ROOT/config/agendev.json"
+  mkdir -p "$TEST_TMPDIR/runoq-wt-42"
+  export RUNOQ_CONFIG="$RUNOQ_ROOT/config/runoq.json"
 
-  run "$AGENDEV_ROOT/scripts/worktree.sh" create 42 "Implement queue"
+  run "$RUNOQ_ROOT/scripts/worktree.sh" create 42 "Implement queue"
 
   [ "$status" -ne 0 ]
   [[ "$output" == *"Worktree already exists"* ]]

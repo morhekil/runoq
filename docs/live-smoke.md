@@ -1,8 +1,8 @@
 # Live Smoke Tests
 
-The live smoke suite validates `agendev` against real GitHub resources. It remains opt-in and credential-gated by design.
+The live smoke suite validates `runoq` against real GitHub resources. It remains opt-in and credential-gated by design.
 
-Interactive smoke commands log progress to stderr automatically. Set `AGENDEV_SMOKE_VERBOSE=1` to force those logs in non-interactive contexts, or `AGENDEV_SMOKE_VERBOSE=0` to silence them.
+Interactive smoke commands log progress to stderr automatically. Set `RUNOQ_SMOKE_VERBOSE=1` to force those logs in non-interactive contexts, or `RUNOQ_SMOKE_VERBOSE=0` to silence them.
 
 There are now two distinct live lanes:
 
@@ -23,10 +23,10 @@ It validates:
 - label provisioning via `scripts/setup.sh`
 - queue issue creation via `scripts/gh-issue-queue.sh`
 - draft PR creation via `scripts/gh-pr-lifecycle.sh`
-- issue and PR comment attribution as `agendev[bot]`
+- issue and PR comment attribution as `runoq[bot]`
 - collaborator permission checks against a sandbox repo
 
-It does not run the full `agendev run` workflow.
+It does not run the full `runoq run` workflow.
 
 ### Lifecycle eval
 
@@ -35,9 +35,9 @@ This is the new full-lifecycle lane in `scripts/smoke-lifecycle.sh preflight`, `
 It validates:
 
 - disposable managed repo provisioning through `gh repo create`
-- `agendev init` against a real GitHub repo
+- `runoq init` against a real GitHub repo
 - deterministic queue seeding with dependent issues
-- `agendev run` queue mode through the real orchestrator/developer flow
+- `runoq run` queue mode through the real orchestrator/developer flow
 - worktree creation, PR lifecycle, verification, and finalization
 - queue ordering across follow-up issues
 - one-shot completion metrics suitable for LLM eval reporting
@@ -55,7 +55,7 @@ Keep the narrow smoke lane because it is better for:
 
 Use the lifecycle eval when you want a higher-cost acceptance test that answers:
 
-- can `agendev` run the real workflow end to end on GitHub?
+- can `runoq` run the real workflow end to end on GitHub?
 - can the configured model stack complete a short dependent issue chain cleanly?
 - does the result still look one-shotable after recent changes?
 
@@ -63,17 +63,17 @@ Use the lifecycle eval when you want a higher-cost acceptance test that answers:
 
 Set all of the following:
 
-- `AGENDEV_SMOKE=1`
-- `AGENDEV_SMOKE_REPO=<owner>/<sandbox-repo>`
-- `AGENDEV_SMOKE_APP_ID=<github-app-id>`
-- `AGENDEV_SMOKE_INSTALLATION_ID=<sandbox-installation-id>`
-- `AGENDEV_SMOKE_APP_KEY=/absolute/path/to/app-key.pem`
-- `AGENDEV_SMOKE_PERMISSION_USER=<repo-collaborator-to-check>`
-- `AGENDEV_SMOKE_PERMISSION_LEVEL=write`
+- `RUNOQ_SMOKE=1`
+- `RUNOQ_SMOKE_REPO=<owner>/<sandbox-repo>`
+- `RUNOQ_SMOKE_APP_ID=<github-app-id>`
+- `RUNOQ_SMOKE_INSTALLATION_ID=<sandbox-installation-id>`
+- `RUNOQ_SMOKE_APP_KEY=/absolute/path/to/app-key.pem`
+- `RUNOQ_SMOKE_PERMISSION_USER=<repo-collaborator-to-check>`
+- `RUNOQ_SMOKE_PERMISSION_LEVEL=write`
 
 Optional:
 
-- `AGENDEV_SMOKE_RUN_ID=<stable-id>`
+- `RUNOQ_SMOKE_RUN_ID=<stable-id>`
 
 Commands:
 
@@ -86,21 +86,21 @@ scripts/smoke-sandbox.sh run
 
 Set all of the following:
 
-- `AGENDEV_SMOKE=1`
-- `AGENDEV_SMOKE_LIFECYCLE=1` when using the Bats wrapper
-- `AGENDEV_SMOKE_REPO_OWNER=<owner-or-org-for-managed-repos>`
-- `AGENDEV_SMOKE_APP_ID=<github-app-id>`
-- `AGENDEV_SMOKE_APP_KEY=/absolute/path/to/app-key.pem`
+- `RUNOQ_SMOKE=1`
+- `RUNOQ_SMOKE_LIFECYCLE=1` when using the Bats wrapper
+- `RUNOQ_SMOKE_REPO_OWNER=<owner-or-org-for-managed-repos>`
+- `RUNOQ_SMOKE_APP_ID=<github-app-id>`
+- `RUNOQ_SMOKE_APP_KEY=/absolute/path/to/app-key.pem`
 
 Optional:
 
-- `AGENDEV_SMOKE_REPO_PREFIX=agendev-live-eval`
-- `AGENDEV_SMOKE_REPO_VISIBILITY=private`
-- `AGENDEV_SMOKE_RUN_ID=<stable-id>`
-- `AGENDEV_SMOKE_MANIFEST_PATH=<path-to-managed-repo-manifest>`
-- `AGENDEV_SMOKE_RUNS_DIR=<path-to-local-run-artifacts>`
-- `AGENDEV_CLAUDE_BIN=<claude-cli>`
-- `AGENDEV_SMOKE_CODEX_BIN=<codex-cli>`
+- `RUNOQ_SMOKE_REPO_PREFIX=runoq-live-eval`
+- `RUNOQ_SMOKE_REPO_VISIBILITY=private`
+- `RUNOQ_SMOKE_RUN_ID=<stable-id>`
+- `RUNOQ_SMOKE_MANIFEST_PATH=<path-to-managed-repo-manifest>`
+- `RUNOQ_SMOKE_RUNS_DIR=<path-to-local-run-artifacts>`
+- `RUNOQ_CLAUDE_BIN=<claude-cli>`
+- `RUNOQ_SMOKE_CODEX_BIN=<codex-cli>`
 
 Additional prerequisites for lifecycle eval:
 
@@ -125,9 +125,9 @@ The lifecycle eval provisions a disposable repo by:
 1. copying a tiny seeded target repo from `test/fixtures/live_smoke_lifecycle_target/`
 2. creating a real GitHub repo with `gh repo create --source ... --push`
 3. enabling `main` as the base branch and enabling auto-merge
-4. running `agendev init`
+4. running `runoq init`
 5. seeding a short dependent issue chain from `test/fixtures/live_smoke_lifecycle_issues.json`
-6. running `agendev run` in queue mode
+6. running `runoq run` in queue mode
 
 The seeded issue chain is intentionally small and predictable:
 
@@ -165,21 +165,21 @@ This is meant to work as both:
 
 ## Managed Repo Tracking And Cleanup
 
-Managed repos are tracked in a local manifest outside `.agendev/state/*.json`.
+Managed repos are tracked in a local manifest outside `.runoq/state/*.json`.
 
 Default manifest path:
 
 ```text
-.agendev/live-smoke/managed-repos.json
+.runoq/live-smoke/managed-repos.json
 ```
 
 Default artifact root:
 
 ```text
-.agendev/live-smoke/runs/<run_id>/
+.runoq/live-smoke/runs/<run_id>/
 ```
 
-Why this stays outside `.agendev/state/`:
+Why this stays outside `.runoq/state/`:
 
 - issue state files are recovery breadcrumbs for target repos
 - managed lifecycle repos are test infrastructure assets
@@ -212,7 +212,7 @@ bats test/live_smoke.bats test/live_smoke_lifecycle.bats
 
 `test/live_smoke_sandbox.bats` is skipped unless sandbox smoke preflight is ready.
 
-`test/live_smoke_lifecycle.bats` is skipped unless lifecycle preflight is ready and `AGENDEV_SMOKE_LIFECYCLE=1` is set.
+`test/live_smoke_lifecycle.bats` is skipped unless lifecycle preflight is ready and `RUNOQ_SMOKE_LIFECYCLE=1` is set.
 
 ## Recommended Usage Pattern
 
@@ -227,7 +227,7 @@ For full lifecycle eval:
 1. Run `scripts/smoke-lifecycle.sh preflight`.
 2. Confirm operator `gh` auth and GitHub App access are both ready.
 3. Run `bats test/live_smoke.bats test/live_smoke_lifecycle.bats` or call `scripts/smoke-lifecycle.sh run` directly.
-4. Inspect the JSON summary and local artifacts under `.agendev/live-smoke/runs/<run_id>/`.
+4. Inspect the JSON summary and local artifacts under `.runoq/live-smoke/runs/<run_id>/`.
 5. Delete managed repos intentionally with `scripts/smoke-lifecycle.sh cleanup ...`.
 
 ## Troubleshooting
@@ -236,13 +236,13 @@ For full lifecycle eval:
 
 Checks:
 
-- `AGENDEV_SMOKE=1`
-- `AGENDEV_SMOKE_REPO_OWNER`
-- `AGENDEV_SMOKE_APP_KEY`
+- `RUNOQ_SMOKE=1`
+- `RUNOQ_SMOKE_REPO_OWNER`
+- `RUNOQ_SMOKE_APP_KEY`
 - operator `gh` login is active
 - `claude`, `codex`, `node`, and `npm` are available
 
-### Repo creation succeeds but `agendev init` fails
+### Repo creation succeeds but `runoq init` fails
 
 Checks:
 
@@ -254,14 +254,14 @@ Checks:
 
 Inspect:
 
-- `.agendev/live-smoke/runs/<run_id>/init.log`
-- `.agendev/live-smoke/runs/<run_id>/run.log`
-- `.agendev/live-smoke/runs/<run_id>/claude/<timestamp>/argv.txt`
-- `.agendev/live-smoke/runs/<run_id>/claude/<timestamp>/context.log`
-- `.agendev/live-smoke/runs/<run_id>/claude/<timestamp>/stdout.log`
-- `.agendev/live-smoke/runs/<run_id>/claude/<timestamp>/stderr.log`
-- `.agendev/live-smoke/runs/<run_id>/summary.json`
-- copied state files under `.agendev/live-smoke/runs/<run_id>/state/`
+- `.runoq/live-smoke/runs/<run_id>/init.log`
+- `.runoq/live-smoke/runs/<run_id>/run.log`
+- `.runoq/live-smoke/runs/<run_id>/claude/<timestamp>/argv.txt`
+- `.runoq/live-smoke/runs/<run_id>/claude/<timestamp>/context.log`
+- `.runoq/live-smoke/runs/<run_id>/claude/<timestamp>/stdout.log`
+- `.runoq/live-smoke/runs/<run_id>/claude/<timestamp>/stderr.log`
+- `.runoq/live-smoke/runs/<run_id>/summary.json`
+- copied state files under `.runoq/live-smoke/runs/<run_id>/state/`
 
 ### Cleanup fails
 

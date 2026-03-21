@@ -4,9 +4,9 @@ load test_helper
 
 @test "report summary aggregates completed state files" {
   export TARGET_ROOT="$TEST_TMPDIR/project"
-  export AGENDEV_STATE_DIR="$TARGET_ROOT/.agendev/state"
-  mkdir -p "$AGENDEV_STATE_DIR"
-  cat >"$AGENDEV_STATE_DIR/42.json" <<'EOF'
+  export RUNOQ_STATE_DIR="$TARGET_ROOT/.runoq/state"
+  mkdir -p "$RUNOQ_STATE_DIR"
+  cat >"$RUNOQ_STATE_DIR/42.json" <<'EOF'
 {
   "phase": "DONE",
   "outcome": { "verdict": "PASS" },
@@ -16,7 +16,7 @@ load test_helper
   ]
 }
 EOF
-  cat >"$AGENDEV_STATE_DIR/43.json" <<'EOF'
+  cat >"$RUNOQ_STATE_DIR/43.json" <<'EOF'
 {
   "phase": "FAILED",
   "outcome": { "verdict": "FAIL" },
@@ -27,7 +27,7 @@ EOF
 }
 EOF
 
-  run "$AGENDEV_ROOT/scripts/report.sh" summary
+  run "$RUNOQ_ROOT/scripts/report.sh" summary
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.issues')" = "2" ]
@@ -38,9 +38,9 @@ EOF
 
 @test "report issue returns the stored state for a specific issue" {
   export TARGET_ROOT="$TEST_TMPDIR/project"
-  export AGENDEV_STATE_DIR="$TARGET_ROOT/.agendev/state"
-  mkdir -p "$AGENDEV_STATE_DIR"
-  cat >"$AGENDEV_STATE_DIR/42.json" <<'EOF'
+  export RUNOQ_STATE_DIR="$TARGET_ROOT/.runoq/state"
+  mkdir -p "$RUNOQ_STATE_DIR"
+  cat >"$RUNOQ_STATE_DIR/42.json" <<'EOF'
 {
   "phase": "DONE",
   "outcome": { "verdict": "PASS" },
@@ -48,7 +48,7 @@ EOF
 }
 EOF
 
-  run "$AGENDEV_ROOT/scripts/report.sh" issue 42
+  run "$RUNOQ_ROOT/scripts/report.sh" issue 42
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.phase')" = "DONE" ]
@@ -56,9 +56,9 @@ EOF
 
 @test "report cost uses config-driven rates" {
   export TARGET_ROOT="$TEST_TMPDIR/project"
-  export AGENDEV_STATE_DIR="$TARGET_ROOT/.agendev/state"
-  mkdir -p "$AGENDEV_STATE_DIR"
-  cat >"$AGENDEV_STATE_DIR/42.json" <<'EOF'
+  export RUNOQ_STATE_DIR="$TARGET_ROOT/.runoq/state"
+  mkdir -p "$RUNOQ_STATE_DIR"
+  cat >"$RUNOQ_STATE_DIR/42.json" <<'EOF'
 {
   "phase": "DONE",
   "outcome": { "verdict": "PASS" },
@@ -71,16 +71,16 @@ EOF
   cat >"$TEST_TMPDIR/config.json" <<'EOF'
 {
   "labels": {
-    "ready": "agendev:ready",
-    "inProgress": "agendev:in-progress",
-    "done": "agendev:done",
-    "needsReview": "agendev:needs-human-review",
-    "blocked": "agendev:blocked",
-    "maintenanceReview": "agendev:maintenance-review"
+    "ready": "runoq:ready",
+    "inProgress": "runoq:in-progress",
+    "done": "runoq:done",
+    "needsReview": "runoq:needs-human-review",
+    "blocked": "runoq:blocked",
+    "maintenanceReview": "runoq:maintenance-review"
   },
   "identity": {
-    "appSlug": "agendev",
-    "handle": "agendev"
+    "appSlug": "runoq",
+    "handle": "runoq"
   },
   "authorization": {
     "minimumPermission": "write",
@@ -100,8 +100,8 @@ EOF
     "maxComplexity": "low"
   },
   "reviewers": ["username"],
-  "branchPrefix": "agendev/",
-  "worktreePrefix": "agendev-wt-",
+  "branchPrefix": "runoq/",
+  "worktreePrefix": "runoq-wt-",
   "consecutiveFailureLimit": 3,
   "verification": {
     "testCommand": "true",
@@ -112,9 +112,9 @@ EOF
   }
 }
 EOF
-  export AGENDEV_CONFIG="$TEST_TMPDIR/config.json"
+  export RUNOQ_CONFIG="$TEST_TMPDIR/config.json"
 
-  run "$AGENDEV_ROOT/scripts/report.sh" cost
+  run "$RUNOQ_ROOT/scripts/report.sh" cost
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.estimated_cost')" = "2" ]
@@ -122,10 +122,10 @@ EOF
 
 @test "report summary handles an empty state directory" {
   export TARGET_ROOT="$TEST_TMPDIR/project"
-  export AGENDEV_STATE_DIR="$TARGET_ROOT/.agendev/state"
-  mkdir -p "$AGENDEV_STATE_DIR"
+  export RUNOQ_STATE_DIR="$TARGET_ROOT/.runoq/state"
+  mkdir -p "$RUNOQ_STATE_DIR"
 
-  run "$AGENDEV_ROOT/scripts/report.sh" summary
+  run "$RUNOQ_ROOT/scripts/report.sh" summary
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.issues')" = "0" ]
@@ -133,9 +133,9 @@ EOF
 
 @test "report summary aggregates lifecycle state files with status/result schema" {
   export TARGET_ROOT="$TEST_TMPDIR/project"
-  export AGENDEV_STATE_DIR="$TARGET_ROOT/.agendev/state"
-  mkdir -p "$AGENDEV_STATE_DIR"
-  cat >"$AGENDEV_STATE_DIR/1.json" <<'EOF'
+  export RUNOQ_STATE_DIR="$TARGET_ROOT/.runoq/state"
+  mkdir -p "$RUNOQ_STATE_DIR"
+  cat >"$RUNOQ_STATE_DIR/1.json" <<'EOF'
 {
   "issueNumber": 1,
   "status": "done",
@@ -143,7 +143,7 @@ EOF
   "result": { "verdict": "PASS" }
 }
 EOF
-  cat >"$AGENDEV_STATE_DIR/2.json" <<'EOF'
+  cat >"$RUNOQ_STATE_DIR/2.json" <<'EOF'
 {
   "issueNumber": 2,
   "status": "failed",
@@ -152,7 +152,7 @@ EOF
 }
 EOF
 
-  run "$AGENDEV_ROOT/scripts/report.sh" summary
+  run "$RUNOQ_ROOT/scripts/report.sh" summary
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.issues')" = "2" ]
@@ -163,9 +163,9 @@ EOF
 
 @test "report summary aggregates lifecycle state files with top-level verdict schema" {
   export TARGET_ROOT="$TEST_TMPDIR/project"
-  export AGENDEV_STATE_DIR="$TARGET_ROOT/.agendev/state"
-  mkdir -p "$AGENDEV_STATE_DIR"
-  cat >"$AGENDEV_STATE_DIR/1.json" <<'EOF'
+  export RUNOQ_STATE_DIR="$TARGET_ROOT/.runoq/state"
+  mkdir -p "$RUNOQ_STATE_DIR"
+  cat >"$RUNOQ_STATE_DIR/1.json" <<'EOF'
 {
   "issue": 1,
   "status": "done",
@@ -173,7 +173,7 @@ EOF
   "verdict": "PASS"
 }
 EOF
-  cat >"$AGENDEV_STATE_DIR/2.json" <<'EOF'
+  cat >"$RUNOQ_STATE_DIR/2.json" <<'EOF'
 {
   "issue": 2,
   "status": "done",
@@ -182,7 +182,7 @@ EOF
 }
 EOF
 
-  run "$AGENDEV_ROOT/scripts/report.sh" summary
+  run "$RUNOQ_ROOT/scripts/report.sh" summary
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.issues')" = "2" ]

@@ -4,7 +4,7 @@ Here is my work summary.
 intermediate non-json block
 ```
 
-<!-- agendev:payload:codex-return -->
+<!-- runoq:payload:codex-return -->
 ```json
 {
   "status": "completed",

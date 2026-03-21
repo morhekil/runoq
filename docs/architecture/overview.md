@@ -1,22 +1,22 @@
 # Architecture Overview
 
-This document describes the current `agendev` runtime as implemented in the repository today. It is the primary architecture reference for the shipped shell/runtime layer.
+This document describes the current `runoq` runtime as implemented in the repository today. It is the primary architecture reference for the shipped shell/runtime layer.
 
 ## System Context
 
-`agendev` sits between a human operator, a target GitHub repository, and Claude-based agents. The operator invokes the CLI from inside the target repository. The runtime resolves repository context, authenticates to GitHub, manages queue and PR state through deterministic scripts, and delegates bounded reasoning work to agents and skills.
+`runoq` sits between a human operator, a target GitHub repository, and Claude-based agents. The operator invokes the CLI from inside the target repository. The runtime resolves repository context, authenticates to GitHub, manages queue and PR state through deterministic scripts, and delegates bounded reasoning work to agents and skills.
 
 ```mermaid
 flowchart LR
   operator[Human operator]
-  runtime[agendev runtime repo]
+  runtime[runoq runtime repo]
   target[Target repository checkout]
   worktrees[Sibling execution worktrees]
   github[GitHub issues, PRs, comments, labels]
   claude[Claude CLI agents and skills]
-  state[.agendev/state/*.json]
+  state[.runoq/state/*.json]
 
-  operator -->|runs agendev CLI| runtime
+  operator -->|runs runoq CLI| runtime
   runtime -->|resolves repo context| target
   runtime -->|creates/removes| worktrees
   runtime -->|reads/writes audit surface| github
@@ -40,9 +40,9 @@ At runtime the system is split into a small set of subsystems with strict roles.
 ```mermaid
 flowchart TB
   subgraph operator_env[Operator workstation]
-    cli[bin/agendev CLI]
+    cli[bin/runoq CLI]
     scripts[shell scripts and JSON config]
-    local_state[.agendev state files]
+    local_state[.runoq state files]
     target_repo[target repo main checkout]
     worktree_repo[sibling worktree checkout]
   end
@@ -68,11 +68,11 @@ flowchart TB
 
 | Subsystem | Purpose | Primary implementation |
 | --- | --- | --- |
-| CLI entrypoint | Thin command router that resolves repo context and auth, then dispatches to scripts or Claude | `bin/agendev` |
-| Deterministic shell runtime | Owns queue logic, PR lifecycle, auth, verification, maintenance operations, and recovery | `scripts/*.sh`, `config/agendev.json` |
+| CLI entrypoint | Thin command router that resolves repo context and auth, then dispatches to scripts or Claude | `bin/runoq` |
+| Deterministic shell runtime | Owns queue logic, PR lifecycle, auth, verification, maintenance operations, and recovery | `scripts/*.sh`, `config/runoq.json` |
 | Agent layer | Performs plan slicing and bounded orchestration/review tasks around script contracts | `.claude/agents/*`, `.claude/skills/*` |
 | GitHub control surface | Stores queue issues, PRs, labels, review comments, permissions, and audit comments | remote GitHub repo |
-| Local breadcrumb state | Stores resumability state and processed-mention tracking | `.agendev/state/*.json` |
+| Local breadcrumb state | Stores resumability state and processed-mention tracking | `.runoq/state/*.json` |
 | Execution workspace | Holds the target repo main checkout plus sibling worktrees created per issue | target repo checkout and worktree siblings |
 
 ## Component View
@@ -81,7 +81,7 @@ The deterministic shell runtime is the architectural center of gravity. Prompted
 
 ```mermaid
 flowchart LR
-  cli[bin/agendev]
+  cli[bin/runoq]
   common[common.sh and config]
   auth[gh-auth.sh]
   queue[gh-issue-queue.sh]
@@ -131,7 +131,7 @@ flowchart LR
 
 | Component | Owns | Does not own |
 | --- | --- | --- |
-| `bin/agendev` | Public CLI shape, repo context export, auth bootstrap, command routing | Queue logic, verification, PR mutation details |
+| `bin/runoq` | Public CLI shape, repo context export, auth bootstrap, command routing | Queue logic, verification, PR mutation details |
 | `scripts/gh-auth.sh` | GitHub token export, `GH_TOKEN` reuse, installation-token minting | Queue state, issue or PR decisions |
 | `scripts/gh-issue-queue.sh` | Queue listing, metadata parsing, dependency ordering, label transitions, issue creation | PR lifecycle, verification, reconciliation |
 | `scripts/dispatch-safety.sh` | Startup reconciliation, stale-label cleanup, eligibility checks, interrupted-run handling | PR creation, verification checks |
@@ -156,10 +156,10 @@ The core architectural rule is that durable behavior belongs in shell scripts an
 
 ### Audit trail vs recovery breadcrumbs
 
-`agendev` uses two different persistence models on purpose:
+`runoq` uses two different persistence models on purpose:
 
-- GitHub issues, PRs, and comments are the operational audit trail. Audit markers such as `<!-- agendev:event -->` and `<!-- agendev:payload:* -->` make those comments machine-recognizable and human-readable.
-- `.agendev/state/*.json` is a resumability mechanism. State files track the latest local phase, worktree, PR number, timestamps, payload normalization output, and mention deduplication, but they are not the long-term record of operator actions.
+- GitHub issues, PRs, and comments are the operational audit trail. Audit markers such as `<!-- runoq:event -->` and `<!-- runoq:payload:* -->` make those comments machine-recognizable and human-readable.
+- `.runoq/state/*.json` is a resumability mechanism. State files track the latest local phase, worktree, PR number, timestamps, payload normalization output, and mention deduplication, but they are not the long-term record of operator actions.
 
 ### Working tree safety
 
@@ -169,10 +169,10 @@ The target repository main checkout is preserved. Execution work happens in sibl
 
 - GitHub labels and issue metadata define queue eligibility and dependency ordering.
 - GitHub PR and issue comments are the durable record of dispatch, verification, escalation, and maintenance activity.
-- `config/agendev.json` defines labels, auth policy, reviewer defaults, branch/worktree prefixes, verification commands, and queue safety limits.
-- `.agendev/identity.json` and `GH_TOKEN` determine which GitHub identity is used.
-- `.agendev/state/*.json` and `processed-mentions.json` exist to recover and reconcile local execution, not to replace GitHub history.
-- The target repository defines test/build commands indirectly through `config/agendev.json` and supplies the actual code and git remotes the runtime acts on.
+- `config/runoq.json` defines labels, auth policy, reviewer defaults, branch/worktree prefixes, verification commands, and queue safety limits.
+- `.runoq/identity.json` and `GH_TOKEN` determine which GitHub identity is used.
+- `.runoq/state/*.json` and `processed-mentions.json` exist to recover and reconcile local execution, not to replace GitHub history.
+- The target repository defines test/build commands indirectly through `config/runoq.json` and supplies the actual code and git remotes the runtime acts on.
 
 ## Architectural Constraints And Tradeoffs
 
@@ -190,7 +190,7 @@ Use this table when deciding where a change belongs:
 | --- | --- |
 | Queue logic and dependency ordering | `gh-issue-queue.sh`, `dispatch-safety.sh`, `run.sh` |
 | PR lifecycle | `gh-pr-lifecycle.sh`, `run.sh` |
-| Auth and token minting | `gh-auth.sh`, `.agendev/identity.json`, `GH_TOKEN` |
+| Auth and token minting | `gh-auth.sh`, `.runoq/identity.json`, `GH_TOKEN` |
 | Verification | `verify.sh` plus configured test/build commands |
 | Maintenance review and triage | `maintenance.sh`, `mentions.sh`, `maintenance-reviewer` |
 | State handling and payload reconstruction | `state.sh` |

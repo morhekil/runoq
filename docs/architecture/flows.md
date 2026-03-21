@@ -1,26 +1,26 @@
 # Execution And Maintenance Flows
 
-This document describes the major runtime sequences in `agendev`: planning, execution, reconciliation, mention handling, and maintenance review.
+This document describes the major runtime sequences in `runoq`: planning, execution, reconciliation, mention handling, and maintenance review.
 
-For `agendev run`, one detail matters: outside fixture mode, [`scripts/run.sh`](../../scripts/run.sh) delegates to the `github-orchestrator` agent after argument parsing. The detailed execution sequence below is therefore an implementation-backed inference from two sources taken together:
+For `runoq run`, one detail matters: outside fixture mode, [`scripts/run.sh`](../../scripts/run.sh) delegates to the `github-orchestrator` agent after argument parsing. The detailed execution sequence below is therefore an implementation-backed inference from two sources taken together:
 
 - the full scripted flow in fixture mode inside `scripts/run.sh`
 - the hard rules and dispatch steps in `.claude/agents/github-orchestrator.md`
 
-## `agendev plan`
+## `runoq plan`
 
-`agendev plan <file>` is the plan-slicing entrypoint. The shell CLI resolves context and auth, then hands the local file to the `plan-to-issues` skill.
+`runoq plan <file>` is the plan-slicing entrypoint. The shell CLI resolves context and auth, then hands the local file to the `plan-to-issues` skill.
 
 ```mermaid
 sequenceDiagram
   actor Operator
-  participant CLI as bin/agendev
+  participant CLI as bin/runoq
   participant Auth as gh-auth.sh
   participant Claude as plan-to-issues skill
   participant Queue as gh-issue-queue.sh
   participant GH as GitHub
 
-  Operator->>CLI: agendev plan docs/plan.md
+  Operator->>CLI: runoq plan docs/plan.md
   CLI->>CLI: resolve TARGET_ROOT, REPO, absolute plan path
   CLI->>Auth: export-token
   Auth-->>CLI: GH_TOKEN
@@ -29,7 +29,7 @@ sequenceDiagram
   Claude-->>Operator: proposal, dependencies, granularity warnings
   alt operator confirms
     Claude->>Queue: create issue for each approved item
-    Queue->>GH: create ready issues with agendev:meta blocks
+    Queue->>GH: create ready issues with runoq:meta blocks
     GH-->>Queue: issue URLs
     Queue-->>Claude: created issue references
     Claude-->>Operator: created queue summary and dependency graph
@@ -46,19 +46,19 @@ sequenceDiagram
 | User confirmation | No issues should be created before explicit confirmation |
 | Issue creation path | The skill should use `gh-issue-queue.sh create`, not ad hoc `gh issue create` |
 
-## `agendev run` Happy Path
+## `runoq run` Happy Path
 
 The queue execution flow has two entry modes:
 
-- `agendev run --issue N`: target a single issue directly
-- `agendev run`: ask the queue for the next actionable ready issue
+- `runoq run --issue N`: target a single issue directly
+- `runoq run`: ask the queue for the next actionable ready issue
 
 The sequence below shows the happy path for one issue after reconciliation succeeds.
 
 ```mermaid
 sequenceDiagram
   actor Operator
-  participant CLI as bin/agendev
+  participant CLI as bin/runoq
   participant Auth as gh-auth.sh
   participant Run as run.sh / github-orchestrator
   participant Safety as dispatch-safety.sh
@@ -70,7 +70,7 @@ sequenceDiagram
   participant GH as GitHub
   participant FS as target repo and sibling worktree
 
-  Operator->>CLI: agendev run [--issue N]
+  Operator->>CLI: runoq run [--issue N]
   CLI->>Auth: export-token
   Auth-->>CLI: GH_TOKEN
   CLI->>Run: invoke run flow
@@ -85,7 +85,7 @@ sequenceDiagram
   end
   Safety-->>Run: allowed=true
   Run->>Queue: set-status in-progress
-  Queue->>GH: replace agendev:* issue label
+  Queue->>GH: replace runoq:* issue label
   Run->>WT: create issue worktree and branch
   WT->>FS: git worktree add from origin/main
   Run->>PR: create draft PR
@@ -105,7 +105,7 @@ sequenceDiagram
     Run->>PR: finalize auto-merge
     PR->>GH: ready PR and enable auto-merge
     Run->>Queue: set-status done
-    Queue->>GH: replace issue label with agendev:done
+    Queue->>GH: replace issue label with runoq:done
     Run->>State: save DONE with outcome
     Run->>WT: remove worktree
     WT->>FS: git worktree remove
@@ -141,7 +141,7 @@ sequenceDiagram
 
   alt dev command stalls or exits non-zero
     Run->>State: keep latest non-terminal breadcrumb
-    Run->>PR: post agendev:event failure comment
+    Run->>PR: post runoq:event failure comment
     Run->>GH: post matching issue event
     Run-->>Run: exit with underlying dev status
   else payload missing or malformed
@@ -179,7 +179,7 @@ Every `run` starts with reconciliation. This is where the runtime decides whethe
 sequenceDiagram
   participant Run as run.sh
   participant Safety as dispatch-safety.sh
-  participant State as .agendev/state/*.json
+  participant State as .runoq/state/*.json
   participant GH as GitHub
 
   Run->>Safety: reconcile REPO
@@ -197,9 +197,9 @@ sequenceDiagram
       Safety-->>Run: action=needs-review
     end
   end
-  Safety->>GH: list agendev:in-progress issues
+  Safety->>GH: list runoq:in-progress issues
   alt issue has stale in-progress label with no active state
-    Safety->>GH: reset issue to agendev:ready
+    Safety->>GH: reset issue to runoq:ready
     Safety->>GH: comment stale-label reset
     Safety-->>Run: action=reset-ready
   end
@@ -210,7 +210,7 @@ sequenceDiagram
 After reconciliation, `dispatch-safety.sh eligibility` can still reject an issue. It posts a skip comment and returns non-zero when any of these checks fail:
 
 - acceptance criteria missing from the issue body
-- any dependency is not labeled `agendev:done`
+- any dependency is not labeled `runoq:done`
 - an open PR already exists for the derived branch name
 - the existing remote branch conflicts with `origin/main`
 
@@ -237,7 +237,7 @@ sequenceDiagram
       Mention->>State: record-mention comment_id
       Mention-->>Caller: action=process
     else permission denied and denyResponse=comment
-      Mention->>GH: post agendev:event denial comment
+      Mention->>GH: post runoq:event denial comment
       Mention->>State: record-mention comment_id
       Mention-->>Caller: action=deny
     else permission denied and denyResponse!=comment
@@ -263,14 +263,14 @@ Maintenance review is a staged workflow implemented by `maintenance.sh`. It is r
 ```mermaid
 sequenceDiagram
   actor Operator
-  participant CLI as agendev maintenance
+  participant CLI as runoq maintenance
   participant Agent as maintenance-reviewer
   participant Maint as maintenance.sh
   participant GH as GitHub
   participant State as maintenance.json
   participant Queue as gh-issue-queue.sh
 
-  Operator->>CLI: agendev maintenance
+  Operator->>CLI: runoq maintenance
   CLI->>Agent: launch maintenance-reviewer
   Agent->>Maint: run repo findings-file
   alt no maintenance state yet
@@ -287,11 +287,11 @@ sequenceDiagram
   end
   alt phase FINDINGS_POSTED
     Maint->>GH: read tracking issue comments
-    loop each new @agendev triage comment
+    loop each new @runoq triage comment
       Maint->>GH: check collaborator permission
       alt approve or "file this"
         Maint->>Queue: create ready issue from finding
-        Queue->>GH: create agendev:ready issue
+        Queue->>GH: create runoq:ready issue
         Maint->>GH: comment approval result
         Maint->>State: mark finding approved and record filed issue
       else skip or won't fix

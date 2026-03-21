@@ -7,16 +7,16 @@ write_verify_config() {
   cat >"$path" <<'EOF'
 {
   "labels": {
-    "ready": "agendev:ready",
-    "inProgress": "agendev:in-progress",
-    "done": "agendev:done",
-    "needsReview": "agendev:needs-human-review",
-    "blocked": "agendev:blocked",
-    "maintenanceReview": "agendev:maintenance-review"
+    "ready": "runoq:ready",
+    "inProgress": "runoq:in-progress",
+    "done": "runoq:done",
+    "needsReview": "runoq:needs-human-review",
+    "blocked": "runoq:blocked",
+    "maintenanceReview": "runoq:maintenance-review"
   },
   "identity": {
-    "appSlug": "agendev",
-    "handle": "agendev"
+    "appSlug": "runoq",
+    "handle": "runoq"
   },
   "authorization": {
     "minimumPermission": "write",
@@ -36,8 +36,8 @@ write_verify_config() {
     "maxComplexity": "low"
   },
   "reviewers": ["username"],
-  "branchPrefix": "agendev/",
-  "worktreePrefix": "agendev-wt-",
+  "branchPrefix": "runoq/",
+  "worktreePrefix": "runoq-wt-",
   "consecutiveFailureLimit": 3,
   "verification": {
     "testCommand": "true",
@@ -54,13 +54,13 @@ prepare_verify_repo() {
   local remote_dir="$1"
   local local_dir="$2"
   make_remote_backed_repo "$remote_dir" "$local_dir"
-  git -C "$local_dir" checkout -b agendev/42-test >/dev/null 2>&1
+  git -C "$local_dir" checkout -b runoq/42-test >/dev/null 2>&1
   base_sha="$(git -C "$local_dir" rev-parse HEAD)"
   mkdir -p "$local_dir/src"
   echo "console.log('ok')" >"$local_dir/src/app.ts"
   git -C "$local_dir" add src/app.ts
   git -C "$local_dir" commit -m "Add app" >/dev/null
-  git -C "$local_dir" push -u origin agendev/42-test >/dev/null 2>&1
+  git -C "$local_dir" push -u origin runoq/42-test >/dev/null 2>&1
   commit_sha="$(git -C "$local_dir" rev-parse HEAD)"
   printf '%s\n%s\n' "$base_sha" "$commit_sha"
 }
@@ -73,7 +73,7 @@ prepare_verify_repo() {
   commit_sha="${shas[1]}"
   config_file="$TEST_TMPDIR/config.json"
   write_verify_config "$config_file"
-  export AGENDEV_CONFIG="$config_file"
+  export RUNOQ_CONFIG="$config_file"
 
   payload_file="$TEST_TMPDIR/payload.json"
   cat >"$payload_file" <<EOF
@@ -93,7 +93,7 @@ prepare_verify_repo() {
 }
 EOF
 
-  run "$AGENDEV_ROOT/scripts/verify.sh" round "$local_dir" agendev/42-test "$base_sha" "$payload_file"
+  run "$RUNOQ_ROOT/scripts/verify.sh" round "$local_dir" runoq/42-test "$base_sha" "$payload_file"
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.ok')" = "true" ]
@@ -107,7 +107,7 @@ EOF
   base_sha="${shas[0]}"
   config_file="$TEST_TMPDIR/config.json"
   write_verify_config "$config_file"
-  export AGENDEV_CONFIG="$config_file"
+  export RUNOQ_CONFIG="$config_file"
 
   payload_file="$TEST_TMPDIR/payload.json"
   cat >"$payload_file" <<'EOF'
@@ -127,7 +127,7 @@ EOF
 }
 EOF
 
-  run "$AGENDEV_ROOT/scripts/verify.sh" round "$local_dir" agendev/42-test "$base_sha" "$payload_file"
+  run "$RUNOQ_ROOT/scripts/verify.sh" round "$local_dir" runoq/42-test "$base_sha" "$payload_file"
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.review_allowed')" = "false" ]
@@ -139,7 +139,7 @@ EOF
   remote_dir="$TEST_TMPDIR/remote.git"
   local_dir="$TEST_TMPDIR/local"
   make_remote_backed_repo "$remote_dir" "$local_dir"
-  git -C "$local_dir" checkout -b agendev/42-test >/dev/null 2>&1
+  git -C "$local_dir" checkout -b runoq/42-test >/dev/null 2>&1
   base_sha="$(git -C "$local_dir" rev-parse HEAD)"
   echo "console.log('ok')" >"$local_dir/src.ts"
   git -C "$local_dir" add src.ts
@@ -148,7 +148,7 @@ EOF
   config_file="$TEST_TMPDIR/config.json"
   write_verify_config "$config_file"
   jq '.verification.testCommand = "false" | .verification.buildCommand = "false"' "$config_file" >"$TEST_TMPDIR/config-fail.json"
-  export AGENDEV_CONFIG="$TEST_TMPDIR/config-fail.json"
+  export RUNOQ_CONFIG="$TEST_TMPDIR/config-fail.json"
 
   payload_file="$TEST_TMPDIR/payload.json"
   cat >"$payload_file" <<EOF
@@ -168,7 +168,7 @@ EOF
 }
 EOF
 
-  run "$AGENDEV_ROOT/scripts/verify.sh" round "$local_dir" agendev/42-test "$base_sha" "$payload_file"
+  run "$RUNOQ_ROOT/scripts/verify.sh" round "$local_dir" runoq/42-test "$base_sha" "$payload_file"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"branch tip is not pushed to origin"* ]]
@@ -185,7 +185,7 @@ EOF
   config_file="$TEST_TMPDIR/config.json"
   write_verify_config "$config_file"
   jq '.verification.testCommand = ""' "$config_file" >"$TEST_TMPDIR/config-bad.json"
-  export AGENDEV_CONFIG="$TEST_TMPDIR/config-bad.json"
+  export RUNOQ_CONFIG="$TEST_TMPDIR/config-bad.json"
 
   payload_file="$TEST_TMPDIR/payload.json"
   cat >"$payload_file" <<EOF
@@ -205,7 +205,7 @@ EOF
 }
 EOF
 
-  run "$AGENDEV_ROOT/scripts/verify.sh" round "$local_dir" agendev/42-test "$base_sha" "$payload_file"
+  run "$RUNOQ_ROOT/scripts/verify.sh" round "$local_dir" runoq/42-test "$base_sha" "$payload_file"
 
   [ "$status" -ne 0 ]
   [[ "$output" == *"verification.testCommand is not configured"* ]]

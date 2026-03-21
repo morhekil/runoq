@@ -18,7 +18,7 @@ parse_metadata_body() {
   local body_file="$1"
   local block depends_line priority_line complexity_line depends_json priority_json complexity_json valid
   block="$(awk '
-    /<!-- agendev:meta/ { in_block = 1; next }
+    /<!-- runoq:meta/ { in_block = 1; next }
     in_block && /-->/ { exit }
     in_block { print }
   ' "$body_file")"
@@ -73,11 +73,11 @@ list_issues() {
   local repo="$1"
   local ready_label="$2"
   local raw issue metadata body_file
-  raw="$(agendev::gh issue list --repo "$repo" --label "$ready_label" --state open --limit 200 --json number,title,body,labels,url)"
+  raw="$(runoq::gh issue list --repo "$repo" --label "$ready_label" --state open --limit 200 --json number,title,body,labels,url)"
 
   while IFS= read -r issue; do
     [[ -z "$issue" ]] && continue
-    body_file="$(mktemp "${TMPDIR:-/tmp}/agendev-issue-body.XXXXXX")"
+    body_file="$(mktemp "${TMPDIR:-/tmp}/runoq-issue-body.XXXXXX")"
     printf '%s' "$issue" | jq -r '.body // ""' >"$body_file"
     metadata="$(parse_metadata_body "$body_file")"
     rm -f "$body_file"
@@ -104,9 +104,9 @@ dependency_status() {
   local repo="$1"
   local dependency="$2"
   local done_label output
-  done_label="$(agendev::config_get '.labels.done')"
+  done_label="$(runoq::config_get '.labels.done')"
 
-  if ! output="$(agendev::gh issue view "$dependency" --repo "$repo" --json number,labels 2>/dev/null)"; then
+  if ! output="$(runoq::gh issue view "$dependency" --repo "$repo" --json number,labels 2>/dev/null)"; then
     jq -n --argjson dependency "$dependency" '{
       dependency: $dependency,
       done: false,
@@ -125,7 +125,7 @@ dependency_status() {
       {
         dependency: $dependency,
         done: false,
-        reason: ("dependency #" + ($dependency | tostring) + " is not agendev:done")
+        reason: ("dependency #" + ($dependency | tostring) + " is not runoq:done")
       }
     end
   '
@@ -189,17 +189,17 @@ case "${1:-}" in
     repo="$2"
     issue_number="$3"
     status="$4"
-    new_label="$(agendev::label_for_status "$status")"
-    current_labels="$(agendev::gh issue view "$issue_number" --repo "$repo" --json labels | jq -r '.labels[].name')"
+    new_label="$(runoq::label_for_status "$status")"
+    current_labels="$(runoq::gh issue view "$issue_number" --repo "$repo" --json labels | jq -r '.labels[].name')"
     edit_args=()
     while IFS= read -r label; do
       [[ -z "$label" ]] && continue
-      if [[ "$label" == agendev:* ]]; then
+      if [[ "$label" == runoq:* ]]; then
         edit_args+=(--remove-label "$label")
       fi
     done <<<"$current_labels"
     edit_args+=(--add-label "$new_label")
-    agendev::gh issue edit "$issue_number" --repo "$repo" "${edit_args[@]}" >/dev/null
+    runoq::gh issue edit "$issue_number" --repo "$repo" "${edit_args[@]}" >/dev/null
     jq -n --argjson issue "$issue_number" --arg status "$status" --arg label "$new_label" '{
       issue: $issue,
       status: $status,
@@ -236,9 +236,9 @@ case "${1:-}" in
       esac
     done
 
-    body_file="$(mktemp "${TMPDIR:-/tmp}/agendev-issue-create.XXXXXX.md")"
+    body_file="$(mktemp "${TMPDIR:-/tmp}/runoq-issue-create.XXXXXX.md")"
     {
-      echo "<!-- agendev:meta"
+      echo "<!-- runoq:meta"
       printf 'depends_on: %s\n' "$(printf '%s' "$depends_on" | jq -c '.')"
       printf 'priority: %s\n' "$priority"
       printf 'estimated_complexity: %s\n' "$estimated_complexity"
@@ -247,8 +247,8 @@ case "${1:-}" in
       printf '%s\n' "$body"
     } >"$body_file"
 
-    ready_label="$(agendev::config_get '.labels.ready')"
-    result="$(agendev::gh issue create --repo "$repo" --title "$title" --body-file "$body_file" --label "$ready_label")"
+    ready_label="$(runoq::config_get '.labels.ready')"
+    result="$(runoq::gh issue create --repo "$repo" --title "$title" --body-file "$body_file" --label "$ready_label")"
     rm -f "$body_file"
     jq -n --arg title "$title" --arg url "$result" '{title:$title, url:$url}'
     ;;

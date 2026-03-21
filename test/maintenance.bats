@@ -7,16 +7,16 @@ write_maintenance_config() {
   cat >"$path" <<'EOF'
 {
   "labels": {
-    "ready": "agendev:ready",
-    "inProgress": "agendev:in-progress",
-    "done": "agendev:done",
-    "needsReview": "agendev:needs-human-review",
-    "blocked": "agendev:blocked",
-    "maintenanceReview": "agendev:maintenance-review"
+    "ready": "runoq:ready",
+    "inProgress": "runoq:in-progress",
+    "done": "runoq:done",
+    "needsReview": "runoq:needs-human-review",
+    "blocked": "runoq:blocked",
+    "maintenanceReview": "runoq:maintenance-review"
   },
   "identity": {
-    "appSlug": "agendev",
-    "handle": "agendev"
+    "appSlug": "runoq",
+    "handle": "runoq"
   },
   "authorization": {
     "minimumPermission": "write",
@@ -36,8 +36,8 @@ write_maintenance_config() {
     "maxComplexity": "low"
   },
   "reviewers": ["username"],
-  "branchPrefix": "agendev/",
-  "worktreePrefix": "agendev-wt-",
+  "branchPrefix": "runoq/",
+  "worktreePrefix": "runoq-wt-",
   "consecutiveFailureLimit": 3,
   "verification": {
     "testCommand": "true",
@@ -55,10 +55,10 @@ prepare_maintenance_repo() {
   mkdir -p "$repo_dir"
   make_git_repo "$repo_dir"
   export TARGET_ROOT="$repo_dir"
-  export AGENDEV_STATE_DIR="$repo_dir/.agendev/state"
-  mkdir -p "$AGENDEV_STATE_DIR"
-  export AGENDEV_CONFIG="$TEST_TMPDIR/config.json"
-  write_maintenance_config "$AGENDEV_CONFIG"
+  export RUNOQ_STATE_DIR="$repo_dir/.runoq/state"
+  mkdir -p "$RUNOQ_STATE_DIR"
+  export RUNOQ_CONFIG="$TEST_TMPDIR/config.json"
+  write_maintenance_config "$RUNOQ_CONFIG"
 }
 
 @test "maintenance derive-partitions uses top-level include directories for single-project repos" {
@@ -75,7 +75,7 @@ EOF
 }
 EOF
 
-  run "$AGENDEV_ROOT/scripts/maintenance.sh" derive-partitions "$repo_dir"
+  run "$RUNOQ_ROOT/scripts/maintenance.sh" derive-partitions "$repo_dir"
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.mode')" = "single-project" ]
@@ -96,7 +96,7 @@ EOF
 }
 EOF
 
-  run "$AGENDEV_ROOT/scripts/maintenance.sh" derive-partitions "$repo_dir"
+  run "$RUNOQ_ROOT/scripts/maintenance.sh" derive-partitions "$repo_dir"
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.mode')" = "references" ]
@@ -133,7 +133,7 @@ EOF
   use_fake_gh "$scenario"
 
   before_sha="$(git -C "$repo_dir" rev-parse HEAD)"
-  run "$AGENDEV_ROOT/scripts/maintenance.sh" start owner/repo
+  run "$RUNOQ_ROOT/scripts/maintenance.sh" start owner/repo
   after_sha="$(git -C "$repo_dir" rev-parse HEAD)"
 
   [ "$status" -eq 0 ]
@@ -147,7 +147,7 @@ EOF
 @test "maintenance post-findings records grouped findings and flags in-flight PRs" {
   repo_dir="$TEST_TMPDIR/project"
   prepare_maintenance_repo "$repo_dir"
-  cat >"$AGENDEV_STATE_DIR/maintenance.json" <<'EOF'
+  cat >"$RUNOQ_STATE_DIR/maintenance.json" <<'EOF'
 {
   "phase": "STARTED",
   "tracking_issue": 120,
@@ -187,14 +187,14 @@ EOF
 EOF
   use_fake_gh "$scenario"
 
-  run "$AGENDEV_ROOT/scripts/maintenance.sh" post-findings owner/repo 120 "$findings_file"
+  run "$RUNOQ_ROOT/scripts/maintenance.sh" post-findings owner/repo 120 "$findings_file"
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.findings | length')" = "1" ]
-  run jq -r '.findings[0].status' "$AGENDEV_STATE_DIR/maintenance.json"
+  run jq -r '.findings[0].status' "$RUNOQ_STATE_DIR/maintenance.json"
   [ "$status" -eq 0 ]
   [ "$output" = "pending" ]
-  run jq -r '.recurring_patterns[0]' "$AGENDEV_STATE_DIR/maintenance.json"
+  run jq -r '.recurring_patterns[0]' "$RUNOQ_STATE_DIR/maintenance.json"
   [ "$status" -eq 0 ]
   [ "$output" = "validation duplication" ]
 }
@@ -202,7 +202,7 @@ EOF
 @test "maintenance triage approves denies and modifies findings while reusing mention authorization rules" {
   repo_dir="$TEST_TMPDIR/project"
   prepare_maintenance_repo "$repo_dir"
-  cat >"$AGENDEV_STATE_DIR/maintenance.json" <<'EOF'
+  cat >"$RUNOQ_STATE_DIR/maintenance.json" <<'EOF'
 {
   "phase": "FINDINGS_POSTED",
   "tracking_issue": 120,
@@ -244,14 +244,14 @@ EOF
 [
   {
     "contains": ["api", "repos/owner/repo/issues/120/comments"],
-    "stdout": "[{\"id\":5001,\"body\":\"@agendev approve F1\",\"user\":{\"login\":\"reviewer1\"},\"created_at\":\"2026-03-17T03:00:00Z\"},{\"id\":5002,\"body\":\"@agendev skip F2\",\"user\":{\"login\":\"reviewer1\"},\"created_at\":\"2026-03-17T03:05:00Z\"},{\"id\":5003,\"body\":\"@agendev file this F3 but lower priority\",\"user\":{\"login\":\"reviewer1\"},\"created_at\":\"2026-03-17T03:10:00Z\"}]"
+    "stdout": "[{\"id\":5001,\"body\":\"@runoq approve F1\",\"user\":{\"login\":\"reviewer1\"},\"created_at\":\"2026-03-17T03:00:00Z\"},{\"id\":5002,\"body\":\"@runoq skip F2\",\"user\":{\"login\":\"reviewer1\"},\"created_at\":\"2026-03-17T03:05:00Z\"},{\"id\":5003,\"body\":\"@runoq file this F3 but lower priority\",\"user\":{\"login\":\"reviewer1\"},\"created_at\":\"2026-03-17T03:10:00Z\"}]"
   },
   {
     "contains": ["api", "repos/owner/repo/collaborators/reviewer1/permission"],
     "stdout_file": "$(fixture_path "comments/permission-write.json")"
   },
   {
-    "contains": ["issue", "create", "--repo", "owner/repo", "--title", "Approval finding", "--label", "agendev:ready"],
+    "contains": ["issue", "create", "--repo", "owner/repo", "--title", "Approval finding", "--label", "runoq:ready"],
     "stdout": "https://github.com/owner/repo/issues/99"
   },
   {
@@ -271,7 +271,7 @@ EOF
     "stdout_file": "$(fixture_path "comments/permission-write.json")"
   },
   {
-    "contains": ["issue", "create", "--repo", "owner/repo", "--title", "Modified finding", "--label", "agendev:ready"],
+    "contains": ["issue", "create", "--repo", "owner/repo", "--title", "Modified finding", "--label", "runoq:ready"],
     "stdout": "https://github.com/owner/repo/issues/100"
   },
   {
@@ -286,20 +286,20 @@ EOF
 EOF
   use_fake_gh "$scenario"
 
-  run "$AGENDEV_ROOT/scripts/maintenance.sh" triage owner/repo 120
+  run "$RUNOQ_ROOT/scripts/maintenance.sh" triage owner/repo 120
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.processed | length')" = "3" ]
-  run jq -r '.findings[] | select(.id == "F1") | .status' "$AGENDEV_STATE_DIR/maintenance.json"
+  run jq -r '.findings[] | select(.id == "F1") | .status' "$RUNOQ_STATE_DIR/maintenance.json"
   [ "$status" -eq 0 ]
   [ "$output" = "approved" ]
-  run jq -r '.findings[] | select(.id == "F2") | .status' "$AGENDEV_STATE_DIR/maintenance.json"
+  run jq -r '.findings[] | select(.id == "F2") | .status' "$RUNOQ_STATE_DIR/maintenance.json"
   [ "$status" -eq 0 ]
   [ "$output" = "declined" ]
-  run jq -r '.findings[] | select(.id == "F3") | .priority' "$AGENDEV_STATE_DIR/maintenance.json"
+  run jq -r '.findings[] | select(.id == "F3") | .priority' "$RUNOQ_STATE_DIR/maintenance.json"
   [ "$status" -eq 0 ]
   [ "$output" = "3" ]
-  run jq -r 'length' "$AGENDEV_STATE_DIR/processed-mentions.json"
+  run jq -r 'length' "$RUNOQ_STATE_DIR/processed-mentions.json"
   [ "$status" -eq 0 ]
   [ "$output" = "3" ]
 }
@@ -346,14 +346,14 @@ EOF
   },
   {
     "contains": ["api", "repos/owner/repo/issues/120/comments"],
-    "stdout": "[{\"id\":7001,\"body\":\"@agendev approve F1\",\"user\":{\"login\":\"reviewer1\"},\"created_at\":\"2026-03-17T04:00:00Z\"}]"
+    "stdout": "[{\"id\":7001,\"body\":\"@runoq approve F1\",\"user\":{\"login\":\"reviewer1\"},\"created_at\":\"2026-03-17T04:00:00Z\"}]"
   },
   {
     "contains": ["api", "repos/owner/repo/collaborators/reviewer1/permission"],
     "stdout_file": "$(fixture_path "comments/permission-write.json")"
   },
   {
-    "contains": ["issue", "create", "--repo", "owner/repo", "--title", "Approval finding", "--label", "agendev:ready"],
+    "contains": ["issue", "create", "--repo", "owner/repo", "--title", "Approval finding", "--label", "runoq:ready"],
     "stdout": "https://github.com/owner/repo/issues/99"
   },
   {
@@ -373,7 +373,7 @@ EOF
   use_fake_gh "$scenario"
 
   before_sha="$(git -C "$repo_dir" rev-parse HEAD)"
-  run "$AGENDEV_ROOT/scripts/maintenance.sh" run owner/repo "$findings_file"
+  run "$RUNOQ_ROOT/scripts/maintenance.sh" run owner/repo "$findings_file"
   after_sha="$(git -C "$repo_dir" rev-parse HEAD)"
 
   [ "$status" -eq 0 ]
@@ -389,7 +389,7 @@ EOF
 @test "maintenance run resumes from posted findings state" {
   repo_dir="$TEST_TMPDIR/project"
   prepare_maintenance_repo "$repo_dir"
-  cat >"$AGENDEV_STATE_DIR/maintenance.json" <<'EOF'
+  cat >"$RUNOQ_STATE_DIR/maintenance.json" <<'EOF'
 {
   "phase": "FINDINGS_POSTED",
   "tracking_issue": 120,
@@ -431,14 +431,14 @@ EOF
 [
   {
     "contains": ["api", "repos/owner/repo/issues/120/comments"],
-    "stdout": "[{\"id\":7101,\"body\":\"@agendev approve F1\",\"user\":{\"login\":\"reviewer1\"},\"created_at\":\"2026-03-17T04:10:00Z\"}]"
+    "stdout": "[{\"id\":7101,\"body\":\"@runoq approve F1\",\"user\":{\"login\":\"reviewer1\"},\"created_at\":\"2026-03-17T04:10:00Z\"}]"
   },
   {
     "contains": ["api", "repos/owner/repo/collaborators/reviewer1/permission"],
     "stdout_file": "$(fixture_path "comments/permission-write.json")"
   },
   {
-    "contains": ["issue", "create", "--repo", "owner/repo", "--title", "Approval finding", "--label", "agendev:ready"],
+    "contains": ["issue", "create", "--repo", "owner/repo", "--title", "Approval finding", "--label", "runoq:ready"],
     "stdout": "https://github.com/owner/repo/issues/99"
   },
   {
@@ -457,7 +457,7 @@ EOF
 EOF
   use_fake_gh "$scenario"
 
-  run "$AGENDEV_ROOT/scripts/maintenance.sh" run owner/repo "$findings_file"
+  run "$RUNOQ_ROOT/scripts/maintenance.sh" run owner/repo "$findings_file"
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.phase')" = "COMPLETED" ]
@@ -469,7 +469,7 @@ EOF
 @test "maintenance run returns completed state without reposting summary" {
   repo_dir="$TEST_TMPDIR/project"
   prepare_maintenance_repo "$repo_dir"
-  cat >"$AGENDEV_STATE_DIR/maintenance.json" <<'EOF'
+  cat >"$RUNOQ_STATE_DIR/maintenance.json" <<'EOF'
 {
   "phase": "COMPLETED",
   "tracking_issue": 120,
@@ -512,7 +512,7 @@ EOF
 EOF
   use_fake_gh "$scenario"
 
-  run "$AGENDEV_ROOT/scripts/maintenance.sh" run owner/repo "$findings_file"
+  run "$RUNOQ_ROOT/scripts/maintenance.sh" run owner/repo "$findings_file"
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.phase')" = "COMPLETED" ]

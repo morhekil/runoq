@@ -3,7 +3,7 @@
 load test_helper
 
 @test "live smoke preflight requires explicit sandbox configuration" {
-  run "$AGENDEV_ROOT/scripts/smoke-sandbox.sh" preflight
+  run "$RUNOQ_ROOT/scripts/smoke-sandbox.sh" preflight
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.ready')" = "false" ]
@@ -14,15 +14,15 @@ load test_helper
 @test "live smoke preflight accepts explicit sandbox configuration" {
   key_path="$TEST_TMPDIR/app-key.pem"
   printf 'not-a-real-key\n' >"$key_path"
-  export AGENDEV_SMOKE=1
-  export AGENDEV_SMOKE_REPO="owner/sandbox"
-  export AGENDEV_SMOKE_APP_ID="123"
-  export AGENDEV_SMOKE_INSTALLATION_ID="456"
-  export AGENDEV_SMOKE_APP_KEY="$key_path"
-  export AGENDEV_SMOKE_PERMISSION_USER="sandbox-user"
-  export AGENDEV_SMOKE_PERMISSION_LEVEL="write"
+  export RUNOQ_SMOKE=1
+  export RUNOQ_SMOKE_REPO="owner/sandbox"
+  export RUNOQ_SMOKE_APP_ID="123"
+  export RUNOQ_SMOKE_INSTALLATION_ID="456"
+  export RUNOQ_SMOKE_APP_KEY="$key_path"
+  export RUNOQ_SMOKE_PERMISSION_USER="sandbox-user"
+  export RUNOQ_SMOKE_PERMISSION_LEVEL="write"
 
-  run "$AGENDEV_ROOT/scripts/smoke-sandbox.sh" preflight
+  run "$RUNOQ_ROOT/scripts/smoke-sandbox.sh" preflight
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.ready')" = "true" ]
@@ -36,16 +36,16 @@ load test_helper
   stdout_file="$TEST_TMPDIR/stdout.json"
   stderr_file="$TEST_TMPDIR/stderr.log"
   printf 'not-a-real-key\n' >"$key_path"
-  export AGENDEV_SMOKE=1
-  export AGENDEV_SMOKE_REPO="owner/sandbox"
-  export AGENDEV_SMOKE_APP_ID="123"
-  export AGENDEV_SMOKE_INSTALLATION_ID="456"
-  export AGENDEV_SMOKE_APP_KEY="$key_path"
-  export AGENDEV_SMOKE_PERMISSION_USER="sandbox-user"
-  export AGENDEV_SMOKE_PERMISSION_LEVEL="write"
-  export AGENDEV_SMOKE_VERBOSE=1
+  export RUNOQ_SMOKE=1
+  export RUNOQ_SMOKE_REPO="owner/sandbox"
+  export RUNOQ_SMOKE_APP_ID="123"
+  export RUNOQ_SMOKE_INSTALLATION_ID="456"
+  export RUNOQ_SMOKE_APP_KEY="$key_path"
+  export RUNOQ_SMOKE_PERMISSION_USER="sandbox-user"
+  export RUNOQ_SMOKE_PERMISSION_LEVEL="write"
+  export RUNOQ_SMOKE_VERBOSE=1
 
-  "$AGENDEV_ROOT/scripts/smoke-sandbox.sh" preflight >"$stdout_file" 2>"$stderr_file"
+  "$RUNOQ_ROOT/scripts/smoke-sandbox.sh" preflight >"$stdout_file" 2>"$stderr_file"
 
   [ "$(jq -r '.ready' "$stdout_file")" = "true" ]
   grep -F "[smoke-sandbox] checking sandbox preflight prerequisites" "$stderr_file"
@@ -63,10 +63,10 @@ load test_helper
 ]
 EOF
   use_fake_gh "$scenario"
-  export AGENDEV_CLAUDE_BIN="sh"
-  export AGENDEV_SMOKE_CODEX_BIN="sh"
+  export RUNOQ_CLAUDE_BIN="sh"
+  export RUNOQ_SMOKE_CODEX_BIN="sh"
 
-  run "$AGENDEV_ROOT/scripts/smoke-lifecycle.sh" preflight
+  run "$RUNOQ_ROOT/scripts/smoke-lifecycle.sh" preflight
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.ready')" = "false" ]
@@ -87,23 +87,23 @@ EOF
 ]
 EOF
   use_fake_gh "$scenario"
-  export AGENDEV_SMOKE=1
-  export AGENDEV_SMOKE_REPO_OWNER="owner"
-  export AGENDEV_SMOKE_APP_ID="123"
-  export AGENDEV_SMOKE_APP_KEY="$key_path"
-  export AGENDEV_CLAUDE_BIN="sh"
-  export AGENDEV_SMOKE_CODEX_BIN="sh"
+  export RUNOQ_SMOKE=1
+  export RUNOQ_SMOKE_REPO_OWNER="owner"
+  export RUNOQ_SMOKE_APP_ID="123"
+  export RUNOQ_SMOKE_APP_KEY="$key_path"
+  export RUNOQ_CLAUDE_BIN="sh"
+  export RUNOQ_SMOKE_CODEX_BIN="sh"
 
-  run "$AGENDEV_ROOT/scripts/smoke-lifecycle.sh" preflight
+  run "$RUNOQ_ROOT/scripts/smoke-lifecycle.sh" preflight
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.ready')" = "true" ]
   [ "$(printf '%s' "$output" | jq -r '.repo_owner')" = "owner" ]
-  [ "$(printf '%s' "$output" | jq -r '.repo_prefix')" = "agendev-live-eval" ]
+  [ "$(printf '%s' "$output" | jq -r '.repo_prefix')" = "runoq-live-eval" ]
 }
 
 @test "live lifecycle run preflight failure does not trip cleanup on unset locals" {
-  run "$AGENDEV_ROOT/scripts/smoke-lifecycle.sh" run
+  run "$RUNOQ_ROOT/scripts/smoke-lifecycle.sh" run
 
   [ "$status" -ne 0 ]
   [[ "$output" == *"Live lifecycle smoke preflight failed."* ]]
@@ -140,9 +140,9 @@ EOF
 ]
 EOF
   use_fake_gh "$scenario"
-  export AGENDEV_SMOKE_MANIFEST_PATH="$manifest_path"
+  export RUNOQ_SMOKE_MANIFEST_PATH="$manifest_path"
 
-  run "$AGENDEV_ROOT/scripts/smoke-lifecycle.sh" cleanup --repo owner/repo-one
+  run "$RUNOQ_ROOT/scripts/smoke-lifecycle.sh" cleanup --repo owner/repo-one
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.status')" = "ok" ]
@@ -177,10 +177,10 @@ EOF
 ]
 EOF
   use_fake_gh "$scenario"
-  export AGENDEV_SMOKE_MANIFEST_PATH="$manifest_path"
-  export AGENDEV_SMOKE_VERBOSE=1
+  export RUNOQ_SMOKE_MANIFEST_PATH="$manifest_path"
+  export RUNOQ_SMOKE_VERBOSE=1
 
-  "$AGENDEV_ROOT/scripts/smoke-lifecycle.sh" cleanup --repo owner/repo-one >"$stdout_file" 2>"$stderr_file"
+  "$RUNOQ_ROOT/scripts/smoke-lifecycle.sh" cleanup --repo owner/repo-one >"$stdout_file" 2>"$stderr_file"
 
   [ "$(jq -r '.status' "$stdout_file")" = "ok" ]
   grep -F "[smoke-lifecycle] selected 1 managed repo(s) for cleanup" "$stderr_file"
@@ -203,16 +203,16 @@ EOF
 
   run bash -lc '
     set -euo pipefail
-    source "'"$AGENDEV_ROOT"'/scripts/lib/smoke-common.sh"
+    source "'"$RUNOQ_ROOT"'/scripts/lib/smoke-common.sh"
     create_claude_capture_wrapper "'"$wrapper_path"'"
-    export AGENDEV_SMOKE_REAL_CLAUDE_BIN="'"$real_claude"'"
-    export AGENDEV_SMOKE_CLAUDE_CAPTURE_DIR="'"$capture_dir"'"
+    export RUNOQ_SMOKE_REAL_CLAUDE_BIN="'"$real_claude"'"
+    export RUNOQ_SMOKE_CLAUDE_CAPTURE_DIR="'"$capture_dir"'"
     export TARGET_ROOT="'"$target_dir"'"
     export REPO="owner/repo"
-    export AGENDEV_ROOT="'"$AGENDEV_ROOT"'"
+    export RUNOQ_ROOT="'"$RUNOQ_ROOT"'"
     mkdir -p "$TARGET_ROOT"
     cd "$TARGET_ROOT"
-    "'"$wrapper_path"'" --print --agent github-orchestrator -- "{\"command\":\"agendev run\"}"
+    "'"$wrapper_path"'" --print --agent github-orchestrator -- "{\"command\":\"runoq run\"}"
   '
 
   [ "$status" -eq 0 ]
@@ -250,14 +250,14 @@ EOF
   run bash -lc '
     set -euo pipefail
     export PATH="'"$real_bin_dir"':$PATH"
-    source "'"$AGENDEV_ROOT"'/scripts/lib/smoke-common.sh"
+    source "'"$RUNOQ_ROOT"'/scripts/lib/smoke-common.sh"
     real_codex_bin="$(smoke_codex_bin)"
     create_codex_capture_wrapper "'"$wrapper_path"'"
-    export AGENDEV_SMOKE_REAL_CODEX_BIN="$real_codex_bin"
-    export AGENDEV_SMOKE_CODEX_CAPTURE_DIR="'"$capture_dir"'"
+    export RUNOQ_SMOKE_REAL_CODEX_BIN="$real_codex_bin"
+    export RUNOQ_SMOKE_CODEX_CAPTURE_DIR="'"$capture_dir"'"
     export TARGET_ROOT="'"$target_dir"'"
     export REPO="owner/repo"
-    export AGENDEV_ROOT="'"$AGENDEV_ROOT"'"
+    export RUNOQ_ROOT="'"$RUNOQ_ROOT"'"
     export PATH="'"$TEST_TMPDIR"':$PATH"
     mkdir -p "$TARGET_ROOT"
     cd "$TARGET_ROOT"
@@ -285,8 +285,8 @@ EOF
 @test "lifecycle summary treats copied lifecycle state files as completed issues" {
   target_dir="$TEST_TMPDIR/target"
   artifacts_dir="$TEST_TMPDIR/artifacts"
-  mkdir -p "$target_dir/.agendev/state" "$artifacts_dir"
-  cat >"$target_dir/.agendev/state/1.json" <<'EOF'
+  mkdir -p "$target_dir/.runoq/state" "$artifacts_dir"
+  cat >"$target_dir/.runoq/state/1.json" <<'EOF'
 {
   "issueNumber": 1,
   "status": "done",
@@ -296,7 +296,7 @@ EOF
   "result": { "verdict": "PASS" }
 }
 EOF
-  cat >"$target_dir/.agendev/state/2.json" <<'EOF'
+  cat >"$target_dir/.runoq/state/2.json" <<'EOF'
 {
   "issueNumber": 2,
   "status": "done",
@@ -309,18 +309,18 @@ EOF
 
   run bash -lc '
     set -euo pipefail
-    source "'"$AGENDEV_ROOT"'/scripts/lib/smoke-common.sh"
+    source "'"$RUNOQ_ROOT"'/scripts/lib/smoke-common.sh"
     seeded='\''[
       {"key":"one","number":1,"title":"One","depends_on_numbers":[],"url":"https://example.test/issues/1"},
       {"key":"two","number":2,"title":"Two","depends_on_numbers":[1],"url":"https://example.test/issues/2"}
     ]'\''
     statuses='\''[
-      {"number":1,"state":"OPEN","labels":[{"name":"agendev:done"}],"url":"https://example.test/issues/1"},
-      {"number":2,"state":"OPEN","labels":[{"name":"agendev:done"}],"url":"https://example.test/issues/2"}
+      {"number":1,"state":"OPEN","labels":[{"name":"runoq:done"}],"url":"https://example.test/issues/1"},
+      {"number":2,"state":"OPEN","labels":[{"name":"runoq:done"}],"url":"https://example.test/issues/2"}
     ]'\''
     prs='\''[
-      {"number":10,"state":"MERGED","isDraft":false,"title":"One","url":"https://example.test/pull/10","headRefName":"agendev/1-one","baseRefName":"main"},
-      {"number":11,"state":"MERGED","isDraft":false,"title":"Two","url":"https://example.test/pull/11","headRefName":"agendev/2-two","baseRefName":"main"}
+      {"number":10,"state":"MERGED","isDraft":false,"title":"One","url":"https://example.test/pull/10","headRefName":"runoq/1-one","baseRefName":"main"},
+      {"number":11,"state":"MERGED","isDraft":false,"title":"Two","url":"https://example.test/pull/11","headRefName":"runoq/2-two","baseRefName":"main"}
     ]'\''
     report='\''{"issues":2,"pass":2,"fail":0,"caveats":0,"tokens":{"input":0,"cached_input":0,"output":0,"total":0},"average_rounds":1.5}'\''
     states="$(read_state_files_json "'"$target_dir"'")"
@@ -351,9 +351,9 @@ EOF
   smoke_root="$TEST_TMPDIR/live-smoke"
   target_dir="$smoke_root/target"
   artifacts_dir="$TEST_TMPDIR/artifacts"
-  worktree_dir="$smoke_root/agendev-wt-2"
-  mkdir -p "$target_dir" "$worktree_dir/.agendev/state" "$artifacts_dir"
-  cat >"$worktree_dir/.agendev/state/2.json" <<'EOF'
+  worktree_dir="$smoke_root/runoq-wt-2"
+  mkdir -p "$target_dir" "$worktree_dir/.runoq/state" "$artifacts_dir"
+  cat >"$worktree_dir/.runoq/state/2.json" <<'EOF'
 {
   "issueNumber": 2,
   "status": "done",
@@ -362,13 +362,13 @@ EOF
 }
 EOF
 
-  source "$AGENDEV_ROOT/scripts/lib/smoke-common.sh"
+  source "$RUNOQ_ROOT/scripts/lib/smoke-common.sh"
   copy_state_artifacts "$target_dir" "$artifacts_dir"
   states="$(read_state_files_json_from_dir "$artifacts_dir/state")"
   report="$(
     TARGET_ROOT="$target_dir" \
-    AGENDEV_STATE_DIR="$artifacts_dir/state" \
-    "$AGENDEV_ROOT/scripts/report.sh" summary
+    RUNOQ_STATE_DIR="$artifacts_dir/state" \
+    "$RUNOQ_ROOT/scripts/report.sh" summary
   )"
 
   [ "$(printf '%s' "$states" | jq -r 'length')" = "1" ]

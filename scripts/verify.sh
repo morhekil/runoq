@@ -52,8 +52,8 @@ verify_round() {
   local base_sha="$3"
   local payload_file="$4"
   local truth_file failures_file remote_sha local_sha test_command build_command
-  truth_file="$(mktemp "${TMPDIR:-/tmp}/agendev-verify-truth.XXXXXX")"
-  failures_file="$(mktemp "${TMPDIR:-/tmp}/agendev-verify-failures.XXXXXX")"
+  truth_file="$(mktemp "${TMPDIR:-/tmp}/runoq-verify-truth.XXXXXX")"
+  failures_file="$(mktemp "${TMPDIR:-/tmp}/runoq-verify-failures.XXXXXX")"
   printf '[]\n' >"$failures_file"
 
   ground_truth_json "$worktree" "$base_sha" >"$truth_file"
@@ -87,10 +87,10 @@ verify_round() {
     mv "${failures_file}.tmp" "$failures_file"
   fi
 
-  test_command="$(agendev::config_get '.verification.testCommand')"
-  build_command="$(agendev::config_get '.verification.buildCommand')"
-  [[ -n "$test_command" && "$test_command" != "null" ]] || agendev::die "verification.testCommand is not configured"
-  [[ -n "$build_command" && "$build_command" != "null" ]] || agendev::die "verification.buildCommand is not configured"
+  test_command="$(runoq::config_get '.verification.testCommand')"
+  build_command="$(runoq::config_get '.verification.buildCommand')"
+  [[ -n "$test_command" && "$test_command" != "null" ]] || runoq::die "verification.testCommand is not configured"
+  [[ -n "$build_command" && "$build_command" != "null" ]] || runoq::die "verification.buildCommand is not configured"
 
   if ! run_check_command "$worktree" "$test_command" >/dev/null 2>&1; then
     jq '. + ["test command failed"]' "$failures_file" >"${failures_file}.tmp"

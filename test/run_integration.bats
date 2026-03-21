@@ -7,16 +7,16 @@ write_run_config() {
   cat >"$path" <<'EOF'
 {
   "labels": {
-    "ready": "agendev:ready",
-    "inProgress": "agendev:in-progress",
-    "done": "agendev:done",
-    "needsReview": "agendev:needs-human-review",
-    "blocked": "agendev:blocked",
-    "maintenanceReview": "agendev:maintenance-review"
+    "ready": "runoq:ready",
+    "inProgress": "runoq:in-progress",
+    "done": "runoq:done",
+    "needsReview": "runoq:needs-human-review",
+    "blocked": "runoq:blocked",
+    "maintenanceReview": "runoq:maintenance-review"
   },
   "identity": {
-    "appSlug": "agendev",
-    "handle": "agendev"
+    "appSlug": "runoq",
+    "handle": "runoq"
   },
   "authorization": {
     "minimumPermission": "write",
@@ -36,8 +36,8 @@ write_run_config() {
     "maxComplexity": "low"
   },
   "reviewers": ["username"],
-  "branchPrefix": "agendev/",
-  "worktreePrefix": "agendev-wt-",
+  "branchPrefix": "runoq/",
+  "worktreePrefix": "runoq-wt-",
   "consecutiveFailureLimit": 3,
   "verification": {
     "testCommand": "true",
@@ -52,7 +52,7 @@ EOF
 
 happy_issue_body() {
   cat <<'EOF'
-<!-- agendev:meta
+<!-- runoq:meta
 depends_on: []
 priority: 1
 estimated_complexity: low
@@ -68,7 +68,7 @@ queue_issue_body() {
   local depends_on="$1"
   local priority="$2"
   cat <<EOF
-<!-- agendev:meta
+<!-- runoq:meta
 depends_on: $depends_on
 priority: $priority
 estimated_complexity: low
@@ -85,11 +85,11 @@ write_issue_view_scenario_rules() {
   cat <<EOF
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
-    "stdout": $(jq -Rn --arg body "$issue_body" '{"number":42,"title":"Implement queue","body":$body,"labels":[{"name":"agendev:ready"}],"url":"https://example.test/issues/42"}')
+    "stdout": $(jq -Rn --arg body "$issue_body" '{"number":42,"title":"Implement queue","body":$body,"labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/42"}')
   },
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
-    "stdout": $(jq -Rn --arg body "$issue_body" '{"number":42,"title":"Implement queue","body":$body,"labels":[{"name":"agendev:ready"}],"url":"https://example.test/issues/42"}')
+    "stdout": $(jq -Rn --arg body "$issue_body" '{"number":42,"title":"Implement queue","body":$body,"labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/42"}')
   }
 EOF
 }
@@ -98,15 +98,15 @@ setup_run_fixture_env() {
   local local_dir="$1"
 
   export TARGET_ROOT="$local_dir"
-  export AGENDEV_REPO="owner/repo"
+  export RUNOQ_REPO="owner/repo"
   export REPO="owner/repo"
   export GH_TOKEN="existing-token"
-  export AGENDEV_TEST_RUN_MODE="fixture"
-  export AGENDEV_TEST_ORCHESTRATOR_RETURN_FILE=""
-  export AGENDEV_TEST_CODEX_OUTPUT_FILE=""
-  export AGENDEV_TEST_DEV_COMMAND=""
-  export AGENDEV_CONFIG="$TEST_TMPDIR/config.json"
-  write_run_config "$AGENDEV_CONFIG"
+  export RUNOQ_TEST_RUN_MODE="fixture"
+  export RUNOQ_TEST_ORCHESTRATOR_RETURN_FILE=""
+  export RUNOQ_TEST_CODEX_OUTPUT_FILE=""
+  export RUNOQ_TEST_DEV_COMMAND=""
+  export RUNOQ_CONFIG="$TEST_TMPDIR/config.json"
+  write_run_config "$RUNOQ_CONFIG"
 }
 
 write_needs_review_scenario() {
@@ -117,24 +117,24 @@ write_needs_review_scenario() {
   write_fake_gh_scenario "$scenario" <<EOF
 [
   {
-    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:in-progress"],
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:in-progress"],
     "stdout": "[]"
   },
 $(write_issue_view_scenario_rules "$issue_body"),
   {
-    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "agendev/42-implement-queue"],
+    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "runoq/42-implement-queue"],
     "stdout": "[]"
   },
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "labels"],
-    "stdout": "{\"labels\":[{\"name\":\"agendev:ready\"}]}"
+    "stdout": "{\"labels\":[{\"name\":\"runoq:ready\"}]}"
   },
   {
-    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "agendev:ready", "--add-label", "agendev:in-progress"],
+    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "runoq:ready", "--add-label", "runoq:in-progress"],
     "stdout": ""
   },
   {
-    "contains": ["pr", "create", "--repo", "owner/repo", "--draft", "--title", "Implement queue", "--head", "agendev/42-implement-queue"],
+    "contains": ["pr", "create", "--repo", "owner/repo", "--draft", "--title", "Implement queue", "--head", "runoq/42-implement-queue"],
     "stdout": "https://example.test/pull/87"
   },
   {
@@ -155,7 +155,7 @@ $(write_issue_view_scenario_rules "$issue_body"),
   },
   {
     "contains": ["pr", "view", "87", "--repo", "owner/repo", "--json", "body"],
-    "stdout_file": "$AGENDEV_ROOT/test/fixtures/comments/pr-view-body.json"
+    "stdout_file": "$RUNOQ_ROOT/test/fixtures/comments/pr-view-body.json"
   },
   {
     "contains": ["pr", "edit", "87", "--repo", "owner/repo", "--body-file"],
@@ -175,10 +175,10 @@ $(write_issue_view_scenario_rules "$issue_body"),
   },
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "labels"],
-    "stdout": "{\"labels\":[{\"name\":\"agendev:in-progress\"}]}"
+    "stdout": "{\"labels\":[{\"name\":\"runoq:in-progress\"}]}"
   },
   {
-    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "agendev:in-progress", "--add-label", "agendev:needs-human-review"],
+    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "runoq:in-progress", "--add-label", "runoq:needs-human-review"],
     "stdout": ""
   },
   {
@@ -207,22 +207,22 @@ write_interrupted_run_scenario() {
     "stdout": ""
   },
   {
-    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:in-progress"],
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:in-progress"],
     "stdout": "[]"
   }
 ]
 EOF
 }
 
-@test "agendev run --issue executes the single-issue happy path end to end" {
+@test "runoq run --issue executes the single-issue happy path end to end" {
   remote_dir="$TEST_TMPDIR/remote.git"
   local_dir="$TEST_TMPDIR/local"
   make_remote_backed_repo "$remote_dir" "$local_dir"
   git -C "$local_dir" remote set-url origin "$remote_dir"
   setup_run_fixture_env "$local_dir"
-  export AGENDEV_TEST_DEV_COMMAND='mkdir -p src && printf "export const queue = true;\n" > src/queue.ts && git add src/queue.ts && git commit -m "Add queue implementation" >/dev/null && git push -u origin HEAD >/dev/null 2>&1'
-  export AGENDEV_TEST_ORCHESTRATOR_RETURN_FILE="$TEST_TMPDIR/orchestrator-return.json"
-  cat >"$AGENDEV_TEST_ORCHESTRATOR_RETURN_FILE" <<'EOF'
+  export RUNOQ_TEST_DEV_COMMAND='mkdir -p src && printf "export const queue = true;\n" > src/queue.ts && git add src/queue.ts && git commit -m "Add queue implementation" >/dev/null && git push -u origin HEAD >/dev/null 2>&1'
+  export RUNOQ_TEST_ORCHESTRATOR_RETURN_FILE="$TEST_TMPDIR/orchestrator-return.json"
+  cat >"$RUNOQ_TEST_ORCHESTRATOR_RETURN_FILE" <<'EOF'
 {
   "verdict": "PASS",
   "rounds_used": 1,
@@ -238,31 +238,31 @@ EOF
   write_fake_gh_scenario "$scenario" <<EOF
 [
   {
-    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:in-progress"],
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:in-progress"],
     "stdout": "[]"
   },
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
-    "stdout": $(jq -Rn --arg body "$issue_body" '{"number":42,"title":"Implement queue","body":$body,"labels":[{"name":"agendev:ready"}],"url":"https://example.test/issues/42"}')
+    "stdout": $(jq -Rn --arg body "$issue_body" '{"number":42,"title":"Implement queue","body":$body,"labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/42"}')
   },
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
-    "stdout": $(jq -Rn --arg body "$issue_body" '{"number":42,"title":"Implement queue","body":$body,"labels":[{"name":"agendev:ready"}],"url":"https://example.test/issues/42"}')
+    "stdout": $(jq -Rn --arg body "$issue_body" '{"number":42,"title":"Implement queue","body":$body,"labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/42"}')
   },
   {
-    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "agendev/42-implement-queue"],
+    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "runoq/42-implement-queue"],
     "stdout": "[]"
   },
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "labels"],
-    "stdout": "{\"labels\":[{\"name\":\"agendev:ready\"}]}"
+    "stdout": "{\"labels\":[{\"name\":\"runoq:ready\"}]}"
   },
   {
-    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "agendev:ready", "--add-label", "agendev:in-progress"],
+    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "runoq:ready", "--add-label", "runoq:in-progress"],
     "stdout": ""
   },
   {
-    "contains": ["pr", "create", "--repo", "owner/repo", "--draft", "--title", "Implement queue", "--head", "agendev/42-implement-queue"],
+    "contains": ["pr", "create", "--repo", "owner/repo", "--draft", "--title", "Implement queue", "--head", "runoq/42-implement-queue"],
     "stdout": "https://example.test/pull/87"
   },
   {
@@ -279,7 +279,7 @@ EOF
   },
   {
     "contains": ["pr", "view", "87", "--repo", "owner/repo", "--json", "body"],
-    "stdout_file": "$AGENDEV_ROOT/test/fixtures/comments/pr-view-body.json"
+    "stdout_file": "$RUNOQ_ROOT/test/fixtures/comments/pr-view-body.json"
   },
   {
     "contains": ["pr", "edit", "87", "--repo", "owner/repo", "--body-file"],
@@ -295,52 +295,52 @@ EOF
   },
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "labels"],
-    "stdout": "{\"labels\":[{\"name\":\"agendev:in-progress\"}]}"
+    "stdout": "{\"labels\":[{\"name\":\"runoq:in-progress\"}]}"
   },
   {
-    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "agendev:in-progress", "--add-label", "agendev:done"],
+    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "runoq:in-progress", "--add-label", "runoq:done"],
     "stdout": ""
   }
 ]
 EOF
   use_fake_gh "$scenario"
 
-  run bash -lc 'cd "'"$local_dir"'" && "'"$AGENDEV_ROOT"'/bin/agendev" run --issue 42'
+  run bash -lc 'cd "'"$local_dir"'" && "'"$RUNOQ_ROOT"'/bin/runoq" run --issue 42'
 
   [ "$status" -eq 0 ]
 
-  run jq -r '.phase' "$local_dir/.agendev/state/42.json"
+  run jq -r '.phase' "$local_dir/.runoq/state/42.json"
   [ "$status" -eq 0 ]
   [ "$output" = "DONE" ]
 
-  worktree_path="$(cd "$local_dir/.." && pwd)/agendev-wt-42"
+  worktree_path="$(cd "$local_dir/.." && pwd)/runoq-wt-42"
   [ ! -e "$worktree_path" ]
 
   run cat "$FAKE_GH_LOG"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"issue edit 42 --repo owner/repo --remove-label agendev:ready --add-label agendev:in-progress"* ]]
-  [[ "$output" == *"pr create --repo owner/repo --draft --title Implement queue --head agendev/42-implement-queue"* ]]
+  [[ "$output" == *"issue edit 42 --repo owner/repo --remove-label runoq:ready --add-label runoq:in-progress"* ]]
+  [[ "$output" == *"pr create --repo owner/repo --draft --title Implement queue --head runoq/42-implement-queue"* ]]
   [[ "$output" == *"pr ready 87 --repo owner/repo"* ]]
   [[ "$output" == *"pr merge 87 --repo owner/repo --auto --squash"* ]]
-  [[ "$output" == *"issue edit 42 --repo owner/repo --remove-label agendev:in-progress --add-label agendev:done"* ]]
+  [[ "$output" == *"issue edit 42 --repo owner/repo --remove-label runoq:in-progress --add-label runoq:done"* ]]
 
-  run rg -n "agendev:payload:github-orchestrator-dispatch" "$FAKE_GH_CAPTURE_DIR"
+  run rg -n "runoq:payload:github-orchestrator-dispatch" "$FAKE_GH_CAPTURE_DIR"
   [ "$status" -eq 0 ]
-  run rg -n "agendev:payload:codex-return" "$FAKE_GH_CAPTURE_DIR"
+  run rg -n "runoq:payload:codex-return" "$FAKE_GH_CAPTURE_DIR"
   [ "$status" -eq 0 ]
-  run rg -n "agendev:payload:orchestrator-return" "$FAKE_GH_CAPTURE_DIR"
+  run rg -n "runoq:payload:orchestrator-return" "$FAKE_GH_CAPTURE_DIR"
   [ "$status" -eq 0 ]
   run rg -n "Implemented the queue file and verified the branch" "$FAKE_GH_CAPTURE_DIR"
   [ "$status" -eq 0 ]
 }
 
-@test "agendev run --issue escalates no-commit runs to needs-human-review with verification comments" {
+@test "runoq run --issue escalates no-commit runs to needs-human-review with verification comments" {
   remote_dir="$TEST_TMPDIR/remote.git"
   local_dir="$TEST_TMPDIR/local"
   make_remote_backed_repo "$remote_dir" "$local_dir"
   git -C "$local_dir" remote set-url origin "$remote_dir"
   setup_run_fixture_env "$local_dir"
-  export AGENDEV_TEST_DEV_COMMAND='true'
+  export RUNOQ_TEST_DEV_COMMAND='true'
 
   issue_body="$(happy_issue_body)"
   scenario="$TEST_TMPDIR/scenario.json"
@@ -348,14 +348,14 @@ EOF
   write_needs_review_scenario "$scenario" "$issue_body" "$issue_comment"
   use_fake_gh "$scenario"
 
-  run bash -lc 'cd "'"$local_dir"'" && "'"$AGENDEV_ROOT"'/bin/agendev" run --issue 42'
+  run bash -lc 'cd "'"$local_dir"'" && "'"$RUNOQ_ROOT"'/bin/runoq" run --issue 42'
 
   [ "$status" -eq 0 ]
-  run jq -r '.phase' "$local_dir/.agendev/state/42.json"
+  run jq -r '.phase' "$local_dir/.runoq/state/42.json"
   [ "$output" = "FAILED" ]
 
   run cat "$FAKE_GH_LOG"
-  [[ "$output" == *"issue edit 42 --repo owner/repo --remove-label agendev:in-progress --add-label agendev:needs-human-review"* ]]
+  [[ "$output" == *"issue edit 42 --repo owner/repo --remove-label runoq:in-progress --add-label runoq:needs-human-review"* ]]
   [[ "$output" == *"pr edit 87 --repo owner/repo --add-reviewer username --add-assignee username"* ]]
 
   run rg -n "Post-dev verification failed: no new commits were created, branch tip is not pushed to origin" "$FAKE_GH_CAPTURE_DIR"
@@ -364,15 +364,15 @@ EOF
   [ "$status" -eq 0 ]
 }
 
-@test "agendev run --issue escalates failing test and build verification to needs-human-review" {
+@test "runoq run --issue escalates failing test and build verification to needs-human-review" {
   remote_dir="$TEST_TMPDIR/remote.git"
   local_dir="$TEST_TMPDIR/local"
   make_remote_backed_repo "$remote_dir" "$local_dir"
   git -C "$local_dir" remote set-url origin "$remote_dir"
   setup_run_fixture_env "$local_dir"
-  export AGENDEV_TEST_DEV_COMMAND='mkdir -p src && printf "export const queue = true;\n" > src/queue.ts && git add src/queue.ts && git commit -m "Add queue implementation" >/dev/null && git push -u origin HEAD >/dev/null 2>&1'
-  jq '.verification.testCommand = "false" | .verification.buildCommand = "false"' "$AGENDEV_CONFIG" >"$TEST_TMPDIR/config-fail.json"
-  export AGENDEV_CONFIG="$TEST_TMPDIR/config-fail.json"
+  export RUNOQ_TEST_DEV_COMMAND='mkdir -p src && printf "export const queue = true;\n" > src/queue.ts && git add src/queue.ts && git commit -m "Add queue implementation" >/dev/null && git push -u origin HEAD >/dev/null 2>&1'
+  jq '.verification.testCommand = "false" | .verification.buildCommand = "false"' "$RUNOQ_CONFIG" >"$TEST_TMPDIR/config-fail.json"
+  export RUNOQ_CONFIG="$TEST_TMPDIR/config-fail.json"
 
   issue_body="$(happy_issue_body)"
   scenario="$TEST_TMPDIR/scenario.json"
@@ -380,20 +380,20 @@ EOF
   write_needs_review_scenario "$scenario" "$issue_body" "$issue_comment"
   use_fake_gh "$scenario"
 
-  run bash -lc 'cd "'"$local_dir"'" && "'"$AGENDEV_ROOT"'/bin/agendev" run --issue 42'
+  run bash -lc 'cd "'"$local_dir"'" && "'"$RUNOQ_ROOT"'/bin/runoq" run --issue 42'
 
   [ "$status" -eq 0 ]
   run rg -n "Post-dev verification failed: test command failed, build command failed" "$FAKE_GH_CAPTURE_DIR"
   [ "$status" -eq 0 ]
 }
 
-@test "agendev run --issue escalates missing push verification failures to needs-human-review" {
+@test "runoq run --issue escalates missing push verification failures to needs-human-review" {
   remote_dir="$TEST_TMPDIR/remote.git"
   local_dir="$TEST_TMPDIR/local"
   make_remote_backed_repo "$remote_dir" "$local_dir"
   git -C "$local_dir" remote set-url origin "$remote_dir"
   setup_run_fixture_env "$local_dir"
-  export AGENDEV_TEST_DEV_COMMAND='mkdir -p src && printf "export const queue = true;\n" > src/queue.ts && git add src/queue.ts && git commit -m "Add queue implementation" >/dev/null'
+  export RUNOQ_TEST_DEV_COMMAND='mkdir -p src && printf "export const queue = true;\n" > src/queue.ts && git add src/queue.ts && git commit -m "Add queue implementation" >/dev/null'
 
   issue_body="$(happy_issue_body)"
   scenario="$TEST_TMPDIR/scenario.json"
@@ -401,21 +401,21 @@ EOF
   write_needs_review_scenario "$scenario" "$issue_body" "$issue_comment"
   use_fake_gh "$scenario"
 
-  run bash -lc 'cd "'"$local_dir"'" && "'"$AGENDEV_ROOT"'/bin/agendev" run --issue 42'
+  run bash -lc 'cd "'"$local_dir"'" && "'"$RUNOQ_ROOT"'/bin/runoq" run --issue 42'
 
   [ "$status" -eq 0 ]
   run rg -n "Post-dev verification failed: branch tip is not pushed to origin" "$FAKE_GH_CAPTURE_DIR"
   [ "$status" -eq 0 ]
 }
 
-@test "agendev run --issue comments when payloads are synthesized from malformed Codex output" {
+@test "runoq run --issue comments when payloads are synthesized from malformed Codex output" {
   remote_dir="$TEST_TMPDIR/remote.git"
   local_dir="$TEST_TMPDIR/local"
   make_remote_backed_repo "$remote_dir" "$local_dir"
   git -C "$local_dir" remote set-url origin "$remote_dir"
   setup_run_fixture_env "$local_dir"
-  export AGENDEV_TEST_DEV_COMMAND='mkdir -p src && printf "export const queue = true;\n" > src/queue.ts && git add src/queue.ts && git commit -m "Add queue implementation" >/dev/null && git push -u origin HEAD >/dev/null 2>&1'
-  export AGENDEV_TEST_CODEX_OUTPUT_FILE="$AGENDEV_ROOT/test/fixtures/payloads/codex-return-malformed.txt"
+  export RUNOQ_TEST_DEV_COMMAND='mkdir -p src && printf "export const queue = true;\n" > src/queue.ts && git add src/queue.ts && git commit -m "Add queue implementation" >/dev/null && git push -u origin HEAD >/dev/null 2>&1'
+  export RUNOQ_TEST_CODEX_OUTPUT_FILE="$RUNOQ_ROOT/test/fixtures/payloads/codex-return-malformed.txt"
 
   issue_body="$(happy_issue_body)"
   scenario="$TEST_TMPDIR/scenario.json"
@@ -423,24 +423,24 @@ EOF
   write_fake_gh_scenario "$scenario" <<EOF
 [
   {
-    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:in-progress"],
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:in-progress"],
     "stdout": "[]"
   },
 $(write_issue_view_scenario_rules "$issue_body"),
   {
-    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "agendev/42-implement-queue"],
+    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "runoq/42-implement-queue"],
     "stdout": "[]"
   },
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "labels"],
-    "stdout": "{\"labels\":[{\"name\":\"agendev:ready\"}]}"
+    "stdout": "{\"labels\":[{\"name\":\"runoq:ready\"}]}"
   },
   {
-    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "agendev:ready", "--add-label", "agendev:in-progress"],
+    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "runoq:ready", "--add-label", "runoq:in-progress"],
     "stdout": ""
   },
   {
-    "contains": ["pr", "create", "--repo", "owner/repo", "--draft", "--title", "Implement queue", "--head", "agendev/42-implement-queue"],
+    "contains": ["pr", "create", "--repo", "owner/repo", "--draft", "--title", "Implement queue", "--head", "runoq/42-implement-queue"],
     "stdout": "https://example.test/pull/87"
   },
   {
@@ -465,7 +465,7 @@ $(write_issue_view_scenario_rules "$issue_body"),
   },
   {
     "contains": ["pr", "view", "87", "--repo", "owner/repo", "--json", "body"],
-    "stdout_file": "$AGENDEV_ROOT/test/fixtures/comments/pr-view-body.json"
+    "stdout_file": "$RUNOQ_ROOT/test/fixtures/comments/pr-view-body.json"
   },
   {
     "contains": ["pr", "edit", "87", "--repo", "owner/repo", "--body-file"],
@@ -485,10 +485,10 @@ $(write_issue_view_scenario_rules "$issue_body"),
   },
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "labels"],
-    "stdout": "{\"labels\":[{\"name\":\"agendev:in-progress\"}]}"
+    "stdout": "{\"labels\":[{\"name\":\"runoq:in-progress\"}]}"
   },
   {
-    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "agendev:in-progress", "--add-label", "agendev:needs-human-review"],
+    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "runoq:in-progress", "--add-label", "runoq:needs-human-review"],
     "stdout": ""
   },
   {
@@ -499,7 +499,7 @@ $(write_issue_view_scenario_rules "$issue_body"),
 EOF
   use_fake_gh "$scenario"
 
-  run bash -lc 'cd "'"$local_dir"'" && "'"$AGENDEV_ROOT"'/bin/agendev" run --issue 42'
+  run bash -lc 'cd "'"$local_dir"'" && "'"$RUNOQ_ROOT"'/bin/runoq" run --issue 42'
 
   [ "$status" -eq 0 ]
   run rg -n "Codex payload required reconstruction. Source=synthetic" "$FAKE_GH_CAPTURE_DIR"
@@ -508,39 +508,39 @@ EOF
   [ "$status" -eq 0 ]
 }
 
-@test "agendev run --issue records watchdog stalls and preserves state for reconciliation" {
+@test "runoq run --issue records watchdog stalls and preserves state for reconciliation" {
   remote_dir="$TEST_TMPDIR/remote.git"
   local_dir="$TEST_TMPDIR/local"
   make_remote_backed_repo "$remote_dir" "$local_dir"
   git -C "$local_dir" remote set-url origin "$remote_dir"
   setup_run_fixture_env "$local_dir"
-  jq '.stall.timeoutSeconds = 1' "$AGENDEV_CONFIG" >"$TEST_TMPDIR/config-stall.json"
-  export AGENDEV_CONFIG="$TEST_TMPDIR/config-stall.json"
-  export AGENDEV_TEST_DEV_COMMAND='sleep 2'
+  jq '.stall.timeoutSeconds = 1' "$RUNOQ_CONFIG" >"$TEST_TMPDIR/config-stall.json"
+  export RUNOQ_CONFIG="$TEST_TMPDIR/config-stall.json"
+  export RUNOQ_TEST_DEV_COMMAND='sleep 2'
 
   issue_body="$(happy_issue_body)"
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<EOF
 [
   {
-    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:in-progress"],
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:in-progress"],
     "stdout": "[]"
   },
 $(write_issue_view_scenario_rules "$issue_body"),
   {
-    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "agendev/42-implement-queue"],
+    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "runoq/42-implement-queue"],
     "stdout": "[]"
   },
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "labels"],
-    "stdout": "{\"labels\":[{\"name\":\"agendev:ready\"}]}"
+    "stdout": "{\"labels\":[{\"name\":\"runoq:ready\"}]}"
   },
   {
-    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "agendev:ready", "--add-label", "agendev:in-progress"],
+    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "runoq:ready", "--add-label", "runoq:in-progress"],
     "stdout": ""
   },
   {
-    "contains": ["pr", "create", "--repo", "owner/repo", "--draft", "--title", "Implement queue", "--head", "agendev/42-implement-queue"],
+    "contains": ["pr", "create", "--repo", "owner/repo", "--draft", "--title", "Implement queue", "--head", "runoq/42-implement-queue"],
     "stdout": "https://example.test/pull/87"
   },
   {
@@ -559,48 +559,48 @@ $(write_issue_view_scenario_rules "$issue_body"),
 EOF
   use_fake_gh "$scenario"
 
-  run bash -lc 'cd "'"$local_dir"'" && "'"$AGENDEV_ROOT"'/bin/agendev" run --issue 42'
+  run bash -lc 'cd "'"$local_dir"'" && "'"$RUNOQ_ROOT"'/bin/runoq" run --issue 42'
 
   [ "$status" -eq 124 ]
-  run jq -r '.phase' "$local_dir/.agendev/state/42.json"
+  run jq -r '.phase' "$local_dir/.runoq/state/42.json"
   [ "$output" = "DEVELOP" ]
-  run jq -r '.stall.timed_out' "$local_dir/.agendev/state/42.json"
+  run jq -r '.stall.timed_out' "$local_dir/.runoq/state/42.json"
   [ "$output" = "true" ]
   run rg -n "Agent stalled after 1 seconds of inactivity. Process terminated. State preserved for resume." "$FAKE_GH_CAPTURE_DIR"
   [ "$status" -eq 0 ]
 }
 
-@test "agendev run --issue comments on agent crashes and leaves interrupted state for startup reconciliation" {
+@test "runoq run --issue comments on agent crashes and leaves interrupted state for startup reconciliation" {
   remote_dir="$TEST_TMPDIR/remote.git"
   local_dir="$TEST_TMPDIR/local"
   make_remote_backed_repo "$remote_dir" "$local_dir"
   git -C "$local_dir" remote set-url origin "$remote_dir"
   setup_run_fixture_env "$local_dir"
-  export AGENDEV_TEST_DEV_COMMAND='exit 23'
+  export RUNOQ_TEST_DEV_COMMAND='exit 23'
 
   issue_body="$(happy_issue_body)"
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<EOF
 [
   {
-    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:in-progress"],
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:in-progress"],
     "stdout": "[]"
   },
 $(write_issue_view_scenario_rules "$issue_body"),
   {
-    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "agendev/42-implement-queue"],
+    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "runoq/42-implement-queue"],
     "stdout": "[]"
   },
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "labels"],
-    "stdout": "{\"labels\":[{\"name\":\"agendev:ready\"}]}"
+    "stdout": "{\"labels\":[{\"name\":\"runoq:ready\"}]}"
   },
   {
-    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "agendev:ready", "--add-label", "agendev:in-progress"],
+    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "runoq:ready", "--add-label", "runoq:in-progress"],
     "stdout": ""
   },
   {
-    "contains": ["pr", "create", "--repo", "owner/repo", "--draft", "--title", "Implement queue", "--head", "agendev/42-implement-queue"],
+    "contains": ["pr", "create", "--repo", "owner/repo", "--draft", "--title", "Implement queue", "--head", "runoq/42-implement-queue"],
     "stdout": "https://example.test/pull/87"
   },
   {
@@ -619,33 +619,33 @@ $(write_issue_view_scenario_rules "$issue_body"),
 EOF
   use_fake_gh "$scenario"
 
-  run bash -lc 'cd "'"$local_dir"'" && "'"$AGENDEV_ROOT"'/bin/agendev" run --issue 42'
+  run bash -lc 'cd "'"$local_dir"'" && "'"$RUNOQ_ROOT"'/bin/runoq" run --issue 42'
 
   [ "$status" -eq 23 ]
-  run jq -r '.phase' "$local_dir/.agendev/state/42.json"
+  run jq -r '.phase' "$local_dir/.runoq/state/42.json"
   [ "$output" = "DEVELOP" ]
   run rg -n "Agent exited unexpectedly \\(exit code 23\\). Last phase: DEVELOP, round 1." "$FAKE_GH_CAPTURE_DIR"
   [ "$status" -eq 0 ]
 }
 
-@test "agendev run --dry-run performs startup reconciliation before reporting queue state" {
+@test "runoq run --dry-run performs startup reconciliation before reporting queue state" {
   remote_dir="$TEST_TMPDIR/remote.git"
   local_dir="$TEST_TMPDIR/local"
   make_remote_backed_repo "$remote_dir" "$local_dir"
   git -C "$local_dir" remote set-url origin "$remote_dir"
   setup_run_fixture_env "$local_dir"
-  mkdir -p "$local_dir/.agendev/state"
-  git -C "$local_dir" checkout -b agendev/42-implement-queue >/dev/null 2>&1
+  mkdir -p "$local_dir/.runoq/state"
+  git -C "$local_dir" checkout -b runoq/42-implement-queue >/dev/null 2>&1
   echo "work" >"$local_dir/work.txt"
   git -C "$local_dir" add work.txt
   git -C "$local_dir" commit -m "Work in progress" >/dev/null
-  git -C "$local_dir" push -u origin agendev/42-implement-queue >/dev/null 2>&1
-  cat >"$local_dir/.agendev/state/42.json" <<'EOF'
+  git -C "$local_dir" push -u origin runoq/42-implement-queue >/dev/null 2>&1
+  cat >"$local_dir/.runoq/state/42.json" <<'EOF'
 {
   "issue": 42,
   "phase": "DEVELOP",
   "round": 1,
-  "branch": "agendev/42-implement-queue",
+  "branch": "runoq/42-implement-queue",
   "pr_number": 87,
   "updated_at": "2026-03-17T00:00:00Z"
 }
@@ -656,24 +656,24 @@ EOF
   write_interrupted_run_scenario "$scenario"
   use_fake_gh "$scenario"
 
-  run bash -lc 'cd "'"$local_dir"'" && "'"$AGENDEV_ROOT"'/bin/agendev" run --dry-run'
+  run bash -lc 'cd "'"$local_dir"'" && "'"$RUNOQ_ROOT"'/bin/runoq" run --dry-run'
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.mode')" = "dry-run" ]
   [ "$(printf '%s' "$output" | jq -r '.reconciliation[0].action')" = "resume" ]
 }
 
-@test "agendev run processes multiple queue issues in dependency order" {
+@test "runoq run processes multiple queue issues in dependency order" {
   remote_dir="$TEST_TMPDIR/remote.git"
   local_dir="$TEST_TMPDIR/local"
   make_remote_backed_repo "$remote_dir" "$local_dir"
   git -C "$local_dir" remote set-url origin "$remote_dir"
   setup_run_fixture_env "$local_dir"
-  export AGENDEV_TEST_DEV_COMMAND='mkdir -p src && printf "export const queue = true;\n" > "src/task-${AGENDEV_TEST_CURRENT_ISSUE}.ts" && git add src && git commit -m "Add queue implementation" >/dev/null && git push -u origin HEAD >/dev/null 2>&1'
-  export AGENDEV_TEST_DEV_COMMAND_42='mkdir -p src && printf "export const alpha = true;\n" > src/task-42.ts && git add src/task-42.ts && git commit -m "Add task 42" >/dev/null && git push -u origin HEAD >/dev/null 2>&1'
-  export AGENDEV_TEST_DEV_COMMAND_43='mkdir -p src && printf "export const beta = true;\n" > src/task-43.ts && git add src/task-43.ts && git commit -m "Add task 43" >/dev/null && git push -u origin HEAD >/dev/null 2>&1'
-  export AGENDEV_TEST_ORCHESTRATOR_RETURN_FILE="$TEST_TMPDIR/orchestrator-return.json"
-  cat >"$AGENDEV_TEST_ORCHESTRATOR_RETURN_FILE" <<'EOF'
+  export RUNOQ_TEST_DEV_COMMAND='mkdir -p src && printf "export const queue = true;\n" > "src/task-${RUNOQ_TEST_CURRENT_ISSUE}.ts" && git add src && git commit -m "Add queue implementation" >/dev/null && git push -u origin HEAD >/dev/null 2>&1'
+  export RUNOQ_TEST_DEV_COMMAND_42='mkdir -p src && printf "export const alpha = true;\n" > src/task-42.ts && git add src/task-42.ts && git commit -m "Add task 42" >/dev/null && git push -u origin HEAD >/dev/null 2>&1'
+  export RUNOQ_TEST_DEV_COMMAND_43='mkdir -p src && printf "export const beta = true;\n" > src/task-43.ts && git add src/task-43.ts && git commit -m "Add task 43" >/dev/null && git push -u origin HEAD >/dev/null 2>&1'
+  export RUNOQ_TEST_ORCHESTRATOR_RETURN_FILE="$TEST_TMPDIR/orchestrator-return.json"
+  cat >"$RUNOQ_TEST_ORCHESTRATOR_RETURN_FILE" <<'EOF'
 {
   "verdict": "PASS",
   "rounds_used": 1,
@@ -687,46 +687,46 @@ EOF
   issue_42_body="$(queue_issue_body "[]" 1)"
   issue_43_body="$(queue_issue_body "[42]" 2)"
   ready_both="$(jq -n --arg body42 "$issue_42_body" --arg body43 "$issue_43_body" '[
-    {number: 42, title: "Implement alpha", body: $body42, labels: [{name:"agendev:ready"}], url: "https://example.test/issues/42"},
-    {number: 43, title: "Implement beta", body: $body43, labels: [{name:"agendev:ready"}], url: "https://example.test/issues/43"}
+    {number: 42, title: "Implement alpha", body: $body42, labels: [{name:"runoq:ready"}], url: "https://example.test/issues/42"},
+    {number: 43, title: "Implement beta", body: $body43, labels: [{name:"runoq:ready"}], url: "https://example.test/issues/43"}
   ]')"
   ready_second="$(jq -n --arg body43 "$issue_43_body" '[
-    {number: 43, title: "Implement beta", body: $body43, labels: [{name:"agendev:ready"}], url: "https://example.test/issues/43"}
+    {number: 43, title: "Implement beta", body: $body43, labels: [{name:"runoq:ready"}], url: "https://example.test/issues/43"}
   ]')"
 
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<EOF
 [
   {
-    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:in-progress"],
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:in-progress"],
     "stdout": "[]"
   },
   {
-    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:ready"],
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:ready"],
     "stdout": $(printf '%s' "$ready_both")
   },
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
-    "stdout": $(jq -Rn --arg body "$issue_42_body" '{"number":42,"title":"Implement alpha","body":$body,"labels":[{"name":"agendev:ready"}],"url":"https://example.test/issues/42"}')
+    "stdout": $(jq -Rn --arg body "$issue_42_body" '{"number":42,"title":"Implement alpha","body":$body,"labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/42"}')
   },
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
-    "stdout": $(jq -Rn --arg body "$issue_42_body" '{"number":42,"title":"Implement alpha","body":$body,"labels":[{"name":"agendev:ready"}],"url":"https://example.test/issues/42"}')
+    "stdout": $(jq -Rn --arg body "$issue_42_body" '{"number":42,"title":"Implement alpha","body":$body,"labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/42"}')
   },
   {
-    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "agendev/42-implement-alpha"],
+    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "runoq/42-implement-alpha"],
     "stdout": "[]"
   },
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "labels"],
-    "stdout": "{\"labels\":[{\"name\":\"agendev:ready\"}]}"
+    "stdout": "{\"labels\":[{\"name\":\"runoq:ready\"}]}"
   },
   {
-    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "agendev:ready", "--add-label", "agendev:in-progress"],
+    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "runoq:ready", "--add-label", "runoq:in-progress"],
     "stdout": ""
   },
   {
-    "contains": ["pr", "create", "--repo", "owner/repo", "--draft", "--title", "Implement alpha", "--head", "agendev/42-implement-alpha"],
+    "contains": ["pr", "create", "--repo", "owner/repo", "--draft", "--title", "Implement alpha", "--head", "runoq/42-implement-alpha"],
     "stdout": "https://example.test/pull/87"
   },
   {
@@ -743,7 +743,7 @@ EOF
   },
   {
     "contains": ["pr", "view", "87", "--repo", "owner/repo", "--json", "body"],
-    "stdout_file": "$AGENDEV_ROOT/test/fixtures/comments/pr-view-body.json"
+    "stdout_file": "$RUNOQ_ROOT/test/fixtures/comments/pr-view-body.json"
   },
   {
     "contains": ["pr", "edit", "87", "--repo", "owner/repo", "--body-file"],
@@ -759,46 +759,46 @@ EOF
   },
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "labels"],
-    "stdout": "{\"labels\":[{\"name\":\"agendev:in-progress\"}]}"
+    "stdout": "{\"labels\":[{\"name\":\"runoq:in-progress\"}]}"
   },
   {
-    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "agendev:in-progress", "--add-label", "agendev:done"],
+    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "runoq:in-progress", "--add-label", "runoq:done"],
     "stdout": ""
   },
   {
-    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:ready"],
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:ready"],
     "stdout": $(printf '%s' "$ready_second")
   },
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "number,labels"],
-    "stdout": "{\"number\":42,\"labels\":[{\"name\":\"agendev:done\"}]}"
+    "stdout": "{\"number\":42,\"labels\":[{\"name\":\"runoq:done\"}]}"
   },
   {
     "contains": ["issue", "view", "43", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
-    "stdout": $(jq -Rn --arg body "$issue_43_body" '{"number":43,"title":"Implement beta","body":$body,"labels":[{"name":"agendev:ready"}],"url":"https://example.test/issues/43"}')
+    "stdout": $(jq -Rn --arg body "$issue_43_body" '{"number":43,"title":"Implement beta","body":$body,"labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/43"}')
   },
   {
     "contains": ["issue", "view", "43", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
-    "stdout": $(jq -Rn --arg body "$issue_43_body" '{"number":43,"title":"Implement beta","body":$body,"labels":[{"name":"agendev:ready"}],"url":"https://example.test/issues/43"}')
+    "stdout": $(jq -Rn --arg body "$issue_43_body" '{"number":43,"title":"Implement beta","body":$body,"labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/43"}')
   },
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "labels"],
-    "stdout": "{\"number\":42,\"labels\":[{\"name\":\"agendev:done\"}]}"
+    "stdout": "{\"number\":42,\"labels\":[{\"name\":\"runoq:done\"}]}"
   },
   {
-    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "agendev/43-implement-beta"],
+    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "runoq/43-implement-beta"],
     "stdout": "[]"
   },
   {
     "contains": ["issue", "view", "43", "--repo", "owner/repo", "--json", "labels"],
-    "stdout": "{\"labels\":[{\"name\":\"agendev:ready\"}]}"
+    "stdout": "{\"labels\":[{\"name\":\"runoq:ready\"}]}"
   },
   {
-    "contains": ["issue", "edit", "43", "--repo", "owner/repo", "--remove-label", "agendev:ready", "--add-label", "agendev:in-progress"],
+    "contains": ["issue", "edit", "43", "--repo", "owner/repo", "--remove-label", "runoq:ready", "--add-label", "runoq:in-progress"],
     "stdout": ""
   },
   {
-    "contains": ["pr", "create", "--repo", "owner/repo", "--draft", "--title", "Implement beta", "--head", "agendev/43-implement-beta"],
+    "contains": ["pr", "create", "--repo", "owner/repo", "--draft", "--title", "Implement beta", "--head", "runoq/43-implement-beta"],
     "stdout": "https://example.test/pull/88"
   },
   {
@@ -815,7 +815,7 @@ EOF
   },
   {
     "contains": ["pr", "view", "88", "--repo", "owner/repo", "--json", "body"],
-    "stdout_file": "$AGENDEV_ROOT/test/fixtures/comments/pr-view-body.json"
+    "stdout_file": "$RUNOQ_ROOT/test/fixtures/comments/pr-view-body.json"
   },
   {
     "contains": ["pr", "edit", "88", "--repo", "owner/repo", "--body-file"],
@@ -831,21 +831,21 @@ EOF
   },
   {
     "contains": ["issue", "view", "43", "--repo", "owner/repo", "--json", "labels"],
-    "stdout": "{\"labels\":[{\"name\":\"agendev:in-progress\"}]}"
+    "stdout": "{\"labels\":[{\"name\":\"runoq:in-progress\"}]}"
   },
   {
-    "contains": ["issue", "edit", "43", "--repo", "owner/repo", "--remove-label", "agendev:in-progress", "--add-label", "agendev:done"],
+    "contains": ["issue", "edit", "43", "--repo", "owner/repo", "--remove-label", "runoq:in-progress", "--add-label", "runoq:done"],
     "stdout": ""
   },
   {
-    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:ready"],
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:ready"],
     "stdout": "[]"
   }
 ]
 EOF
   use_fake_gh "$scenario"
 
-  run bash -lc 'cd "'"$local_dir"'" && "'"$AGENDEV_ROOT"'/bin/agendev" run'
+  run bash -lc 'cd "'"$local_dir"'" && "'"$RUNOQ_ROOT"'/bin/runoq" run'
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.status')" = "completed" ]
@@ -854,66 +854,66 @@ EOF
   run cat "$FAKE_GH_LOG"
   [ "$status" -eq 0 ]
   [[ "$output" == *"issue view 42 --repo owner/repo --json number,labels"* ]]
-  [[ "$output" == *"issue edit 42 --repo owner/repo --remove-label agendev:in-progress --add-label agendev:done"* ]]
-  [[ "$output" == *"issue edit 43 --repo owner/repo --remove-label agendev:in-progress --add-label agendev:done"* ]]
+  [[ "$output" == *"issue edit 42 --repo owner/repo --remove-label runoq:in-progress --add-label runoq:done"* ]]
+  [[ "$output" == *"issue edit 43 --repo owner/repo --remove-label runoq:in-progress --add-label runoq:done"* ]]
 }
 
-@test "agendev run halts the queue when the consecutive failure limit is reached" {
+@test "runoq run halts the queue when the consecutive failure limit is reached" {
   remote_dir="$TEST_TMPDIR/remote.git"
   local_dir="$TEST_TMPDIR/local"
   make_remote_backed_repo "$remote_dir" "$local_dir"
   git -C "$local_dir" remote set-url origin "$remote_dir"
   setup_run_fixture_env "$local_dir"
-  jq '.consecutiveFailureLimit = 2' "$AGENDEV_CONFIG" >"$TEST_TMPDIR/config-circuit.json"
-  export AGENDEV_CONFIG="$TEST_TMPDIR/config-circuit.json"
-  export AGENDEV_TEST_DEV_COMMAND='true'
+  jq '.consecutiveFailureLimit = 2' "$RUNOQ_CONFIG" >"$TEST_TMPDIR/config-circuit.json"
+  export RUNOQ_CONFIG="$TEST_TMPDIR/config-circuit.json"
+  export RUNOQ_TEST_DEV_COMMAND='true'
 
   issue_42_body="$(queue_issue_body "[]" 1)"
   issue_43_body="$(queue_issue_body "[]" 2)"
   issue_44_body="$(queue_issue_body "[]" 3)"
   ready_first="$(jq -n --arg body42 "$issue_42_body" --arg body43 "$issue_43_body" --arg body44 "$issue_44_body" '[
-    {number: 42, title: "Fail alpha", body: $body42, labels: [{name:"agendev:ready"}], url: "https://example.test/issues/42"},
-    {number: 43, title: "Fail beta", body: $body43, labels: [{name:"agendev:ready"}], url: "https://example.test/issues/43"},
-    {number: 44, title: "Fail gamma", body: $body44, labels: [{name:"agendev:ready"}], url: "https://example.test/issues/44"}
+    {number: 42, title: "Fail alpha", body: $body42, labels: [{name:"runoq:ready"}], url: "https://example.test/issues/42"},
+    {number: 43, title: "Fail beta", body: $body43, labels: [{name:"runoq:ready"}], url: "https://example.test/issues/43"},
+    {number: 44, title: "Fail gamma", body: $body44, labels: [{name:"runoq:ready"}], url: "https://example.test/issues/44"}
   ]')"
   ready_second="$(jq -n --arg body43 "$issue_43_body" --arg body44 "$issue_44_body" '[
-    {number: 43, title: "Fail beta", body: $body43, labels: [{name:"agendev:ready"}], url: "https://example.test/issues/43"},
-    {number: 44, title: "Fail gamma", body: $body44, labels: [{name:"agendev:ready"}], url: "https://example.test/issues/44"}
+    {number: 43, title: "Fail beta", body: $body43, labels: [{name:"runoq:ready"}], url: "https://example.test/issues/43"},
+    {number: 44, title: "Fail gamma", body: $body44, labels: [{name:"runoq:ready"}], url: "https://example.test/issues/44"}
   ]')"
 
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<EOF
 [
   {
-    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:in-progress"],
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:in-progress"],
     "stdout": "[]"
   },
   {
-    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:ready"],
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:ready"],
     "stdout": $(printf '%s' "$ready_first")
   },
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
-    "stdout": $(jq -Rn --arg body "$issue_42_body" '{"number":42,"title":"Fail alpha","body":$body,"labels":[{"name":"agendev:ready"}],"url":"https://example.test/issues/42"}')
+    "stdout": $(jq -Rn --arg body "$issue_42_body" '{"number":42,"title":"Fail alpha","body":$body,"labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/42"}')
   },
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
-    "stdout": $(jq -Rn --arg body "$issue_42_body" '{"number":42,"title":"Fail alpha","body":$body,"labels":[{"name":"agendev:ready"}],"url":"https://example.test/issues/42"}')
+    "stdout": $(jq -Rn --arg body "$issue_42_body" '{"number":42,"title":"Fail alpha","body":$body,"labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/42"}')
   },
   {
-    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "agendev/42-fail-alpha"],
+    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "runoq/42-fail-alpha"],
     "stdout": "[]"
   },
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "labels"],
-    "stdout": "{\"labels\":[{\"name\":\"agendev:ready\"}]}"
+    "stdout": "{\"labels\":[{\"name\":\"runoq:ready\"}]}"
   },
   {
-    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "agendev:ready", "--add-label", "agendev:in-progress"],
+    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "runoq:ready", "--add-label", "runoq:in-progress"],
     "stdout": ""
   },
   {
-    "contains": ["pr", "create", "--repo", "owner/repo", "--draft", "--title", "Fail alpha", "--head", "agendev/42-fail-alpha"],
+    "contains": ["pr", "create", "--repo", "owner/repo", "--draft", "--title", "Fail alpha", "--head", "runoq/42-fail-alpha"],
     "stdout": "https://example.test/pull/87"
   },
   {
@@ -934,7 +934,7 @@ EOF
   },
   {
     "contains": ["pr", "view", "87", "--repo", "owner/repo", "--json", "body"],
-    "stdout_file": "$AGENDEV_ROOT/test/fixtures/comments/pr-view-body.json"
+    "stdout_file": "$RUNOQ_ROOT/test/fixtures/comments/pr-view-body.json"
   },
   {
     "contains": ["pr", "edit", "87", "--repo", "owner/repo", "--body-file"],
@@ -954,10 +954,10 @@ EOF
   },
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "labels"],
-    "stdout": "{\"labels\":[{\"name\":\"agendev:in-progress\"}]}"
+    "stdout": "{\"labels\":[{\"name\":\"runoq:in-progress\"}]}"
   },
   {
-    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "agendev:in-progress", "--add-label", "agendev:needs-human-review"],
+    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "runoq:in-progress", "--add-label", "runoq:needs-human-review"],
     "stdout": ""
   },
   {
@@ -965,31 +965,31 @@ EOF
     "stdout": ""
   },
   {
-    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:ready"],
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:ready"],
     "stdout": $(printf '%s' "$ready_second")
   },
   {
     "contains": ["issue", "view", "43", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
-    "stdout": $(jq -Rn --arg body "$issue_43_body" '{"number":43,"title":"Fail beta","body":$body,"labels":[{"name":"agendev:ready"}],"url":"https://example.test/issues/43"}')
+    "stdout": $(jq -Rn --arg body "$issue_43_body" '{"number":43,"title":"Fail beta","body":$body,"labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/43"}')
   },
   {
     "contains": ["issue", "view", "43", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
-    "stdout": $(jq -Rn --arg body "$issue_43_body" '{"number":43,"title":"Fail beta","body":$body,"labels":[{"name":"agendev:ready"}],"url":"https://example.test/issues/43"}')
+    "stdout": $(jq -Rn --arg body "$issue_43_body" '{"number":43,"title":"Fail beta","body":$body,"labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/43"}')
   },
   {
-    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "agendev/43-fail-beta"],
+    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "runoq/43-fail-beta"],
     "stdout": "[]"
   },
   {
     "contains": ["issue", "view", "43", "--repo", "owner/repo", "--json", "labels"],
-    "stdout": "{\"labels\":[{\"name\":\"agendev:ready\"}]}"
+    "stdout": "{\"labels\":[{\"name\":\"runoq:ready\"}]}"
   },
   {
-    "contains": ["issue", "edit", "43", "--repo", "owner/repo", "--remove-label", "agendev:ready", "--add-label", "agendev:in-progress"],
+    "contains": ["issue", "edit", "43", "--repo", "owner/repo", "--remove-label", "runoq:ready", "--add-label", "runoq:in-progress"],
     "stdout": ""
   },
   {
-    "contains": ["pr", "create", "--repo", "owner/repo", "--draft", "--title", "Fail beta", "--head", "agendev/43-fail-beta"],
+    "contains": ["pr", "create", "--repo", "owner/repo", "--draft", "--title", "Fail beta", "--head", "runoq/43-fail-beta"],
     "stdout": "https://example.test/pull/88"
   },
   {
@@ -1010,7 +1010,7 @@ EOF
   },
   {
     "contains": ["pr", "view", "88", "--repo", "owner/repo", "--json", "body"],
-    "stdout_file": "$AGENDEV_ROOT/test/fixtures/comments/pr-view-body.json"
+    "stdout_file": "$RUNOQ_ROOT/test/fixtures/comments/pr-view-body.json"
   },
   {
     "contains": ["pr", "edit", "88", "--repo", "owner/repo", "--body-file"],
@@ -1030,10 +1030,10 @@ EOF
   },
   {
     "contains": ["issue", "view", "43", "--repo", "owner/repo", "--json", "labels"],
-    "stdout": "{\"labels\":[{\"name\":\"agendev:in-progress\"}]}"
+    "stdout": "{\"labels\":[{\"name\":\"runoq:in-progress\"}]}"
   },
   {
-    "contains": ["issue", "edit", "43", "--repo", "owner/repo", "--remove-label", "agendev:in-progress", "--add-label", "agendev:needs-human-review"],
+    "contains": ["issue", "edit", "43", "--repo", "owner/repo", "--remove-label", "runoq:in-progress", "--add-label", "runoq:needs-human-review"],
     "stdout": ""
   },
   {
@@ -1052,7 +1052,7 @@ EOF
 EOF
   use_fake_gh "$scenario"
 
-  run bash -lc 'cd "'"$local_dir"'" && "'"$AGENDEV_ROOT"'/bin/agendev" run'
+  run bash -lc 'cd "'"$local_dir"'" && "'"$RUNOQ_ROOT"'/bin/runoq" run'
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.status')" = "halted" ]
@@ -1065,7 +1065,7 @@ EOF
   [ "$status" -eq 0 ]
 }
 
-@test "agendev run --dry-run reports queue selection and blocked reasons without dispatch mutation" {
+@test "runoq run --dry-run reports queue selection and blocked reasons without dispatch mutation" {
   remote_dir="$TEST_TMPDIR/remote.git"
   local_dir="$TEST_TMPDIR/local"
   make_remote_backed_repo "$remote_dir" "$local_dir"
@@ -1075,39 +1075,39 @@ EOF
   blocked_body="$(queue_issue_body "[42]" 1)"
   ready_body="$(queue_issue_body "[]" 2)"
   ready_queue="$(jq -n --arg blocked "$blocked_body" --arg ready "$ready_body" '[
-    {number: 43, title: "Blocked beta", body: $blocked, labels: [{name:"agendev:ready"}], url: "https://example.test/issues/43"},
-    {number: 44, title: "Ready gamma", body: $ready, labels: [{name:"agendev:ready"}], url: "https://example.test/issues/44"}
+    {number: 43, title: "Blocked beta", body: $blocked, labels: [{name:"runoq:ready"}], url: "https://example.test/issues/43"},
+    {number: 44, title: "Ready gamma", body: $ready, labels: [{name:"runoq:ready"}], url: "https://example.test/issues/44"}
   ]')"
 
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<EOF
 [
   {
-    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:in-progress"],
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:in-progress"],
     "stdout": "[]"
   },
   {
-    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:ready"],
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:ready"],
     "stdout": $(printf '%s' "$ready_queue")
   },
   {
-    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:ready"],
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:ready"],
     "stdout": $(printf '%s' "$ready_queue")
   },
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "number,labels"],
-    "stdout": "{\"number\":42,\"labels\":[{\"name\":\"agendev:ready\"}]}"
+    "stdout": "{\"number\":42,\"labels\":[{\"name\":\"runoq:ready\"}]}"
   }
 ]
 EOF
   use_fake_gh "$scenario"
 
-  run bash -lc 'cd "'"$local_dir"'" && "'"$AGENDEV_ROOT"'/bin/agendev" run --dry-run'
+  run bash -lc 'cd "'"$local_dir"'" && "'"$RUNOQ_ROOT"'/bin/runoq" run --dry-run'
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.mode')" = "dry-run" ]
   [ "$(printf '%s' "$output" | jq -r '.selection.issue.number')" = "44" ]
-  [ "$(printf '%s' "$output" | jq -r '.selection.skipped[0].blocked_reasons[0]')" = "dependency #42 is not agendev:done" ]
+  [ "$(printf '%s' "$output" | jq -r '.selection.skipped[0].blocked_reasons[0]')" = "dependency #42 is not runoq:done" ]
 
   run cat "$FAKE_GH_LOG"
   [ "$status" -eq 0 ]

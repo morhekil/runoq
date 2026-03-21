@@ -3,7 +3,7 @@
   "checklist": [
     "Address failing dependency handling"
   ],
-  "branch": "agendev/42-fix-auth-refresh",
-  "worktree": "../agendev-wt-42",
+  "branch": "runoq/42-fix-auth-refresh",
+  "worktree": "../runoq-wt-42",
   "round": 2
 }

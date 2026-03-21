@@ -2,9 +2,9 @@
   {
     "number": 30,
     "title": "Missing dep",
-    "body": "<!-- agendev:meta\ndepends_on: [404]\npriority: 1\nestimated_complexity: low\n-->\n",
+    "body": "<!-- runoq:meta\ndepends_on: [404]\npriority: 1\nestimated_complexity: low\n-->\n",
     "labels": [
-      { "name": "agendev:ready" }
+      { "name": "runoq:ready" }
     ],
     "url": "https://github.com/owner/repo/issues/30"
   }

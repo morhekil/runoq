@@ -1,46 +1,46 @@
 # Target Repository Contract
 
-This document defines what `agendev` expects from the repository it operates on. It is the contract between this runtime repo and a downstream project repo.
+This document defines what `runoq` expects from the repository it operates on. It is the contract between this runtime repo and a downstream project repo.
 
 ## Compatibility Checklist
 
-A target repository is compatible with `agendev` when all of the following are true:
+A target repository is compatible with `runoq` when all of the following are true:
 
 - it is a git repository
 - it has an `origin` remote
 - `origin` resolves to `github.com` using SSH or HTTPS remote syntax
-- the operator can run `agendev` from inside that repository checkout
+- the operator can run `runoq` from inside that repository checkout
 - the repo can tolerate sibling worktrees created next to the main checkout
-- queued issues use the `agendev:meta` block and include acceptance criteria
-- verification commands configured in `config/agendev.json` can run successfully in the repo
+- queued issues use the `runoq:meta` block and include acceptance criteria
+- verification commands configured in `config/runoq.json` can run successfully in the repo
 
 ## Git And Remote Assumptions
 
 ### Required remote shape
 
-By default, `agendev` derives `REPO` from the `origin` remote and only accepts GitHub remotes in one of these forms:
+By default, `runoq` derives `REPO` from the `origin` remote and only accepts GitHub remotes in one of these forms:
 
 - `git@github.com:owner/repo.git`
 - `https://github.com/owner/repo.git`
 - `ssh://git@github.com/owner/repo.git`
 
-Anything else fails repo resolution unless `AGENDEV_REPO` overrides it.
+Anything else fails repo resolution unless `RUNOQ_REPO` overrides it.
 
-In normal CLI usage, a usable `origin` remote is still required because repo context resolution consults `origin` before the override takes effect. Treat `AGENDEV_REPO` as a specialized override, not as a replacement for the remote contract.
+In normal CLI usage, a usable `origin` remote is still required because repo context resolution consults `origin` before the override takes effect. Treat `RUNOQ_REPO` as a specialized override, not as a replacement for the remote contract.
 
 ### Base branch assumption
 
-Sibling worktrees are created from `origin/main` unless `AGENDEV_BASE_REF` overrides it.
+Sibling worktrees are created from `origin/main` unless `RUNOQ_BASE_REF` overrides it.
 
 Implications for downstream repos:
 
-- the remote should expose a usable `main` branch, or operators must deliberately override `AGENDEV_BASE_REF`
+- the remote should expose a usable `main` branch, or operators must deliberately override `RUNOQ_BASE_REF`
 - existing issue branches are checked for conflicts against `origin/main`
 - queue execution assumes the worktree base ref is fetchable from `origin`
 
 ## Working Tree And Worktree Behavior
 
-`agendev` does not mutate the target repo’s main working tree during issue execution. Instead it:
+`runoq` does not mutate the target repo’s main working tree during issue execution. Instead it:
 
 - derives a branch name from the issue number and title
 - creates a sibling worktree adjacent to the main checkout
@@ -60,7 +60,7 @@ Downstream implications:
 Queue issues are expected to start with the metadata block used by [`templates/issue-template.md`](../../templates/issue-template.md):
 
 ```md
-<!-- agendev:meta
+<!-- runoq:meta
 depends_on: []
 priority: 3
 estimated_complexity: medium
@@ -87,21 +87,21 @@ The shell runtime does not inspect checklist items semantically, but it does req
 
 The runtime manages these labels:
 
-- `agendev:ready`
-- `agendev:in-progress`
-- `agendev:done`
-- `agendev:needs-human-review`
-- `agendev:blocked`
-- `agendev:maintenance-review`
+- `runoq:ready`
+- `runoq:in-progress`
+- `runoq:done`
+- `runoq:needs-human-review`
+- `runoq:blocked`
+- `runoq:maintenance-review`
 
 Downstream repos should not repurpose these labels for unrelated workflows.
 
 ## PR Body Contract
 
-PRs created by `agendev` use [`templates/pr-template.md`](../../templates/pr-template.md). Two marker-delimited regions are contract-sensitive:
+PRs created by `runoq` use [`templates/pr-template.md`](../../templates/pr-template.md). Two marker-delimited regions are contract-sensitive:
 
-- `<!-- agendev:summary:start -->` to `<!-- agendev:summary:end -->`
-- `<!-- agendev:attention:start -->` to `<!-- agendev:attention:end -->`
+- `<!-- runoq:summary:start -->` to `<!-- runoq:summary:end -->`
+- `<!-- runoq:attention:start -->` to `<!-- runoq:attention:end -->`
 
 `gh-pr-lifecycle.sh update-summary` rewrites only those sections. If those markers are missing, summary updates become unsafe.
 
@@ -154,13 +154,13 @@ That means the repo should normally have:
 - a `test` script
 - a `build` script
 
-### Default bootstrapping during `agendev init`
+### Default bootstrapping during `runoq init`
 
-If the target repo does not already have a `package.json`, `agendev init` creates a minimal placeholder:
+If the target repo does not already have a `package.json`, `runoq init` creates a minimal placeholder:
 
 ```json
 {
-  "name": "agendev-target",
+  "name": "runoq-target",
   "private": true,
   "scripts": {
     "test": "echo \"No tests configured\"",
@@ -171,7 +171,7 @@ If the target repo does not already have a `package.json`, `agendev init` create
 
 This makes the repo bootstrappable, not production-ready. Downstream maintainers should replace these placeholder scripts with real verification commands or supply a different runtime config.
 
-`agendev init` also installs and refreshes symlinks for the agendev-managed Claude agents and skills under the target repo's `.claude/` tree. It does not replace the entire `.claude/` directory, so downstream repos can keep their own project-specific agents, skills, and settings alongside the managed files.
+`runoq init` also installs and refreshes symlinks for the runoq-managed Claude agents and skills under the target repo's `.claude/` tree. It does not replace the entire `.claude/` directory, so downstream repos can keep their own project-specific agents, skills, and settings alongside the managed files.
 
 ## Maintenance Review Inputs
 
@@ -204,13 +204,13 @@ If neither file is present, maintenance can still run, but partition quality may
 - `## Acceptance Criteria` section requirement
 - PR summary and attention markers
 - sibling worktree execution model
-- `.agendev/` directory usage for identity and resumability state
+- `.runoq/` directory usage for identity and resumability state
 - GitHub issues and PR comments as the audit/control surface
 
 ## Failure Signals That Usually Mean Contract Mismatch
 
-- `Run agendev from inside a git repository.`
-- `No 'origin' remote found. agendev requires a GitHub-hosted repo.`
+- `Run runoq from inside a git repository.`
+- `No 'origin' remote found. runoq requires a GitHub-hosted repo.`
 - `Origin remote is not a GitHub URL: ...`
 - `Skipped: missing acceptance criteria.`
 - `Skipped: existing open PR #... already tracks this issue.`

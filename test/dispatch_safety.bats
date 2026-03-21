@@ -32,7 +32,7 @@ EOF
 issue_body_with_meta() {
   local depends_on="${1:-[]}"
   cat <<EOF
-<!-- agendev:meta
+<!-- runoq:meta
 depends_on: $depends_on
 priority: 2
 estimated_complexity: low
@@ -54,11 +54,11 @@ prepare_conflicting_branch() {
   git -C "$local_dir" commit -m "Add conflict file" >/dev/null
   git -C "$local_dir" push origin main >/dev/null 2>&1
 
-  git -C "$local_dir" checkout -b agendev/42-implement-queue >/dev/null 2>&1
+  git -C "$local_dir" checkout -b runoq/42-implement-queue >/dev/null 2>&1
   echo "branch change" >"$local_dir/conflict.txt"
   git -C "$local_dir" add conflict.txt
   git -C "$local_dir" commit -m "Branch change" >/dev/null
-  git -C "$local_dir" push -u origin agendev/42-implement-queue >/dev/null 2>&1
+  git -C "$local_dir" push -u origin runoq/42-implement-queue >/dev/null 2>&1
 
   git -C "$local_dir" checkout main >/dev/null 2>&1
   echo "main change" >"$local_dir/conflict.txt"
@@ -72,14 +72,14 @@ prepare_conflicting_branch() {
   local_dir="$TEST_TMPDIR/local"
   prepare_dispatch_repo "$remote_dir" "$local_dir"
   export TARGET_ROOT="$local_dir"
-  export AGENDEV_STATE_DIR="$local_dir/.agendev/state"
-  mkdir -p "$AGENDEV_STATE_DIR"
-  git -C "$local_dir" checkout -b agendev/42-implement-queue >/dev/null 2>&1
+  export RUNOQ_STATE_DIR="$local_dir/.runoq/state"
+  mkdir -p "$RUNOQ_STATE_DIR"
+  git -C "$local_dir" checkout -b runoq/42-implement-queue >/dev/null 2>&1
   echo "work" >"$local_dir/work.txt"
   git -C "$local_dir" add work.txt
   git -C "$local_dir" commit -m "Work in progress" >/dev/null
-  git -C "$local_dir" push -u origin agendev/42-implement-queue >/dev/null 2>&1
-  write_issue_state_file "$AGENDEV_STATE_DIR/42.json" 42 REVIEW 2 agendev/42-implement-queue 87
+  git -C "$local_dir" push -u origin runoq/42-implement-queue >/dev/null 2>&1
+  write_issue_state_file "$RUNOQ_STATE_DIR/42.json" 42 REVIEW 2 runoq/42-implement-queue 87
 
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<'EOF'
@@ -97,14 +97,14 @@ prepare_conflicting_branch() {
     "stdout": ""
   },
   {
-    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:in-progress"],
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:in-progress"],
     "stdout": "[]"
   }
 ]
 EOF
   use_fake_gh "$scenario"
 
-  run "$AGENDEV_ROOT/scripts/dispatch-safety.sh" reconcile owner/repo
+  run "$RUNOQ_ROOT/scripts/dispatch-safety.sh" reconcile owner/repo
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.[0].action')" = "resume" ]
@@ -116,9 +116,9 @@ EOF
   local_dir="$TEST_TMPDIR/local"
   prepare_dispatch_repo "$remote_dir" "$local_dir"
   export TARGET_ROOT="$local_dir"
-  export AGENDEV_STATE_DIR="$local_dir/.agendev/state"
-  mkdir -p "$AGENDEV_STATE_DIR"
-  write_issue_state_file "$AGENDEV_STATE_DIR/42.json" 42 DEVELOP 1 agendev/42-implement-queue 87
+  export RUNOQ_STATE_DIR="$local_dir/.runoq/state"
+  mkdir -p "$RUNOQ_STATE_DIR"
+  write_issue_state_file "$RUNOQ_STATE_DIR/42.json" 42 DEVELOP 1 runoq/42-implement-queue 87
 
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<'EOF'
@@ -130,10 +130,10 @@ EOF
   },
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "labels"],
-    "stdout": "{\"labels\":[{\"name\":\"agendev:in-progress\"}]}"
+    "stdout": "{\"labels\":[{\"name\":\"runoq:in-progress\"}]}"
   },
   {
-    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "agendev:in-progress", "--add-label", "agendev:needs-human-review"],
+    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "runoq:in-progress", "--add-label", "runoq:needs-human-review"],
     "stdout": ""
   },
   {
@@ -141,14 +141,14 @@ EOF
     "stdout": ""
   },
   {
-    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:in-progress"],
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:in-progress"],
     "stdout": "[]"
   }
 ]
 EOF
   use_fake_gh "$scenario"
 
-  run "$AGENDEV_ROOT/scripts/dispatch-safety.sh" reconcile owner/repo
+  run "$RUNOQ_ROOT/scripts/dispatch-safety.sh" reconcile owner/repo
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.[0].action')" = "needs-review" ]
@@ -159,33 +159,33 @@ EOF
   local_dir="$TEST_TMPDIR/local"
   prepare_dispatch_repo "$remote_dir" "$local_dir"
   export TARGET_ROOT="$local_dir"
-  export AGENDEV_STATE_DIR="$local_dir/.agendev/state"
-  mkdir -p "$AGENDEV_STATE_DIR"
+  export RUNOQ_STATE_DIR="$local_dir/.runoq/state"
+  mkdir -p "$RUNOQ_STATE_DIR"
 
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<'EOF'
 [
   {
-    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "agendev:in-progress"],
-    "stdout": "[{\"number\":43,\"title\":\"Implement queue\",\"labels\":[{\"name\":\"agendev:in-progress\"}]}]"
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:in-progress"],
+    "stdout": "[{\"number\":43,\"title\":\"Implement queue\",\"labels\":[{\"name\":\"runoq:in-progress\"}]}]"
   },
   {
     "contains": ["issue", "view", "43", "--repo", "owner/repo", "--json", "labels"],
-    "stdout": "{\"labels\":[{\"name\":\"agendev:in-progress\"}]}"
+    "stdout": "{\"labels\":[{\"name\":\"runoq:in-progress\"}]}"
   },
   {
-    "contains": ["issue", "edit", "43", "--repo", "owner/repo", "--remove-label", "agendev:in-progress", "--add-label", "agendev:ready"],
+    "contains": ["issue", "edit", "43", "--repo", "owner/repo", "--remove-label", "runoq:in-progress", "--add-label", "runoq:ready"],
     "stdout": ""
   },
   {
-    "contains": ["issue", "comment", "43", "--repo", "owner/repo", "--body", "Found stale agendev:in-progress label with no active run. Reset to agendev:ready."],
+    "contains": ["issue", "comment", "43", "--repo", "owner/repo", "--body", "Found stale runoq:in-progress label with no active run. Reset to runoq:ready."],
     "stdout": ""
   }
 ]
 EOF
   use_fake_gh "$scenario"
 
-  run "$AGENDEV_ROOT/scripts/dispatch-safety.sh" reconcile owner/repo
+  run "$RUNOQ_ROOT/scripts/dispatch-safety.sh" reconcile owner/repo
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.[0].action')" = "reset-ready" ]
@@ -202,10 +202,10 @@ EOF
 [
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
-    "stdout": "{\"number\":42,\"title\":\"Implement queue\",\"body\":\"No acceptance criteria here.\",\"labels\":[{\"name\":\"agendev:ready\"}],\"url\":\"https://example.test/issues/42\"}"
+    "stdout": "{\"number\":42,\"title\":\"Implement queue\",\"body\":\"No acceptance criteria here.\",\"labels\":[{\"name\":\"runoq:ready\"}],\"url\":\"https://example.test/issues/42\"}"
   },
   {
-    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "agendev/42-implement-queue"],
+    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "runoq/42-implement-queue"],
     "stdout": "[]"
   },
   {
@@ -216,7 +216,7 @@ EOF
 EOF
   use_fake_gh "$scenario"
 
-  run "$AGENDEV_ROOT/scripts/dispatch-safety.sh" eligibility owner/repo 42
+  run "$RUNOQ_ROOT/scripts/dispatch-safety.sh" eligibility owner/repo 42
 
   [ "$status" -eq 1 ]
   [ "$(printf '%s' "$output" | jq -r '.allowed')" = "false" ]
@@ -235,28 +235,28 @@ EOF
 [
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
-    "stdout": $(jq -Rn --arg body "$body" '{"number":42,"title":"Implement queue","body":$body,"labels":[{"name":"agendev:ready"}],"url":"https://example.test/issues/42"}')
+    "stdout": $(jq -Rn --arg body "$body" '{"number":42,"title":"Implement queue","body":$body,"labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/42"}')
   },
   {
     "contains": ["issue", "view", "12", "--repo", "owner/repo", "--json", "labels"],
-    "stdout": "{\"number\":12,\"labels\":[{\"name\":\"agendev:ready\"}]}"
+    "stdout": "{\"number\":12,\"labels\":[{\"name\":\"runoq:ready\"}]}"
   },
   {
-    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "agendev/42-implement-queue"],
+    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "runoq/42-implement-queue"],
     "stdout": "[]"
   },
   {
-    "contains": ["issue", "comment", "42", "--repo", "owner/repo", "--body", "Skipped: dependency #12 is not agendev:done."],
+    "contains": ["issue", "comment", "42", "--repo", "owner/repo", "--body", "Skipped: dependency #12 is not runoq:done."],
     "stdout": ""
   }
 ]
 EOF
   use_fake_gh "$scenario"
 
-  run "$AGENDEV_ROOT/scripts/dispatch-safety.sh" eligibility owner/repo 42
+  run "$RUNOQ_ROOT/scripts/dispatch-safety.sh" eligibility owner/repo 42
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *"dependency #12 is not agendev:done"* ]]
+  [[ "$output" == *"dependency #12 is not runoq:done"* ]]
 }
 
 @test "dispatch safety eligibility rejects issues with an existing open PR" {
@@ -271,10 +271,10 @@ EOF
 [
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
-    "stdout": $(jq -Rn --arg body "$body" '{"number":42,"title":"Implement queue","body":$body,"labels":[{"name":"agendev:ready"}],"url":"https://example.test/issues/42"}')
+    "stdout": $(jq -Rn --arg body "$body" '{"number":42,"title":"Implement queue","body":$body,"labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/42"}')
   },
   {
-    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "agendev/42-implement-queue"],
+    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "runoq/42-implement-queue"],
     "stdout": "[{\"number\":88,\"url\":\"https://example.test/pull/88\"}]"
   },
   {
@@ -285,7 +285,7 @@ EOF
 EOF
   use_fake_gh "$scenario"
 
-  run "$AGENDEV_ROOT/scripts/dispatch-safety.sh" eligibility owner/repo 42
+  run "$RUNOQ_ROOT/scripts/dispatch-safety.sh" eligibility owner/repo 42
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"existing open PR #88 already tracks this issue"* ]]
@@ -303,21 +303,21 @@ EOF
 [
   {
     "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
-    "stdout": $(jq -Rn --arg body "$body" '{"number":42,"title":"Implement queue","body":$body,"labels":[{"name":"agendev:ready"}],"url":"https://example.test/issues/42"}')
+    "stdout": $(jq -Rn --arg body "$body" '{"number":42,"title":"Implement queue","body":$body,"labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/42"}')
   },
   {
-    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "agendev/42-implement-queue"],
+    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "runoq/42-implement-queue"],
     "stdout": "[]"
   },
   {
-    "contains": ["issue", "comment", "42", "--repo", "owner/repo", "--body", "Skipped: branch agendev/42-implement-queue has unresolved conflicts with origin/main."],
+    "contains": ["issue", "comment", "42", "--repo", "owner/repo", "--body", "Skipped: branch runoq/42-implement-queue has unresolved conflicts with origin/main."],
     "stdout": ""
   }
 ]
 EOF
   use_fake_gh "$scenario"
 
-  run "$AGENDEV_ROOT/scripts/dispatch-safety.sh" eligibility owner/repo 42
+  run "$RUNOQ_ROOT/scripts/dispatch-safety.sh" eligibility owner/repo 42
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"has unresolved conflicts with origin/main"* ]]

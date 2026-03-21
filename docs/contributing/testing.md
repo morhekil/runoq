@@ -1,6 +1,6 @@
 # Contributor Testing Guide
 
-This guide explains how to validate changes to the `agendev` runtime safely and how to choose the right test layer for a shell change.
+This guide explains how to validate changes to the `runoq` runtime safely and how to choose the right test layer for a shell change.
 
 ## Testing Principles
 
@@ -73,7 +73,7 @@ Examples:
 
 Choose this layer when:
 
-- `bin/agendev` routing changes
+- `bin/runoq` routing changes
 - `run` behavior changes across multiple scripts
 - reconciliation, circuit breaker, or escalation behavior changes end to end
 
@@ -84,10 +84,10 @@ Use only when you need to validate behavior that fake fixtures cannot prove.
 Examples:
 
 - GitHub App auth against real GitHub
-- comment attribution as `agendev[bot]`
+- comment attribution as `runoq[bot]`
 - real collaborator permission checks
 - sandbox cleanup behavior
-- full end-to-end lifecycle/eval runs through `agendev init` and `agendev run`
+- full end-to-end lifecycle/eval runs through `runoq init` and `runoq run`
 
 Live smoke is opt-in and credential-gated by design.
 

@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-`agendev` coordinates GitHub state, local worktrees, verification, recovery, and maintenance review around LLM-driven workflows. Prompt text alone is too hard to test, recover, and review for these responsibilities.
+`runoq` coordinates GitHub state, local worktrees, verification, recovery, and maintenance review around LLM-driven workflows. Prompt text alone is too hard to test, recover, and review for these responsibilities.
 
 ## Decision
 

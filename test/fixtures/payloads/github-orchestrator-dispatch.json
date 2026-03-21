@@ -2,10 +2,10 @@
   "issue_number": 42,
   "issue_title": "Fix auth token refresh",
   "issue_body_summary": "Implement the refresh path and verify token rotation.",
-  "branch": "agendev/42-fix-auth-refresh",
+  "branch": "runoq/42-fix-auth-refresh",
   "pr_number": 87,
   "repo": "owner/repo",
-  "worktree": "../agendev-wt-42",
+  "worktree": "../runoq-wt-42",
   "max_rounds": 5,
   "max_token_budget": 500000
 }

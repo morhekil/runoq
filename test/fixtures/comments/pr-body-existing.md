@@ -1,7 +1,7 @@
 ## Summary
-<!-- agendev:summary:start -->
+<!-- runoq:summary:start -->
 Pending.
-<!-- agendev:summary:end -->
+<!-- runoq:summary:end -->
 
 ## Linked Issue
 Closes #42
@@ -12,6 +12,6 @@ Closes #42
 | 1 | 28 | ITERATE | comment-1 |
 
 ## Areas for Human Attention
-<!-- agendev:attention:start -->
+<!-- runoq:attention:start -->
 None.
-<!-- agendev:attention:end -->
+<!-- runoq:attention:end -->

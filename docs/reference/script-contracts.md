@@ -7,7 +7,7 @@ This document summarizes the public shell-script contracts under [`scripts/`](..
 Treat these outputs as stability-sensitive:
 
 - JSON returned by the subcommands documented below
-- audit markers such as `<!-- agendev:event -->` and `<!-- agendev:payload:* -->`
+- audit markers such as `<!-- runoq:event -->` and `<!-- runoq:payload:* -->`
 - marker-delimited PR template sections used by `update-summary`
 
 Treat these as implementation details unless separately documented:
@@ -26,8 +26,8 @@ Primary callers: `run.sh`, `maintenance.sh`, the `plan-to-issues` skill, tests.
 | --- | --- | --- | --- |
 | `list` | `<repo> <ready-label>` | JSON array of issues with `number`, `title`, `body`, `url`, `labels`, `depends_on`, `priority`, `estimated_complexity`, `metadata_present`, `metadata_valid` | reads GitHub issues |
 | `next` | `<repo> <ready-label>` | JSON object `{ issue, skipped }`; `issue` is either the next actionable issue object or `null`, `skipped` contains blocked items with `blocked_reasons` | reads GitHub issues and dependency labels |
-| `set-status` | `<repo> <issue-number> <status>` where status is `ready`, `in-progress`, `done`, `needs-review`, or `blocked` | JSON object `{ issue, status, label }` | removes existing `agendev:*` labels and applies exactly one new state label |
-| `create` | `<repo> <title> <body> [--depends-on N,M] [--priority N] [--estimated-complexity value]` | JSON object `{ title, url }` | creates a GitHub issue labeled `agendev:ready` with an `agendev:meta` block |
+| `set-status` | `<repo> <issue-number> <status>` where status is `ready`, `in-progress`, `done`, `needs-review`, or `blocked` | JSON object `{ issue, status, label }` | removes existing `runoq:*` labels and applies exactly one new state label |
+| `create` | `<repo> <title> <body> [--depends-on N,M] [--priority N] [--estimated-complexity value]` | JSON object `{ title, url }` | creates a GitHub issue labeled `runoq:ready` with an `runoq:meta` block |
 
 Notes:
 
@@ -44,7 +44,7 @@ Primary callers: `run.sh`, `mentions.sh`, skills, tests.
 | --- | --- | --- | --- |
 | `create` | `<repo> <branch> <issue-number> <title>` | `{ url, number }` | creates a draft PR from `templates/pr-template.md` |
 | `comment` | `<repo> <pr-number> <comment-body-file>` | `{ commented: true, pr }` | posts a PR comment using the file body |
-| `update-summary` | `<repo> <pr-number> <summary-file>` | `{ updated: true, pr }` | replaces only the `agendev:summary` and `agendev:attention` marker blocks in the PR body |
+| `update-summary` | `<repo> <pr-number> <summary-file>` | `{ updated: true, pr }` | replaces only the `runoq:summary` and `runoq:attention` marker blocks in the PR body |
 | `finalize` | `<repo> <pr-number> <verdict> [--reviewer username]` | `{ pr, verdict, reviewer }` | `auto-merge`: ready PR then enable squash auto-merge; `needs-review`: ready PR and optionally assign reviewer/assignee |
 | `line-comment` | `<repo> <pr-number> <file> <start-line> <end-line> <body>` | `{ path, start_line, end_line }` | creates a GitHub review comment |
 | `read-actionable` | `<repo> <pr-number> <agent-handle>` | JSON array of actionable comments; issue comments include `id`, `author`, `body`, `html_url`, `comment_type`, review comments include `path` too | reads PR issue comments and review comments |
@@ -53,7 +53,7 @@ Primary callers: `run.sh`, `mentions.sh`, skills, tests.
 
 Notes:
 
-- `read-actionable` filters out audit payload comments and `agendev:event` comments from issue-comment results.
+- `read-actionable` filters out audit payload comments and `runoq:event` comments from issue-comment results.
 - `poll-mentions` determines PR vs issue context from the GitHub item type, not from comment text.
 
 ## `state.sh`
@@ -64,7 +64,7 @@ Primary callers: `run.sh`, `mentions.sh`, `gh-pr-lifecycle.sh`, `maintenance.sh`
 
 | Subcommand | Arguments | JSON/stdout contract | Side effects |
 | --- | --- | --- | --- |
-| `save` | `<issue-number> [--state-dir DIR]` with JSON on stdin | echoes the saved state JSON with injected `issue`, `started_at`, and `updated_at` | atomically writes `.agendev/state/<issue>.json` |
+| `save` | `<issue-number> [--state-dir DIR]` with JSON on stdin | echoes the saved state JSON with injected `issue`, `started_at`, and `updated_at` | atomically writes `.runoq/state/<issue>.json` |
 | `load` | `<issue-number> [--state-dir DIR]` | echoes the stored JSON state | reads state file |
 | `record-mention` | `<comment-id> [--state-dir DIR]` | echoes the full processed-mention JSON array | atomically writes `processed-mentions.json` |
 | `has-mention` | `<comment-id> [--state-dir DIR]` | prints `true` and exits 0 when present; prints `false` and exits non-zero when absent | reads processed mention state |
@@ -111,7 +111,7 @@ Primary callers: `run.sh`, tests.
 
 | Subcommand | Arguments | JSON/stdout contract | Side effects |
 | --- | --- | --- | --- |
-| `create` | `<issue-number> <title>` | `{ branch, worktree, base_ref }` | fetches `origin/main`, creates a new worktree and branch from `AGENDEV_BASE_REF` or `origin/main` |
+| `create` | `<issue-number> <title>` | `{ branch, worktree, base_ref }` | fetches `origin/main`, creates a new worktree and branch from `RUNOQ_BASE_REF` or `origin/main` |
 | `remove` | `<issue-number>` | `{ removed, worktree }` | force-removes the sibling worktree if present |
 | `inspect` | `<issue-number>` | `{ worktree, exists }` | no mutation |
 | `branch-name` | `<issue-number> <title>` | prints the derived branch name | no mutation |
@@ -143,7 +143,7 @@ Eligibility failure reasons currently include:
 
 Purpose: read-only reporting over local state files.
 
-Primary callers: `bin/agendev`, operators, tests.
+Primary callers: `bin/runoq`, operators, tests.
 
 | Subcommand | Arguments | JSON/stdout contract | Side effects |
 | --- | --- | --- | --- |

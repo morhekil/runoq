@@ -1,30 +1,30 @@
 # Queue Operations
 
-This guide covers the day-to-day operator workflow for the `agendev` issue queue.
+This guide covers the day-to-day operator workflow for the `runoq` issue queue.
 
 ## Queue Labels And What They Mean
 
-`agendev` uses labels as the visible queue state.
+`runoq` uses labels as the visible queue state.
 
 | Label | Meaning | Typical next step |
 | --- | --- | --- |
-| `agendev:ready` | Eligible for queue selection once dependencies and eligibility checks pass | run `agendev run` or target it with `agendev run --issue N` |
-| `agendev:in-progress` | Actively being worked or awaiting reconciliation | inspect state, PR comments, and startup reconciliation output |
-| `agendev:done` | Completed successfully | inspect PR finalization and reports |
-| `agendev:blocked` | Manually or externally blocked | unblock prerequisites or adjust the issue |
-| `agendev:needs-human-review` | Escalated to a person after verification, review, or reconciliation | inspect the PR and issue audit comments |
-| `agendev:maintenance-review` | Tracking issue for maintenance review, not part of the normal implementation queue | triage maintenance findings separately |
+| `runoq:ready` | Eligible for queue selection once dependencies and eligibility checks pass | run `runoq run` or target it with `runoq run --issue N` |
+| `runoq:in-progress` | Actively being worked or awaiting reconciliation | inspect state, PR comments, and startup reconciliation output |
+| `runoq:done` | Completed successfully | inspect PR finalization and reports |
+| `runoq:blocked` | Manually or externally blocked | unblock prerequisites or adjust the issue |
+| `runoq:needs-human-review` | Escalated to a person after verification, review, or reconciliation | inspect the PR and issue audit comments |
+| `runoq:maintenance-review` | Tracking issue for maintenance review, not part of the normal implementation queue | triage maintenance findings separately |
 
-The queue runner only selects from open issues labeled `agendev:ready`.
+The queue runner only selects from open issues labeled `runoq:ready`.
 
 ## How Selection Works
 
 Queue selection is deterministic:
 
-1. list open `agendev:ready` issues
-2. parse the `agendev:meta` block from each issue body
+1. list open `runoq:ready` issues
+2. parse the `runoq:meta` block from each issue body
 3. sort by `priority`, then issue number
-4. skip any issue whose `depends_on` items are not `agendev:done`
+4. skip any issue whose `depends_on` items are not `runoq:done`
 5. skip any issue that fails dispatch eligibility
 6. choose the first remaining actionable issue
 
@@ -32,11 +32,11 @@ Queue selection is deterministic:
 
 The runtime surfaces blocked or skipped reasons such as:
 
-- `dependency #12 is not agendev:done`
+- `dependency #12 is not runoq:done`
 - `missing dependency issue #404`
 - `missing acceptance criteria`
 - `existing open PR #88 already tracks this issue`
-- `branch agendev/... has unresolved conflicts with origin/main`
+- `branch runoq/... has unresolved conflicts with origin/main`
 
 Operators should treat these as queue hygiene signals, not as transient noise.
 
@@ -44,15 +44,15 @@ Operators should treat these as queue hygiene signals, not as transient noise.
 
 Check the queue surface:
 
-- open issues labeled `agendev:ready`
+- open issues labeled `runoq:ready`
 - issue bodies include the metadata block and `## Acceptance Criteria`
 - dependencies really reflect sequencing constraints
-- old `agendev:in-progress` issues are understood before starting
+- old `runoq:in-progress` issues are understood before starting
 
 If you suspect stale state, start with:
 
 ```bash
-agendev run --dry-run
+runoq run --dry-run
 ```
 
 This performs reconciliation first, then shows queue state and selection without dispatching new work.
@@ -62,7 +62,7 @@ This performs reconciliation first, then shows queue state and selection without
 ### Queue preview
 
 ```bash
-agendev run --dry-run
+runoq run --dry-run
 ```
 
 Use this to answer:
@@ -81,7 +81,7 @@ The returned JSON includes:
 ### Single-issue preview
 
 ```bash
-agendev run --issue 42 --dry-run
+runoq run --issue 42 --dry-run
 ```
 
 Use this to confirm the runtime sees the targeted issue number and to inspect reconciliation output before dispatching manually.
@@ -91,7 +91,7 @@ Use this to confirm the runtime sees the targeted issue number and to inspect re
 Use single-issue mode when you want to target one queue item regardless of what else is ready.
 
 ```bash
-agendev run --issue 42
+runoq run --issue 42
 ```
 
 Typical reasons:
@@ -104,7 +104,7 @@ Single-issue mode still performs:
 
 - startup reconciliation
 - eligibility checks
-- label transition to `agendev:in-progress`
+- label transition to `runoq:in-progress`
 - worktree creation
 - PR creation and audit comments
 - verification and finalization
@@ -113,10 +113,10 @@ It stops after that one issue.
 
 ## Queue Mode
 
-Use queue mode when you want `agendev` to keep selecting the next actionable ready issue until there is nothing left to do or the circuit breaker halts execution.
+Use queue mode when you want `runoq` to keep selecting the next actionable ready issue until there is nothing left to do or the circuit breaker halts execution.
 
 ```bash
-agendev run
+runoq run
 ```
 
 Queue mode:
@@ -124,7 +124,7 @@ Queue mode:
 - reconciles interrupted runs first
 - processes issues in dependency-safe priority order
 - resets the consecutive-failure counter after each clean completion
-- stops when no actionable `agendev:ready` issue remains
+- stops when no actionable `runoq:ready` issue remains
 
 ## Finalization Outcomes
 
@@ -135,7 +135,7 @@ An issue run ends in one of two broad outcomes:
 What happens:
 
 - PR is marked ready and auto-merge is enabled
-- issue label moves to `agendev:done`
+- issue label moves to `runoq:done`
 - local state becomes terminal with `phase: "DONE"`
 - sibling worktree is removed
 
@@ -147,7 +147,7 @@ What happens:
 
 - PR is marked ready for review instead of auto-merge
 - reviewer/assignee may be added from config
-- issue label moves to `agendev:needs-human-review`
+- issue label moves to `runoq:needs-human-review`
 - local state becomes terminal with `phase: "FAILED"`
 - issue and PR get escalation comments explaining why
 
@@ -191,7 +191,7 @@ Look for:
 Look for:
 
 - dispatch payload comment
-- `agendev:payload:codex-return` comment for the dev round
+- `runoq:payload:codex-return` comment for the dev round
 - payload reconstruction comments when malformed output was patched or synthesized
 - verification failure comments
 - final orchestrator verdict comment
@@ -209,9 +209,9 @@ Look for:
 Use:
 
 ```bash
-agendev report summary
-agendev report issue 42
-agendev report cost
+runoq report summary
+runoq report issue 42
+runoq report cost
 ```
 
 Use them to confirm:
@@ -224,10 +224,10 @@ Use them to confirm:
 
 For normal operation, this cadence works well:
 
-1. Run `agendev run --dry-run` to inspect reconciliation and selection.
-2. If the queue looks healthy, run `agendev run`.
-3. If one issue needs focused attention, run `agendev run --issue N`.
-4. After the run, inspect issue comments, PR comments, and `agendev report summary`.
+1. Run `runoq run --dry-run` to inspect reconciliation and selection.
+2. If the queue looks healthy, run `runoq run`.
+3. If one issue needs focused attention, run `runoq run --issue N`.
+4. After the run, inspect issue comments, PR comments, and `runoq report summary`.
 5. If the queue halted or escalated repeatedly, fix the root cause before the next run.
 
 ## Related Docs

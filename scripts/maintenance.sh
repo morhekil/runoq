@@ -18,7 +18,7 @@ EOF
 }
 
 maintenance_state_file() {
-  printf '%s/maintenance.json\n' "$(agendev::state_dir)"
+  printf '%s/maintenance.json\n' "$(runoq::state_dir)"
 }
 
 gitignore_exclusions() {
@@ -99,20 +99,20 @@ derive_partitions() {
 }
 
 tracking_issue_body_file() {
-  mktemp "${TMPDIR:-/tmp}/agendev-maintenance-body.XXXXXX"
+  mktemp "${TMPDIR:-/tmp}/runoq-maintenance-body.XXXXXX"
 }
 
 tracking_issue_body() {
   local partitions_json="$1"
   local body_file commit_sha branch_name timestamp partitions_line
   body_file="$(tracking_issue_body_file)"
-  commit_sha="$(git -C "$(agendev::target_root)" rev-parse HEAD)"
-  branch_name="$(git -C "$(agendev::target_root)" branch --show-current)"
+  commit_sha="$(git -C "$(runoq::target_root)" rev-parse HEAD)"
+  branch_name="$(git -C "$(runoq::target_root)" branch --show-current)"
   timestamp="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   partitions_line="$(printf '%s' "$partitions_json" | jq -r '.partitions | map(.name) | join(", ")')"
 
   {
-    echo "<!-- agendev:event -->"
+    echo "<!-- runoq:event -->"
     echo "Maintenance review started."
     echo
     printf 'Timestamp: %s\n' "$timestamp"
@@ -130,8 +130,8 @@ create_tracking_issue() {
   local title body_file result number label
   title="Maintenance review $(date -u +%Y-%m-%d)"
   body_file="$(tracking_issue_body "$partitions_json")"
-  label="$(agendev::config_get '.labels.maintenanceReview')"
-  result="$(agendev::gh issue create --repo "$repo" --title "$title" --body-file "$body_file" --label "$label")"
+  label="$(runoq::config_get '.labels.maintenanceReview')"
+  result="$(runoq::gh issue create --repo "$repo" --title "$title" --body-file "$body_file" --label "$label")"
   rm -f "$body_file"
   number="$(printf '%s' "$result" | sed -n 's#.*/issues/\([0-9][0-9]*\).*#\1#p')"
   jq -n --arg title "$title" --arg url "$result" --argjson number "${number:-null}" '{title:$title, url:$url, number:$number}'
@@ -145,28 +145,28 @@ report_partition() {
   local finding_count="$5"
   local body
   body="$(printf 'Partition %s reviewed. PERFECT-D score: %s. Findings: %s.' "$partition_name" "$score" "$finding_count")"
-  agendev::gh issue comment "$tracking_issue" --repo "$repo" --body "$body" >/dev/null
+  runoq::gh issue comment "$tracking_issue" --repo "$repo" --body "$body" >/dev/null
 }
 
 save_maintenance_state() {
   local payload="$1"
-  agendev::ensure_state_dir
-  printf '%s\n' "$payload" | agendev::write_json_file "$(maintenance_state_file)"
+  runoq::ensure_state_dir
+  printf '%s\n' "$payload" | runoq::write_json_file "$(maintenance_state_file)"
 }
 
 load_maintenance_state() {
   local file
   file="$(maintenance_state_file)"
-  [[ -f "$file" ]] || agendev::die "Maintenance state file not found"
+  [[ -f "$file" ]] || runoq::die "Maintenance state file not found"
   jq -e '.' "$file"
 }
 
 authorization_minimum_permission() {
-  agendev::config_get '.authorization.minimumPermission'
+  runoq::config_get '.authorization.minimumPermission'
 }
 
 authorization_deny_response() {
-  agendev::config_get '.authorization.denyResponse'
+  runoq::config_get '.authorization.denyResponse'
 }
 
 finding_comment_body() {
@@ -223,7 +223,7 @@ post_findings() {
 
   while IFS= read -r finding; do
     [[ -n "$finding" ]] || continue
-    agendev::gh issue comment "$tracking_issue" --repo "$repo" --body "$(finding_comment_body "$finding")" >/dev/null
+    runoq::gh issue comment "$tracking_issue" --repo "$repo" --body "$(finding_comment_body "$finding")" >/dev/null
   done < <(printf '%s' "$findings_json" | jq -c '.findings[]')
 
   state_json="$(jq -n \
@@ -249,7 +249,7 @@ post_findings() {
 tracking_issue_comments() {
   local repo="$1"
   local tracking_issue="$2"
-  agendev::gh api "repos/${repo}/issues/${tracking_issue}/comments"
+  runoq::gh api "repos/${repo}/issues/${tracking_issue}/comments"
 }
 
 find_finding_id() {
@@ -283,7 +283,7 @@ create_issue_from_finding() {
   if [[ -n "$priority_override" ]]; then
     priority="$priority_override"
   fi
-  result="$("$(agendev::root)/scripts/gh-issue-queue.sh" create "$repo" "$title" "$(printf '%s\n\nSuggested fix: %s\n' "$description" "$suggested_fix")" --priority "$priority" --estimated-complexity medium)"
+  result="$("$(runoq::root)/scripts/gh-issue-queue.sh" create "$repo" "$title" "$(printf '%s\n\nSuggested fix: %s\n' "$description" "$suggested_fix")" --priority "$priority" --estimated-complexity medium)"
   url="$(printf '%s' "$result" | jq -r '.url')"
   issue_number="$(issue_number_from_url "$url")"
   jq -n --argjson issue "$issue_number" --arg url "$url" --arg priority "$priority" '{issue:$issue, url:$url, priority:$priority}'
@@ -330,22 +330,22 @@ triage() {
   while IFS= read -r comment; do
     [[ -n "$comment" ]] || continue
     comment_id="$(printf '%s' "$comment" | jq -r '.id')"
-    if "$(agendev::root)/scripts/state.sh" has-mention "$comment_id" >/dev/null 2>&1; then
+    if "$(runoq::root)/scripts/state.sh" has-mention "$comment_id" >/dev/null 2>&1; then
       continue
     fi
     body="$(printf '%s' "$comment" | jq -r '.body')"
-    [[ "$body" == *"@agendev"* ]] || continue
+    [[ "$body" == *"@runoq"* ]] || continue
     author="$(printf '%s' "$comment" | jq -r '.user.login')"
 
     set +e
-    "$(agendev::root)/scripts/gh-pr-lifecycle.sh" check-permission "$repo" "$author" "$required" >/dev/null 2>&1
+    "$(runoq::root)/scripts/gh-pr-lifecycle.sh" check-permission "$repo" "$author" "$required" >/dev/null 2>&1
     permission_status="$?"
     set -e
     if [[ "$permission_status" -ne 0 ]]; then
       if [[ "$deny_mode" == "comment" ]]; then
-        agendev::gh issue comment "$tracking_issue" --repo "$repo" --body "Permission denied for @${author}. Requires ${required} access to address @agendev mentions." >/dev/null
+        runoq::gh issue comment "$tracking_issue" --repo "$repo" --body "Permission denied for @${author}. Requires ${required} access to address @runoq mentions." >/dev/null
       fi
-      "$(agendev::root)/scripts/state.sh" record-mention "$comment_id" >/dev/null
+      "$(runoq::root)/scripts/state.sh" record-mention "$comment_id" >/dev/null
       processed="$(jq -n --argjson processed "$processed" --argjson id "$comment_id" '$processed + [$id]')"
       continue
     fi
@@ -365,20 +365,20 @@ triage() {
       else
         message="Finding ${finding_id} approved. Filed as #${filed_issue}."
       fi
-      agendev::gh issue comment "$tracking_issue" --repo "$repo" --body "$message" >/dev/null
+      runoq::gh issue comment "$tracking_issue" --repo "$repo" --body "$message" >/dev/null
       state_json="$(update_finding_state "$state_json" "$finding_id" "approved" "$filed_issue" "$priority_override")"
     elif [[ "$body" == *"skip"* || "$body" == *"won't fix"* ]]; then
-      agendev::gh issue comment "$tracking_issue" --repo "$repo" --body "Finding ${finding_id} declined." >/dev/null
+      runoq::gh issue comment "$tracking_issue" --repo "$repo" --body "Finding ${finding_id} declined." >/dev/null
       state_json="$(update_finding_state "$state_json" "$finding_id" "declined")"
     fi
 
-    "$(agendev::root)/scripts/state.sh" record-mention "$comment_id" >/dev/null
+    "$(runoq::root)/scripts/state.sh" record-mention "$comment_id" >/dev/null
     processed="$(jq -n --argjson processed "$processed" --argjson id "$comment_id" '$processed + [$id]')"
   done < <(printf '%s' "$comments" | jq -c '.[]')
 
   if [[ "$(printf '%s' "$state_json" | jq -r '(.findings // []) | all(.status != "pending")')" == "true" ]] &&
      [[ "$(printf '%s' "$state_json" | jq -r '(.recurring_patterns // []) | length')" -gt 0 ]]; then
-    agendev::gh issue comment "$tracking_issue" --repo "$repo" --body "Recurring patterns: $(printf '%s' "$state_json" | jq -r '.recurring_patterns | join(", ")')." >/dev/null
+    runoq::gh issue comment "$tracking_issue" --repo "$repo" --body "Recurring patterns: $(printf '%s' "$state_json" | jq -r '.recurring_patterns | join(", ")')." >/dev/null
   fi
 
   save_maintenance_state "$state_json"
@@ -410,7 +410,7 @@ complete_run() {
   if [[ "$(printf '%s' "$summary_json" | jq -r '.recurring_patterns | length')" -gt 0 ]]; then
     message="${message} Recurring patterns: $(printf '%s' "$summary_json" | jq -r '.recurring_patterns | join(", ")')."
   fi
-  agendev::gh issue comment "$tracking_issue" --repo "$repo" --body "$message" >/dev/null
+  runoq::gh issue comment "$tracking_issue" --repo "$repo" --body "$message" >/dev/null
   state_json="$(jq -n --argjson state "$state_json" --argjson summary "$summary_json" '
     $state + {
       phase: "COMPLETED",
@@ -474,7 +474,7 @@ run_maintenance() {
 start_run() {
   local repo="$1"
   local partitions_json tracking_json tracking_issue
-  partitions_json="$(derive_partitions "$(agendev::target_root)")"
+  partitions_json="$(derive_partitions "$(runoq::target_root)")"
   tracking_json="$(create_tracking_issue "$repo" "$partitions_json")"
   tracking_issue="$(printf '%s' "$tracking_json" | jq -r '.number')"
 

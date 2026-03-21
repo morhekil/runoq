@@ -13,8 +13,8 @@ EOF
 }
 
 claude_exec() {
-  local claude_bin="${AGENDEV_CLAUDE_BIN:-claude}"
-  command -v "$claude_bin" >/dev/null 2>&1 || agendev::die "Claude CLI not found: $claude_bin"
+  local claude_bin="${RUNOQ_CLAUDE_BIN:-claude}"
+  command -v "$claude_bin" >/dev/null 2>&1 || runoq::die "Claude CLI not found: $claude_bin"
   (
     cd "$TARGET_ROOT"
     "$claude_bin" "$@"
@@ -28,7 +28,7 @@ parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --issue)
-        [[ $# -ge 2 ]] || agendev::die "--issue requires a value"
+        [[ $# -ge 2 ]] || runoq::die "--issue requires a value"
         issue_number="$2"
         shift 2
         ;;
@@ -46,7 +46,7 @@ parse_args() {
 
 build_run_prompt() {
   jq -cn \
-    --arg command "agendev run" \
+    --arg command "runoq run" \
     --arg issue "${issue_number:-}" \
     --argjson dry_run "$dry_run" '
     {
@@ -60,13 +60,13 @@ build_run_prompt() {
 run_production() {
   local prompt
   prompt="$(build_run_prompt)"
-  claude_exec --print --permission-mode bypassPermissions --agent github-orchestrator --add-dir "$AGENDEV_ROOT" -- "$prompt"
+  claude_exec --print --permission-mode bypassPermissions --agent github-orchestrator --add-dir "$RUNOQ_ROOT" -- "$prompt"
 }
 
 main() {
   parse_args "$@"
 
-  if [[ "${AGENDEV_TEST_RUN_MODE:-}" == "fixture" ]]; then
+  if [[ "${RUNOQ_TEST_RUN_MODE:-}" == "fixture" ]]; then
     # shellcheck source=./scripts/run-fixture.sh
     source "$(cd "$(dirname "$0")" && pwd)/run-fixture.sh"
     fixture_mode_run "$issue_number" "$dry_run"

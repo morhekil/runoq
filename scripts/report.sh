@@ -16,7 +16,7 @@ EOF
 state_files_query() {
   local last="${1:-}"
   local state_dir
-  state_dir="$(agendev::state_dir)"
+  state_dir="$(runoq::state_dir)"
   mkdir -p "$state_dir"
   find "$state_dir" -maxdepth 1 -type f -name '*.json' | sort | {
     if [[ -n "$last" ]]; then
@@ -71,8 +71,8 @@ summary_report() {
 issue_report() {
   local issue="$1"
   local file
-  file="$(agendev::state_dir)/${issue}.json"
-  [[ -f "$file" ]] || agendev::die "No state file found for issue $issue"
+  file="$(runoq::state_dir)/${issue}.json"
+  [[ -f "$file" ]] || runoq::die "No state file found for issue $issue"
   jq '.' "$file"
 }
 
@@ -85,9 +85,9 @@ cost_report() {
     return
   fi
 
-  input="$(agendev::config_get '.tokenCost.inputPerMillion')"
-  cached="$(agendev::config_get '.tokenCost.cachedInputPerMillion')"
-  output="$(agendev::config_get '.tokenCost.outputPerMillion')"
+  input="$(runoq::config_get '.tokenCost.inputPerMillion')"
+  cached="$(runoq::config_get '.tokenCost.cachedInputPerMillion')"
+  output="$(runoq::config_get '.tokenCost.outputPerMillion')"
 
   jq -s --argjson in_rate "$input" --argjson cache_rate "$cached" --argjson out_rate "$output" '
     {

@@ -2,18 +2,18 @@
   {
     "number": 21,
     "title": "Blocked",
-    "body": "<!-- agendev:meta\ndepends_on: [5]\npriority: 1\nestimated_complexity: medium\n-->\n",
+    "body": "<!-- runoq:meta\ndepends_on: [5]\npriority: 1\nestimated_complexity: medium\n-->\n",
     "labels": [
-      { "name": "agendev:ready" }
+      { "name": "runoq:ready" }
     ],
     "url": "https://github.com/owner/repo/issues/21"
   },
   {
     "number": 22,
     "title": "Ready",
-    "body": "<!-- agendev:meta\ndepends_on: []\npriority: 2\nestimated_complexity: low\n-->\n",
+    "body": "<!-- runoq:meta\ndepends_on: []\npriority: 2\nestimated_complexity: low\n-->\n",
     "labels": [
-      { "name": "agendev:ready" }
+      { "name": "runoq:ready" }
     ],
     "url": "https://github.com/owner/repo/issues/22"
   }

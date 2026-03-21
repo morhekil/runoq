@@ -1,12 +1,12 @@
 # State And Audit Model
 
-This document explains how `agendev` records local execution state and how that differs from the GitHub-side operational audit trail.
+This document explains how `runoq` records local execution state and how that differs from the GitHub-side operational audit trail.
 
 ## Two Persistence Layers
 
-`agendev` intentionally uses two different storage layers for different jobs:
+`runoq` intentionally uses two different storage layers for different jobs:
 
-- Local state under `.agendev/state/` is for resumability, reconciliation, and deduplication.
+- Local state under `.runoq/state/` is for resumability, reconciliation, and deduplication.
 - GitHub issues, PRs, and comments are the operator-facing audit and control surface.
 
 If you are debugging an interrupted run, read both. If you are reconstructing what happened historically, prefer GitHub comments over local state files.
@@ -16,22 +16,22 @@ If you are debugging an interrupted run, read both. If you are reconstructing wh
 Default location:
 
 ```text
-<target-repo>/.agendev/state/
+<target-repo>/.runoq/state/
 ```
 
 Override:
 
-- `AGENDEV_STATE_DIR`
+- `RUNOQ_STATE_DIR`
 
 Current files of interest:
 
-- `.agendev/state/<issue>.json`
-- `.agendev/state/maintenance.json`
-- `.agendev/state/processed-mentions.json`
+- `.runoq/state/<issue>.json`
+- `.runoq/state/maintenance.json`
+- `.runoq/state/processed-mentions.json`
 
 All writes are intended to be atomic via temp file plus rename.
 
-## Issue State Files: `.agendev/state/<issue>.json`
+## Issue State Files: `.runoq/state/<issue>.json`
 
 ### Purpose
 
@@ -62,8 +62,8 @@ Fields commonly written by `run.sh`:
   "issue": 42,
   "phase": "DEVELOP",
   "round": 1,
-  "branch": "agendev/42-implement-queue",
-  "worktree": "/path/to/../agendev-wt-42",
+  "branch": "runoq/42-implement-queue",
+  "worktree": "/path/to/../runoq-wt-42",
   "pr_number": 87,
   "started_at": "2026-03-17T00:00:00Z",
   "updated_at": "2026-03-17T00:05:00Z"
@@ -77,8 +77,8 @@ Fields commonly written by `run.sh`:
   "issue": 42,
   "phase": "DONE",
   "round": 1,
-  "branch": "agendev/42-implement-queue",
-  "worktree": "/path/to/../agendev-wt-42",
+  "branch": "runoq/42-implement-queue",
+  "worktree": "/path/to/../runoq-wt-42",
   "pr_number": 87,
   "outcome": {
     "verdict": "PASS",
@@ -212,7 +212,7 @@ This normalized payload is part of the runtime model, but it is not persisted as
 
 That verification JSON is likewise transient unless copied into GitHub comments or a higher-level outcome.
 
-## Maintenance State: `.agendev/state/maintenance.json`
+## Maintenance State: `.runoq/state/maintenance.json`
 
 ### Purpose
 
@@ -296,7 +296,7 @@ Current status values written by the shell flow:
 - `approved`
 - `declined`
 
-## Processed Mentions: `.agendev/state/processed-mentions.json`
+## Processed Mentions: `.runoq/state/processed-mentions.json`
 
 Purpose:
 
@@ -323,17 +323,17 @@ GitHub comments are the audit trail. The runtime uses machine-recognizable marke
 
 | Marker | Meaning | Typical location |
 | --- | --- | --- |
-| `<!-- agendev:event -->` | human-readable operational event | issue comments, PR comments, maintenance tracking issue comments |
-| `<!-- agendev:payload:github-orchestrator-dispatch -->` | dispatch payload sent into orchestration | PR comment |
-| `<!-- agendev:payload:codex-return -->` | normalized or reconstructed dev-round payload | PR comment |
-| `<!-- agendev:payload:orchestrator-return -->` | orchestration verdict payload | PR comment |
+| `<!-- runoq:event -->` | human-readable operational event | issue comments, PR comments, maintenance tracking issue comments |
+| `<!-- runoq:payload:github-orchestrator-dispatch -->` | dispatch payload sent into orchestration | PR comment |
+| `<!-- runoq:payload:codex-return -->` | normalized or reconstructed dev-round payload | PR comment |
+| `<!-- runoq:payload:orchestrator-return -->` | orchestration verdict payload | PR comment |
 
 ### PR body markers
 
 These are not comments, but they are still part of the audit/control surface:
 
-- `<!-- agendev:summary:start -->` ... `<!-- agendev:summary:end -->`
-- `<!-- agendev:attention:start -->` ... `<!-- agendev:attention:end -->`
+- `<!-- runoq:summary:start -->` ... `<!-- runoq:summary:end -->`
+- `<!-- runoq:attention:start -->` ... `<!-- runoq:attention:end -->`
 
 `gh-pr-lifecycle.sh update-summary` depends on them to update the PR body in place.
 
@@ -353,7 +353,7 @@ Escalate to `needs-human-review` when:
 
 Reset stale labels when:
 
-- GitHub shows `agendev:in-progress`, but no active non-terminal state file explains it
+- GitHub shows `runoq:in-progress`, but no active non-terminal state file explains it
 
 This is why local state is a recovery breadcrumb: it enables the decision, but the resulting action is written back to GitHub comments and labels.
 
@@ -361,9 +361,9 @@ This is why local state is a recovery breadcrumb: it enables the decision, but t
 
 Check local state first:
 
-- `.agendev/state/<issue>.json` for `phase`, `updated_at`, `branch`, `pr_number`, and any `stall`
-- `.agendev/state/maintenance.json` for maintenance workflow phase
-- `.agendev/state/processed-mentions.json` for duplicate-mention handling
+- `.runoq/state/<issue>.json` for `phase`, `updated_at`, `branch`, `pr_number`, and any `stall`
+- `.runoq/state/maintenance.json` for maintenance workflow phase
+- `.runoq/state/processed-mentions.json` for duplicate-mention handling
 
 Then check GitHub:
 
