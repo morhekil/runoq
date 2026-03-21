@@ -122,20 +122,60 @@ finalize_pr() {
   local pr_number="$2"
   local verdict="$3"
   local reviewer=""
+  local assigned_reviewer=""
   shift 3
   if [[ "${1:-}" == "--reviewer" ]]; then
     reviewer="${2:-}"
   fi
 
+  ready_pr() {
+    local output status
+    set +e
+    output="$(agendev::gh pr ready "$pr_number" --repo "$repo" 2>&1)"
+    status=$?
+    set -e
+    if [[ "$status" -eq 0 ]]; then
+      return 0
+    fi
+    if [[ "$output" == *'already "ready for review"'* ]]; then
+      printf '%s\n' "$output" >&2
+      return 0
+    fi
+    printf '%s\n' "$output" >&2
+    return "$status"
+  }
+
   case "$verdict" in
     auto-merge)
-      agendev::gh pr ready "$pr_number" --repo "$repo" >/dev/null
-      agendev::gh pr merge "$pr_number" --repo "$repo" --auto --squash >/dev/null
+      local merge_output merge_status
+      ready_pr
+      set +e
+      merge_output="$(agendev::gh pr merge "$pr_number" --repo "$repo" --auto --squash 2>&1)"
+      merge_status=$?
+      set -e
+      if [[ "$merge_status" -eq 0 ]]; then
+        :
+      elif [[ "$merge_output" == *"Protected branch rules not configured for this branch"* ]] || [[ "$merge_output" == *"enablePullRequestAutoMerge"* ]]; then
+        printf '%s\n' "$merge_output" >&2
+        agendev::gh pr merge "$pr_number" --repo "$repo" --squash --delete-branch >/dev/null
+      else
+        printf '%s\n' "$merge_output" >&2
+        return "$merge_status"
+      fi
       ;;
     needs-review)
-      agendev::gh pr ready "$pr_number" --repo "$repo" >/dev/null
+      local edit_output edit_status
+      ready_pr
       if [[ -n "$reviewer" ]]; then
-        agendev::gh pr edit "$pr_number" --repo "$repo" --add-reviewer "$reviewer" --add-assignee "$reviewer" >/dev/null
+        set +e
+        edit_output="$(agendev::gh pr edit "$pr_number" --repo "$repo" --add-reviewer "$reviewer" --add-assignee "$reviewer" 2>&1)"
+        edit_status=$?
+        set -e
+        if [[ "$edit_status" -eq 0 ]]; then
+          assigned_reviewer="$reviewer"
+        else
+          printf '%s\n' "$edit_output" >&2
+        fi
       fi
       ;;
     *)
@@ -143,7 +183,7 @@ finalize_pr() {
       ;;
   esac
 
-  jq -n --argjson pr "$pr_number" --arg verdict "$verdict" --arg reviewer "$reviewer" '{
+  jq -n --argjson pr "$pr_number" --arg verdict "$verdict" --arg reviewer "$assigned_reviewer" '{
     pr: $pr,
     verdict: $verdict,
     reviewer: $reviewer

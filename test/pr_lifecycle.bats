@@ -104,6 +104,58 @@ EOF
   [[ "$output" == *'"reviewer": "reviewer1"'* ]]
 }
 
+@test "pr lifecycle finalize falls back to direct squash merge when auto-merge is unavailable" {
+  scenario="$TEST_TMPDIR/scenario.json"
+  write_fake_gh_scenario "$scenario" <<EOF
+[
+  {
+    "contains": ["pr", "ready", "87", "--repo owner/repo"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "merge", "87", "--repo owner/repo", "--auto", "--squash"],
+    "stderr": "GraphQL: Pull request Protected branch rules not configured for this branch (enablePullRequestAutoMerge)",
+    "exit_code": 1
+  },
+  {
+    "contains": ["pr", "merge", "87", "--repo owner/repo", "--squash", "--delete-branch"],
+    "stdout": ""
+  }
+]
+EOF
+  use_fake_gh "$scenario"
+
+  run "$AGENDEV_ROOT/scripts/gh-pr-lifecycle.sh" finalize owner/repo 87 auto-merge
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"verdict": "auto-merge"'* ]]
+}
+
+@test "pr lifecycle finalize tolerates already-ready PRs and failed reviewer assignment" {
+  scenario="$TEST_TMPDIR/scenario.json"
+  write_fake_gh_scenario "$scenario" <<EOF
+[
+  {
+    "contains": ["pr", "ready", "88", "--repo owner/repo"],
+    "stderr": "! Pull request owner/repo#88 is already \"ready for review\"",
+    "exit_code": 1
+  },
+  {
+    "contains": ["pr", "edit", "88", "--repo owner/repo", "--add-reviewer reviewer1", "--add-assignee reviewer1"],
+    "stderr": "'reviewer1' not found",
+    "exit_code": 1
+  }
+]
+EOF
+  use_fake_gh "$scenario"
+
+  run "$AGENDEV_ROOT/scripts/gh-pr-lifecycle.sh" finalize owner/repo 88 needs-review --reviewer reviewer1
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"verdict": "needs-review"'* ]]
+  [[ "$output" == *'"reviewer": ""'* ]]
+}
+
 @test "pr lifecycle line-comment supports multi-line review comments" {
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<EOF
