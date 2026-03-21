@@ -51,7 +51,7 @@ summary_report() {
       else null
       end;
     def verdict_value:
-      .outcome.verdict // .result.verdict // null;
+      .outcome.verdict // .result.verdict // .verdict // null;
     {
       issues: length,
       pass: map(select(verdict_value == "PASS")) | length,

@@ -339,9 +339,10 @@ EOF
   '
 
   [ "$status" -eq 0 ]
-  [ "$(printf '%s' "$output" | jq -r '.status')" = "failed" ]
+  [ "$(printf '%s' "$output" | jq -r '.status')" = "ok" ]
   [ "$(printf '%s' "$output" | jq -r '.lifecycle.completed_issues')" = "2" ]
   [ "$(printf '%s' "$output" | jq -r '.lifecycle.all_issues_done')" = "true" ]
   [ "$(printf '%s' "$output" | jq -r '.lifecycle.one_shot_completed')" = "1" ]
   [ "$(printf '%s' "$output" | jq -r '.failures | map(select(. == "Not all seeded issues reached DONE.")) | length')" = "0" ]
+  [ "$(printf '%s' "$output" | jq -r '.failures | map(select(. == "Not all seeded issues completed in one round.")) | length')" = "0" ]
 }

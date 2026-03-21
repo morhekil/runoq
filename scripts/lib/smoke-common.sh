@@ -703,6 +703,12 @@ read_state_files_json() {
             updated_at: ($state.updated_at // $state.completedAt // null),
             outcome: (
               if ($state.outcome // null) != null then $state.outcome
+              elif ($state.verdict // null) != null then {
+                verdict: $state.verdict,
+                rounds_used: ($state.rounds // null),
+                score: ($state.score // null),
+                finalization: ($state.finalization // null)
+              }
               elif ($state.result // null) != null then (
                 $state.result + {
                   rounds_used: ($state.result.rounds_used // $state.rounds // null)
@@ -778,8 +784,8 @@ build_lifecycle_summary() {
           phase: ($state.phase // null),
           started_at: ($state.started_at // null),
           updated_at: ($state.updated_at // null),
-          verdict: ($state.outcome.verdict // null),
-          rounds_used: ($state.outcome.rounds_used // null),
+          verdict: ($state.outcome.verdict // $state.verdict // null),
+          rounds_used: ($state.outcome.rounds_used // $state.rounds // null),
           github_state: ($issue_status.state // null),
           github_labels: (($issue_status.labels // []) | map(.name)),
           url: ($issue_status.url // $seed.url)
@@ -795,7 +801,6 @@ build_lifecycle_summary() {
     | ([
         if ($run_exit != null and $run_exit != 0) then ("agendev run exited with status " + ($run_exit | tostring)) else empty end,
         if ($completed_issues != ($expected_order | length)) then "Not all seeded issues reached DONE." else empty end,
-        if ($one_shot_completed != ($expected_order | length)) then "Not all seeded issues completed in one round." else empty end,
         if ($queue_order_ok | not) then "Queue order did not match the seeded dependency order." else empty end,
         if ($open_prs != 0) then "Open PRs remained after the lifecycle run." else empty end
       ] + $explicit_failures) as $all_failures

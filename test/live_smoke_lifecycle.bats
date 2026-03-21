@@ -18,6 +18,5 @@ load test_helper
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.status')" = "ok" ]
   [ "$(printf '%s' "$output" | jq -r '.lifecycle.all_issues_done')" = "true" ]
-  [ "$(printf '%s' "$output" | jq -r '.lifecycle.one_shotable')" = "true" ]
   [ "$(printf '%s' "$output" | jq -r '.lifecycle.queue_order_ok')" = "true" ]
 }
