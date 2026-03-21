@@ -687,7 +687,32 @@ read_state_files_json() {
   find "$state_dir" -maxdepth 1 -type f -name '*.json' | sort | while IFS= read -r file; do
     [[ -n "$file" ]] || continue
     if [[ "$(basename "$file" .json)" =~ ^[0-9]+$ ]]; then
-      jq -c '.' "$file"
+      jq -c '
+        . as $state
+        | $state + {
+            issue: ($state.issue // $state.issueNumber // null),
+            phase: (
+              if ($state.phase // null) != null then $state.phase
+              elif ($state.status // "") == "done" then "DONE"
+              elif ($state.status // "") == "failed" then "FAILED"
+              elif ($state.status // "") == "in_progress" then "DEVELOP"
+              else null
+              end
+            ),
+            started_at: ($state.started_at // $state.dispatchedAt // null),
+            updated_at: ($state.updated_at // $state.completedAt // null),
+            outcome: (
+              if ($state.outcome // null) != null then $state.outcome
+              elif ($state.result // null) != null then (
+                $state.result + {
+                  rounds_used: ($state.result.rounds_used // $state.rounds // null)
+                }
+              )
+              else null
+              end
+            )
+          }
+      ' "$file"
     fi
   done | jq -s '.'
 }

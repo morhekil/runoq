@@ -281,3 +281,67 @@ EOF
   grep -F "codex stdout" "$invocation_dir/stdout.log"
   grep -F "codex stderr" "$invocation_dir/stderr.log"
 }
+
+@test "lifecycle summary treats copied lifecycle state files as completed issues" {
+  target_dir="$TEST_TMPDIR/target"
+  artifacts_dir="$TEST_TMPDIR/artifacts"
+  mkdir -p "$target_dir/.agendev/state" "$artifacts_dir"
+  cat >"$target_dir/.agendev/state/1.json" <<'EOF'
+{
+  "issueNumber": 1,
+  "status": "done",
+  "dispatchedAt": "2026-03-21T00:23:00Z",
+  "completedAt": "2026-03-21T00:27:00Z",
+  "rounds": 1,
+  "result": { "verdict": "PASS" }
+}
+EOF
+  cat >"$target_dir/.agendev/state/2.json" <<'EOF'
+{
+  "issueNumber": 2,
+  "status": "done",
+  "dispatchedAt": "2026-03-21T00:28:00Z",
+  "completedAt": "2026-03-21T00:37:00Z",
+  "rounds": 2,
+  "result": { "verdict": "PASS" }
+}
+EOF
+
+  run bash -lc '
+    set -euo pipefail
+    source "'"$AGENDEV_ROOT"'/scripts/lib/smoke-common.sh"
+    seeded='\''[
+      {"key":"one","number":1,"title":"One","depends_on_numbers":[],"url":"https://example.test/issues/1"},
+      {"key":"two","number":2,"title":"Two","depends_on_numbers":[1],"url":"https://example.test/issues/2"}
+    ]'\''
+    statuses='\''[
+      {"number":1,"state":"OPEN","labels":[{"name":"agendev:done"}],"url":"https://example.test/issues/1"},
+      {"number":2,"state":"OPEN","labels":[{"name":"agendev:done"}],"url":"https://example.test/issues/2"}
+    ]'\''
+    prs='\''[
+      {"number":10,"state":"MERGED","isDraft":false,"title":"One","url":"https://example.test/pull/10","headRefName":"agendev/1-one","baseRefName":"main"},
+      {"number":11,"state":"MERGED","isDraft":false,"title":"Two","url":"https://example.test/pull/11","headRefName":"agendev/2-two","baseRefName":"main"}
+    ]'\''
+    report='\''{"issues":2,"pass":2,"fail":0,"caveats":0,"tokens":{"input":0,"cached_input":0,"output":0,"total":0},"average_rounds":1.5}'\''
+    states="$(read_state_files_json "'"$target_dir"'")"
+    build_lifecycle_summary \
+      "owner/repo" \
+      "run-123" \
+      "'"$artifacts_dir"'" \
+      "0" \
+      "$seeded" \
+      "$states" \
+      "$statuses" \
+      "$prs" \
+      "$report" \
+      "[]" \
+      "[\"lifecycle_run_invoked\"]"
+  '
+
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | jq -r '.status')" = "failed" ]
+  [ "$(printf '%s' "$output" | jq -r '.lifecycle.completed_issues')" = "2" ]
+  [ "$(printf '%s' "$output" | jq -r '.lifecycle.all_issues_done')" = "true" ]
+  [ "$(printf '%s' "$output" | jq -r '.lifecycle.one_shot_completed')" = "1" ]
+  [ "$(printf '%s' "$output" | jq -r '.failures | map(select(. == "Not all seeded issues reached DONE.")) | length')" = "0" ]
+}

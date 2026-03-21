@@ -130,3 +130,33 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.issues')" = "0" ]
 }
+
+@test "report summary aggregates lifecycle state files with status/result schema" {
+  export TARGET_ROOT="$TEST_TMPDIR/project"
+  export AGENDEV_STATE_DIR="$TARGET_ROOT/.agendev/state"
+  mkdir -p "$AGENDEV_STATE_DIR"
+  cat >"$AGENDEV_STATE_DIR/1.json" <<'EOF'
+{
+  "issueNumber": 1,
+  "status": "done",
+  "rounds": 1,
+  "result": { "verdict": "PASS" }
+}
+EOF
+  cat >"$AGENDEV_STATE_DIR/2.json" <<'EOF'
+{
+  "issueNumber": 2,
+  "status": "failed",
+  "rounds": 2,
+  "result": { "verdict": "FAIL" }
+}
+EOF
+
+  run "$AGENDEV_ROOT/scripts/report.sh" summary
+
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | jq -r '.issues')" = "2" ]
+  [ "$(printf '%s' "$output" | jq -r '.pass')" = "1" ]
+  [ "$(printf '%s' "$output" | jq -r '.fail')" = "1" ]
+  [ "$(printf '%s' "$output" | jq -r '.average_rounds')" = "1.5" ]
+}
