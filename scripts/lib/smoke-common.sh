@@ -573,11 +573,28 @@ find_comment_author() {
   local repo="$1"
   local issue_number="$2"
   local body="$3"
-  runoq::gh api "repos/${repo}/issues/${issue_number}/comments" | jq -r --arg body "$body" '
-    map(select(.body == $body))
-    | last
-    | .user.login // empty
-  '
+  local author attempt max_attempts
+  max_attempts="${RUNOQ_SMOKE_COMMENT_LOOKUP_ATTEMPTS:-5}"
+
+  for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+    author="$(runoq::gh api "repos/${repo}/issues/${issue_number}/comments" | jq -r --arg body "$body" '
+      def normalize:
+        gsub("\r"; "")
+        | sub("\n+$"; "");
+      map(select((.body | normalize) == ($body | normalize)))
+      | last
+      | .user.login // empty
+    ')"
+    if [[ -n "$author" ]]; then
+      printf '%s\n' "$author"
+      return 0
+    fi
+    if [[ "$attempt" -lt "$max_attempts" ]]; then
+      sleep 1
+    fi
+  done
+
+  printf '\n'
 }
 
 default_branch() {

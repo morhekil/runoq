@@ -122,6 +122,61 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+@test "live smoke normalizes trailing newlines when matching comment attribution" {
+  scenario="$TEST_TMPDIR/scenario.json"
+  write_fake_gh_scenario "$scenario" <<'EOF'
+[
+  {
+    "contains": ["api", "repos/owner/repo/issues/5/comments"],
+    "stdout": "[{\"body\":\"runoq live smoke pr comment 123\\n\",\"user\":{\"login\":\"runoq[bot]\"}}]"
+  }
+]
+EOF
+  use_fake_gh "$scenario"
+
+  run bash -lc '
+    set -euo pipefail
+    export RUNOQ_ROOT="'"$RUNOQ_ROOT"'"
+    export RUNOQ_CONFIG="'"$RUNOQ_CONFIG"'"
+    export GH_BIN="'"$GH_BIN"'"
+    source "'"$RUNOQ_ROOT"'/scripts/lib/smoke-common.sh"
+    find_comment_author owner/repo 5 "runoq live smoke pr comment 123"
+  '
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "runoq[bot]" ]
+}
+
+@test "live smoke retries comment attribution lookups until the comment appears" {
+  scenario="$TEST_TMPDIR/scenario.json"
+  write_fake_gh_scenario "$scenario" <<'EOF'
+[
+  {
+    "contains": ["api", "repos/owner/repo/issues/5/comments"],
+    "stdout": "[]"
+  },
+  {
+    "contains": ["api", "repos/owner/repo/issues/5/comments"],
+    "stdout": "[{\"body\":\"runoq live smoke pr comment 123\",\"user\":{\"login\":\"runoq[bot]\"}}]"
+  }
+]
+EOF
+  use_fake_gh "$scenario"
+
+  run bash -lc '
+    set -euo pipefail
+    export RUNOQ_ROOT="'"$RUNOQ_ROOT"'"
+    export RUNOQ_CONFIG="'"$RUNOQ_CONFIG"'"
+    export GH_BIN="'"$GH_BIN"'"
+    export RUNOQ_SMOKE_COMMENT_LOOKUP_ATTEMPTS=2
+    source "'"$RUNOQ_ROOT"'/scripts/lib/smoke-common.sh"
+    find_comment_author owner/repo 5 "runoq live smoke pr comment 123"
+  '
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "runoq[bot]" ]
+}
+
 @test "live lifecycle smoke preflight requires explicit managed repo configuration" {
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<'EOF'
