@@ -185,7 +185,9 @@ The resulting list of **related files** is passed to the diff reviewer alongside
 
 ### Step 4 — Diff review
 
-Spawn a **new Agent subagent** (fresh context every round) with `subagent_type: "general-purpose"`. Use the `Agent` tool directly. Do NOT spend turns searching for team, task, or messaging tools first.
+Spawn a **new Agent subagent** (fresh context every round) with `subagent_type: "general-purpose"`. Use the `Agent` tool directly. Do NOT spend turns searching for team, task, messaging, or deferred tools first.
+The `Agent` tool is already available in this environment. Do NOT call `ToolSearch`, `Task`, or any other tool-discovery helper before spawning the reviewer. Call `Agent` immediately.
+If the direct `Agent` call itself returns an error, stop and return FAIL with blocker `diff reviewer unavailable`. Do NOT review the diff yourself, do NOT fall back to codex as reviewer, and do NOT invent a replacement workflow.
 
 Agent tool fields:
 - `name`: `diff-review-round-<N>`
@@ -222,6 +224,8 @@ When done:
 VERDICT is PASS only if: no issues found in the diff scope.
 Otherwise VERDICT is ITERATE and CHECKLIST must list all actionable items.
 ```
+
+Do not preface this with tool-discovery or capability checks. Spawn the reviewer immediately with the `Agent` tool call above.
 
 Post the diff-review result as a PR comment via `pr-lifecycle` skill.
 

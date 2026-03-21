@@ -104,6 +104,10 @@ load test_helper
   [ "$status" -eq 0 ]
   run grep -n "Use the \`Agent\` tool directly" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
+  run grep -n "Do NOT call \`ToolSearch\`, \`Task\`, or any other tool-discovery helper" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  [ "$status" -eq 0 ]
+  run grep -n "Do NOT review the diff yourself, do NOT fall back to codex as reviewer" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
+  [ "$status" -eq 0 ]
   run grep -n "Parse the JSON output" "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
   run grep -n '"\$AGENDEV_ROOT/scripts/verify.sh" round' "$AGENDEV_ROOT/.claude/agents/issue-runner.md"
