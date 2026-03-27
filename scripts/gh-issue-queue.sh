@@ -330,7 +330,7 @@ case "${1:-}" in
     if [[ -n "$parent_epic" ]]; then
       new_issue_number="$(printf '%s' "$result" | grep -oE '[0-9]+$')"
       child_id="$(runoq::gh api "repos/${repo}/issues/${new_issue_number}" --jq '.id')"
-      runoq::gh api "repos/${repo}/issues/${parent_epic}/sub_issues" --method POST -F "sub_issue_id=${child_id}"
+      runoq::gh api "repos/${repo}/issues/${parent_epic}/sub_issues" --method POST -F "sub_issue_id=${child_id}" >/dev/null
     fi
 
     jq -n --arg title "$title" --arg url "$result" '{title:$title, url:$url}'
