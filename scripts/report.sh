@@ -18,7 +18,7 @@ state_files_query() {
   local state_dir
   state_dir="$(runoq::state_dir)"
   mkdir -p "$state_dir"
-  find "$state_dir" -maxdepth 1 -type f -name '*.json' | sort | {
+  find "$state_dir" -maxdepth 1 -type f -name '*.json' | sort | grep -E '/[0-9]+\.json$' | {
     if [[ -n "$last" ]]; then
       tail -n "$last"
     else
