@@ -139,14 +139,16 @@ append_index_entry() {
 
   {
     printf '\n## Round %s\n\n' "$round"
-    printf '- **Commits**: `%s..%s` (%s commit(s))\n' "$baseline" "$head_hash" "$commit_count"
-    printf '%s\n' "$commit_subjects_text"
-    printf '- **Verification**: %s%s\n' "$verification_result" "${verification_detail:+ ($verification_detail)}"
-    printf '- **Review**: %s\n' "$review_status"
-    printf '- **Score**: %s\n' "$score"
-    printf '- **Verdict**: %s\n' "$verdict"
-    printf '- **Key issues**: %s\n' "$key_issues"
-    printf '- **Cumulative tokens**: %s\n' "$cumulative_tokens"
+    cat <<ENTRY
+- **Commits**: \`${baseline}..${head_hash}\` (${commit_count} commit(s))
+${commit_subjects_text}
+- **Verification**: ${verification_result}${verification_detail:+ ($verification_detail)}
+- **Review**: ${review_status}
+- **Score**: ${score}
+- **Verdict**: ${verdict}
+- **Key issues**: ${key_issues}
+- **Cumulative tokens**: ${cumulative_tokens}
+ENTRY
   } >> "$log_dir/index.md"
 }
 
