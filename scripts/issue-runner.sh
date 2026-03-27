@@ -329,7 +329,7 @@ Then print the required final stdout payload block:
     # Capture new commits
     local commits_text
     commits_text="$(git -C "$worktree" log --reverse --format="%H %s" "${baseline}..HEAD" 2>/dev/null || true)"
-    commit_subjects_json="$(printf '%s\n' "$commits_text" | grep -v '^$' | jq -Rsc 'split("\n") | map(select(length > 0))')"
+    commit_subjects_json="$(printf '%s\n' "$commits_text" | { grep -v '^$' || true; } | jq -Rsc 'split("\n") | map(select(length > 0))')"
     head_hash="$(git -C "$worktree" log -1 --format="%H")"
     local commit_count
     commit_count="$(printf '%s\n' "$commits_text" | grep -c -v '^$' || true)"
