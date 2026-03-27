@@ -1,26 +1,57 @@
 # plan-to-issues
 
-Use this skill to slice a local plan document into GitHub issues.
+Use this skill to slice a local plan document into GitHub issues, organized into an epic/task hierarchy when appropriate.
 
 ## Process
 
 1. Read the requested local plan file from disk before proposing anything.
 2. Reuse `"$RUNOQ_ROOT/templates/issue-template.md"` as the issue-body shape. Do not invent a parallel template in prompt text.
-3. Propose small, independently testable issues with explicit acceptance criteria and dependency ordering.
-4. Flag bad granularity before creating issues:
-   - Too broad: more than 5 acceptance criteria, multiple subsystems, or a plan that obviously needs further decomposition. See `"$RUNOQ_ROOT/test/fixtures/plans/broad-example.md"`.
-   - Too narrow: trivial rename or formatting-only work with no behavioral impact. See `"$RUNOQ_ROOT/test/fixtures/plans/narrow-example.md"`.
-   - Missing testability: no verifiable acceptance criteria or no observable outcome. See `"$RUNOQ_ROOT/test/fixtures/plans/untestable-example.md"`.
-5. Present the proposed issue queue, dependency graph, and any granularity warnings to the user for confirmation before creating anything. This must include explicit confirmation before creating GitHub issues.
-6. Only after confirmation, create issues through `"$RUNOQ_ROOT/scripts/gh-issue-queue.sh" create`. Do not hand-write `gh issue create` calls.
-7. After creation, summarize the created issue numbers and dependency graph so the queue order is visible.
+3. **Detect epics.** Before proposing individual issues, identify epic-sized chunks in the plan:
+   - Plan sections that span multiple subsystems.
+   - Sections with 3 or more subtasks.
+   - Sections that represent a cohesive feature or milestone.
+   Flag these as epics rather than individual issues.
+4. Propose a hierarchical issue structure:
+   - **Epics**: scope summary and integration-level acceptance criteria (criteria that only pass when the children work together).
+   - **Tasks**: small, independently testable issues nested under their parent epic. Each task carries:
+     - `type: task`
+     - `parent_epic: <epic issue number>` (filled in after epic creation)
+     - `estimated_complexity: low | medium | high`
+   - The complexity estimate determines whether bar-setter (acceptance test agent) runs:
+     - `low` — bar-setter is skipped; the task is trivial enough that implementation-time checks suffice.
+     - `medium` / `high` — bar-setter writes acceptance tests before implementation begins.
+   - Standalone issues that do not belong to any epic are still allowed; treat them as tasks with no parent.
+5. Flag bad granularity before creating issues:
+   - Too broad: more than 5 acceptance criteria, multiple subsystems, or a plan that obviously needs further decomposition. **Suggest splitting into an epic with child tasks.**
+     See `"$RUNOQ_ROOT/test/fixtures/plans/broad-example.md"`.
+   - Too narrow: trivial rename or formatting-only work with no behavioral impact. **Suggest as a `low`-complexity task (bar-setter will be skipped).**
+     See `"$RUNOQ_ROOT/test/fixtures/plans/narrow-example.md"`.
+   - Right-sized but part of a larger feature: **suggest as a `medium`-complexity task under an epic.**
+   - Missing testability: no verifiable acceptance criteria or no observable outcome.
+     See `"$RUNOQ_ROOT/test/fixtures/plans/untestable-example.md"`.
+6. Present the proposed issue queue to the user for confirmation before creating anything. The confirmation step must clearly show:
+   - The epic/task tree (epics first, child tasks indented beneath).
+   - Complexity assignments for every task.
+   - Which tasks will trigger bar-setter and which will not.
+   - Dependency graph and any granularity warnings.
+   This must include explicit confirmation before creating GitHub issues.
+7. Only after confirmation, create issues through `"$RUNOQ_ROOT/scripts/gh-issue-queue.sh" create`:
+   - **Create epics first** using `--type epic`.
+   - **Then create child tasks** using `--type task --parent-epic <N>` where `<N>` is the epic issue number.
+   - **After all children are created**, update each epic with `--children N,M,O` to record the full child list.
+   Do not hand-write `gh issue create` calls.
+8. After creation, summarize the created issue numbers, the epic→task hierarchy, and the dependency graph so the queue order is visible.
 
 ## Output contract
 
 - Proposal phase:
-  - List each proposed issue with title, acceptance criteria, dependencies, and a short rationale.
+  - Show the epic/task tree: epics listed with scope and integration-level acceptance criteria, child tasks indented beneath with title, acceptance criteria, dependencies, complexity estimate, and a short rationale.
+  - Show complexity assignments and indicate which tasks will trigger bar-setter (medium/high) and which will not (low).
   - Call out whether the source plan is too broad, too narrow, or untestable before proceeding.
 - Creation phase:
-  - Use `"$RUNOQ_ROOT/scripts/gh-issue-queue.sh" create` for each approved issue.
+  - Use `"$RUNOQ_ROOT/scripts/gh-issue-queue.sh" create` for each approved issue with the appropriate flags:
+    - `--type epic|task`
+    - `--parent-epic N` (for child tasks)
+    - `--children N,M,O` (for updating epics after children are created)
   - Reuse `"$RUNOQ_ROOT/templates/issue-template.md"` language and section structure.
-  - Finish with the dependency graph and the created issue links or numbers.
+  - Finish with the dependency graph including epic→task relationships and the created issue links or numbers.
