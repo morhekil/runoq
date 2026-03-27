@@ -1,30 +1,45 @@
 [
   {
-    "key": "format-progress",
-    "title": "Add formatted progress output",
+    "key": "progress-library",
+    "type": "epic",
+    "title": "Progress tracking library with output formatters and CLI",
     "depends_on_keys": [],
     "priority": 1,
-    "estimated_complexity": "low",
+    "estimated_complexity": "high",
+    "body": "## Context\n\nBuild a progress tracking library that exposes formatted output in multiple styles and a CLI wrapper.\n\n## Acceptance Criteria\n\n- [ ] Library exports `formatProgress(complete, total)` with default style.\n- [ ] Overflowing values are clamped to 100%.\n- [ ] CLI wrapper accepts two integer arguments and prints formatted output.\n- [ ] All modules are CommonJS, no external dependencies.\n- [ ] `npm test` and `npm run build` pass."
+  },
+  {
+    "key": "core-formatter",
+    "type": "task",
+    "parent_epic_key": "progress-library",
+    "title": "Add formatted progress output with multiple styles",
+    "depends_on_keys": [],
+    "priority": 1,
+    "estimated_complexity": "medium",
     "body": "## Context\n\nThe target repo only exposes a numeric `percent()` helper right now.\n\n## Acceptance Criteria\n\n- [ ] `src/progress.js` exports `formatProgress(complete, total)`.\n- [ ] `formatProgress(2, 5)` returns `\"2/5 complete (40%)\"`.\n- [ ] `test/progress.test.js` covers the new formatter.\n- [ ] Keep the implementation in CommonJS and use only built-in Node.js modules."
   },
   {
     "key": "clamp-overflow",
+    "type": "task",
+    "parent_epic_key": "progress-library",
     "title": "Clamp overflowing progress values",
     "depends_on_keys": [
-      "format-progress"
+      "core-formatter"
     ],
     "priority": 2,
     "estimated_complexity": "low",
     "body": "## Context\n\nThe formatter should stay predictable even when `complete` is greater than `total`.\n\n## Acceptance Criteria\n\n- [ ] Progress values are clamped so they never report more than 100%.\n- [ ] `percent(7, 5)` returns `100`.\n- [ ] `formatProgress(7, 5)` returns `\"5/5 complete (100%)\"`.\n- [ ] Add or update tests in `test/progress.test.js`."
   },
   {
-    "key": "add-cli",
+    "key": "cli-wrapper",
+    "type": "task",
+    "parent_epic_key": "progress-library",
     "title": "Add a CLI wrapper for progress output",
     "depends_on_keys": [
       "clamp-overflow"
     ],
     "priority": 3,
-    "estimated_complexity": "low",
+    "estimated_complexity": "medium",
     "body": "## Context\n\nAfter the formatter is stable, expose it through a tiny CLI.\n\n## Acceptance Criteria\n\n- [ ] Add `src/cli.js` that prints the formatted progress for two integer arguments.\n- [ ] Add tests for the CLI success path using built-in Node.js modules only.\n- [ ] Keep `npm test` and `npm run build` green."
   }
 ]

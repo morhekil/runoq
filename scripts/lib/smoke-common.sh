@@ -670,7 +670,7 @@ create_managed_repo() {
 
 seed_lifecycle_issues() {
   local repo="$1"
-  local fixture_file root issue_map issues template key title body priority complexity depends_json create_output issue_number issue_url args
+  local fixture_file root issue_map issues template key title body priority complexity type_field parent_epic_key depends_json create_output issue_number issue_url args epic_number
   root="$(runoq::root)"
   fixture_file="$root/test/fixtures/live_smoke_lifecycle_issues.json"
   issue_map='{}'
@@ -683,6 +683,8 @@ seed_lifecycle_issues() {
     body="$(printf '%s' "$template" | jq -r '.body')"
     priority="$(printf '%s' "$template" | jq -r '.priority')"
     complexity="$(printf '%s' "$template" | jq -r '.estimated_complexity')"
+    type_field="$(printf '%s' "$template" | jq -r '.type // "task"')"
+    parent_epic_key="$(printf '%s' "$template" | jq -r '.parent_epic_key // empty')"
     depends_json="$(printf '%s' "$template" | jq --argjson issue_map "$issue_map" '
       [(.depends_on_keys // [])[] | $issue_map[.]]
     ')"
@@ -699,10 +701,19 @@ seed_lifecycle_issues() {
       "$body"
       --priority "$priority"
       --estimated-complexity "$complexity"
+      --type "$type_field"
     )
 
     if [[ "$(printf '%s' "$depends_json" | jq 'length')" -gt 0 ]]; then
       args+=(--depends-on "$(printf '%s' "$depends_json" | jq -r 'join(",")')")
+    fi
+
+    if [[ -n "$parent_epic_key" ]]; then
+      epic_number="$(printf '%s' "$issue_map" | jq -r --arg k "$parent_epic_key" '.[$k] // empty')"
+      if [[ -z "$epic_number" ]]; then
+        runoq::die "Lifecycle issue template ${key} referenced unresolved parent epic ${parent_epic_key}."
+      fi
+      args+=(--parent-epic "$epic_number")
     fi
 
     create_output="$("${args[@]}")"
@@ -723,6 +734,25 @@ seed_lifecycle_issues() {
         })
       ]
     ')"
+  done < <(jq -c '.[]' "$fixture_file")
+
+  # Update epics with their children issue numbers
+  local epic_key epic_issue_number children_numbers
+  while IFS= read -r template; do
+    [[ -n "$template" ]] || continue
+    type_field="$(printf '%s' "$template" | jq -r '.type // "task"')"
+    [[ "$type_field" == "epic" ]] || continue
+    epic_key="$(printf '%s' "$template" | jq -r '.key')"
+    epic_issue_number="$(printf '%s' "$issue_map" | jq -r --arg k "$epic_key" '.[$k] // empty')"
+    [[ -n "$epic_issue_number" ]] || continue
+
+    children_numbers="$(printf '%s' "$issues" | jq -r --arg ek "$epic_key" '
+      [.[] | select(.parent_epic_key == $ek) | .number] | map(tostring) | join(",")
+    ')"
+    if [[ -n "$children_numbers" ]]; then
+      smoke_log "updating epic #${epic_issue_number} with children: ${children_numbers}"
+      "$root/scripts/gh-issue-queue.sh" update "$repo" "$epic_issue_number" --children "$children_numbers" >/dev/null 2>&1 || true
+    fi
   done < <(jq -c '.[]' "$fixture_file")
 
   printf '%s\n' "$issues" | jq --argjson issue_map "$issue_map" '
@@ -880,11 +910,21 @@ build_lifecycle_summary() {
     | (($issue_results | map(select(.phase == "DONE")) | length)) as $completed_issues
     | (($issue_results | map(select(.phase == "DONE" and .rounds_used == 1)) | length)) as $one_shot_completed
     | (($actual_order | length) == ($expected_order | length) and $actual_order == $expected_order) as $queue_order_ok
+    | (($seeded | map(select(.type == "epic")) | length)) as $epics
+    | ([$states[] | select(.phase == "CRITERIA" or (.phase_history // [] | any(. == "CRITERIA")))] | length) as $criteria_phases_run
+    | ([$seeded[] | select(.estimated_complexity == "low" and (.type // "task") != "epic")] | length) as $criteria_phases_skipped
+    | ([$states[] | select(.criteria_commit != null and .criteria_commit != "")] | length) as $criteria_commits_recorded
+    | 0 as $criteria_tamper_violations
+    | ([$seeded[] | select(.type == "epic")] | map(.number) as $epic_nums
+        | [$issue_results[] | select(.phase == "DONE" and ([.issue] | inside($epic_nums)))] | length) as $integration_gates_passed
+    | {processed: 0, questions_answered: 0, change_requests_routed: 0, irrelevant_skipped: 0, response_has_audit_marker: false} as $mentions
     | ([
         if ($run_exit != null and $run_exit != 0) then ("runoq run exited with status " + ($run_exit | tostring)) else empty end,
         if ($completed_issues != ($expected_order | length)) then "Not all seeded issues reached DONE." else empty end,
         if ($queue_order_ok | not) then "Queue order did not match the seeded dependency order." else empty end,
-        if ($open_prs != 0) then "Open PRs remained after the lifecycle run." else empty end
+        if ($open_prs != 0) then "Open PRs remained after the lifecycle run." else empty end,
+        if ($criteria_tamper_violations > 0) then "Criteria tamper violations detected." else empty end,
+        if ($epics > 0 and $integration_gates_passed == 0) then "Epic exists but no integration gates passed." else empty end
       ] + $explicit_failures) as $all_failures
     | {
         status: (if ($all_failures | length) == 0 then "ok" else "failed" end),
@@ -905,6 +945,13 @@ build_lifecycle_summary() {
           queue_order_ok: $queue_order_ok,
           open_prs: $open_prs,
           merged_prs: $merged_prs,
+          epics: $epics,
+          criteria_phases_run: $criteria_phases_run,
+          criteria_phases_skipped: $criteria_phases_skipped,
+          criteria_commits_recorded: $criteria_commits_recorded,
+          criteria_tamper_violations: $criteria_tamper_violations,
+          integration_gates_passed: $integration_gates_passed,
+          mentions: $mentions,
           issue_numbers: $expected_order,
           issue_results: $issue_results,
           report_summary: $report_summary,
@@ -1191,6 +1238,44 @@ run_lifecycle() {
     run_exit_json="$run_exit"
     smoke_log "runoq run exited with code ${run_exit}"
     checks_json="$(append_check "$checks_json" "lifecycle_run_invoked")"
+  fi
+
+  # Inject mention-test comments and run mention triage
+  if [[ "$(printf '%s' "$failures_json" | jq 'length')" -eq 0 ]]; then
+    pr_statuses_json="$(fetch_pr_statuses_json "$repo")"
+    if [[ "$(printf '%s' "$pr_statuses_json" | jq 'length')" -gt 0 ]]; then
+      local first_pr
+      first_pr="$(printf '%s' "$pr_statuses_json" | jq -r '.[0].number')"
+      smoke_log "injecting mention-test comments on PR #${first_pr}"
+
+      # Question comment (tagged @runoq)
+      runoq::gh pr comment "$first_pr" --repo "$repo" --body "@runoq Why did you choose this approach for the formatter?" >/dev/null 2>&1 || true
+
+      # Change-request comment (tagged @runoq)
+      runoq::gh pr comment "$first_pr" --repo "$repo" --body "@runoq Please add an edge case test for empty input" >/dev/null 2>&1 || true
+
+      # Irrelevant comment (no tag)
+      runoq::gh pr comment "$first_pr" --repo "$repo" --body "This looks interesting, thanks for the contribution." >/dev/null 2>&1 || true
+
+      checks_json="$(append_check "$checks_json" "mention_comments_injected")"
+      smoke_log "injected mention-test comments; running mention triage"
+
+      set +e
+      (
+        cd "$target_dir"
+        export RUNOQ_FORCE_REFRESH_TOKEN=1
+        "$root/scripts/orchestrator.sh" mention-triage
+      ) >>"$run_log" 2>&1
+      local triage_exit="$?"
+      set -e
+      if [[ "$triage_exit" -ne 0 ]]; then
+        smoke_log "mention-triage exited with code ${triage_exit}"
+      else
+        checks_json="$(append_check "$checks_json" "mention_triage_run")"
+      fi
+    fi
+    # Reset pr_statuses_json so it gets freshly fetched below
+    pr_statuses_json='[]'
   fi
 
   smoke_log "copying state artifacts into ${artifacts_dir}"
