@@ -892,6 +892,7 @@ build_lifecycle_summary() {
           key: $seed.key,
           issue: $seed.number,
           title: $seed.title,
+          type: ($seed.type // "task"),
           depends_on: ($seed.depends_on_numbers // []),
           phase: ($state.phase // null),
           started_at: ($state.started_at // null),
@@ -1264,7 +1265,7 @@ run_lifecycle() {
       (
         cd "$target_dir"
         export RUNOQ_FORCE_REFRESH_TOKEN=1
-        "$root/scripts/orchestrator.sh" mention-triage
+        "$root/scripts/orchestrator.sh" mention-triage "$repo" "$first_pr"
       ) >>"$run_log" 2>&1
       local triage_exit="$?"
       set -e
