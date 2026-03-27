@@ -736,23 +736,20 @@ seed_lifecycle_issues() {
     ')"
   done < <(jq -c '.[]' "$fixture_file")
 
-  # Update epics with their children issue numbers
-  local epic_key epic_issue_number children_numbers
+  # Link child issues as sub-issues of their parent epics via GitHub API
+  local child_key child_number child_node_id parent_number
   while IFS= read -r template; do
     [[ -n "$template" ]] || continue
-    type_field="$(printf '%s' "$template" | jq -r '.type // "task"')"
-    [[ "$type_field" == "epic" ]] || continue
-    epic_key="$(printf '%s' "$template" | jq -r '.key')"
-    epic_issue_number="$(printf '%s' "$issue_map" | jq -r --arg k "$epic_key" '.[$k] // empty')"
-    [[ -n "$epic_issue_number" ]] || continue
+    parent_epic_key="$(printf '%s' "$template" | jq -r '.parent_epic_key // empty')"
+    [[ -n "$parent_epic_key" ]] || continue
+    child_key="$(printf '%s' "$template" | jq -r '.key')"
+    child_number="$(printf '%s' "$issue_map" | jq -r --arg k "$child_key" '.[$k] // empty')"
+    parent_number="$(printf '%s' "$issue_map" | jq -r --arg k "$parent_epic_key" '.[$k] // empty')"
+    [[ -n "$child_number" && -n "$parent_number" ]] || continue
 
-    children_numbers="$(printf '%s' "$issues" | jq -r --arg ek "$epic_key" '
-      [.[] | select(.parent_epic_key == $ek) | .number] | map(tostring) | join(",")
-    ')"
-    if [[ -n "$children_numbers" ]]; then
-      smoke_log "updating epic #${epic_issue_number} with children: ${children_numbers}"
-      "$root/scripts/gh-issue-queue.sh" update "$repo" "$epic_issue_number" --children "$children_numbers" >/dev/null 2>&1 || true
-    fi
+    child_node_id="$(runoq::gh api "repos/${repo}/issues/${child_number}" --jq '.node_id')"
+    smoke_log "linking child #${child_number} as sub-issue of epic #${parent_number}"
+    runoq::gh api "repos/${repo}/issues/${parent_number}/sub_issues" --method POST -f "sub_issue_id=${child_node_id}" >/dev/null 2>&1 || true
   done < <(jq -c '.[]' "$fixture_file")
 
   printf '%s\n' "$issues" | jq --argjson issue_map "$issue_map" '
