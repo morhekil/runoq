@@ -9,6 +9,7 @@ usage() {
   cat <<'EOF'
 Usage:
   verify.sh round <worktree> <branch> <base-sha> <payload-file>
+  verify.sh integrate <worktree> <criteria-commit>
 EOF
 }
 
@@ -112,6 +113,29 @@ verify_round() {
     mv "${failures_file}.tmp" "$failures_file"
   fi
 
+  # Criteria tamper check (only if criteria_commit is present in payload)
+  local criteria_commit
+  criteria_commit="$(jq -r '.criteria_commit // empty' "$payload_file")"
+  if [[ -n "$criteria_commit" ]]; then
+    # Get the list of files from the criteria commit
+    local criteria_files_list
+    criteria_files_list="$(git -C "$worktree" diff-tree --no-commit-id --name-only -r "$criteria_commit" 2>/dev/null || true)"
+    if [[ -n "$criteria_files_list" ]]; then
+      local tampered_files=""
+      while IFS= read -r cfile; do
+        [[ -z "$cfile" ]] && continue
+        # Compare the file at criteria_commit vs HEAD
+        if ! git -C "$worktree" diff --quiet "$criteria_commit" HEAD -- "$cfile" 2>/dev/null; then
+          tampered_files="${tampered_files:+$tampered_files, }$cfile"
+        fi
+      done <<< "$criteria_files_list"
+      if [[ -n "$tampered_files" ]]; then
+        jq --arg failure "criteria tampered: $tampered_files" '. + [$failure]' "$failures_file" >"${failures_file}.tmp"
+        mv "${failures_file}.tmp" "$failures_file"
+      fi
+    fi
+  fi
+
   jq -n \
     --slurpfile truth "$truth_file" \
     --slurpfile failures "$failures_file" '
@@ -126,10 +150,59 @@ verify_round() {
   rm -f "$truth_file" "$failures_file"
 }
 
+verify_integrate() {
+  local worktree="$1"
+  local criteria_commit="$2"
+  local failures_file test_command
+  failures_file="$(mktemp "${TMPDIR:-/tmp}/runoq-verify-integrate.XXXXXX")"
+  printf '[]\n' >"$failures_file"
+
+  # Check criteria files are unchanged
+  local criteria_files_list
+  criteria_files_list="$(git -C "$worktree" diff-tree --no-commit-id --name-only -r "$criteria_commit" 2>/dev/null || true)"
+  if [[ -n "$criteria_files_list" ]]; then
+    while IFS= read -r cfile; do
+      [[ -z "$cfile" ]] && continue
+      if [[ ! -f "$worktree/$cfile" ]]; then
+        jq --arg failure "criteria file missing: $cfile" '. + [$failure]' "$failures_file" >"${failures_file}.tmp"
+        mv "${failures_file}.tmp" "$failures_file"
+      elif ! git -C "$worktree" diff --quiet "$criteria_commit" HEAD -- "$cfile" 2>/dev/null; then
+        jq --arg failure "criteria tampered: $cfile" '. + [$failure]' "$failures_file" >"${failures_file}.tmp"
+        mv "${failures_file}.tmp" "$failures_file"
+      fi
+    done <<< "$criteria_files_list"
+  else
+    jq '. + ["no criteria files found in criteria commit"]' "$failures_file" >"${failures_file}.tmp"
+    mv "${failures_file}.tmp" "$failures_file"
+  fi
+
+  # Run test suite
+  test_command="$(runoq::config_get '.verification.testCommand')"
+  [[ -n "$test_command" && "$test_command" != "null" ]] || runoq::die "verification.testCommand is not configured"
+  if ! run_check_command "$worktree" "$test_command" >/dev/null 2>&1; then
+    jq '. + ["test command failed"]' "$failures_file" >"${failures_file}.tmp"
+    mv "${failures_file}.tmp" "$failures_file"
+  fi
+
+  jq -n \
+    --slurpfile failures "$failures_file" '
+    {
+      ok: (($failures[0] | length) == 0),
+      failures: $failures[0]
+    }
+  '
+
+  rm -f "$failures_file"
+}
+
 case "${1:-}" in
   round)
     [[ $# -eq 5 ]] || { usage >&2; exit 1; }
     verify_round "$2" "$3" "$4" "$5"
+    ;;
+  integrate)
+    [[ $# -eq 3 ]] || { usage >&2; exit 1; }
+    verify_integrate "$2" "$3"
     ;;
   *)
     usage >&2
