@@ -275,7 +275,7 @@ phase_init() {
     cumulative_tokens: $cumulative_tokens,
     consecutive_failures: $consecutive_failures
   }')"
-  save_state "$issue_number" "$state"
+  save_state "$issue_number" "$state" >/dev/null
 
   post_audit_comment "$repo" "$pr_number" "init" "Orchestrator initialized. Branch: \`${branch}\`"
 
