@@ -304,7 +304,7 @@ Then print the required final stdout payload block:
 <!-- runoq:payload:codex-return -->
 \`\`\`json
 { ... }
-\`\`\`" 2>&1 | tee "$dev_log"
+\`\`\`" >"$dev_log" 2>&1
     else
       codex_exec exec --dangerously-bypass-approvals-and-sandbox "Address the following code review or verification feedback.
 
@@ -321,7 +321,7 @@ Then print the required final stdout payload block:
 <!-- runoq:payload:codex-return -->
 \`\`\`json
 { ... }
-\`\`\`" 2>&1 | tee "$dev_log"
+\`\`\`" >"$dev_log" 2>&1
     fi
 
     # Capture new commits

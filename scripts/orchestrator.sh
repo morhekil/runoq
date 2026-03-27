@@ -430,17 +430,30 @@ phase_develop() {
   printf '%s' "$payload" > "$payload_file"
   output_file="$(mktemp "${TMPDIR:-/tmp}/runoq-runner-out.XXXXXX")"
 
+  local runner_stderr_file
+  runner_stderr_file="$(mktemp "${TMPDIR:-/tmp}/runoq-runner-err.XXXXXX")"
+
   if [[ -x "$SCRIPTS_DIR/issue-runner.sh" ]]; then
-    "$SCRIPTS_DIR/issue-runner.sh" run "$payload_file" >"$output_file" 2>&1 || true
+    "$SCRIPTS_DIR/issue-runner.sh" run "$payload_file" >"$output_file" 2>"$runner_stderr_file" || true
   else
     claude_exec --print --permission-mode bypassPermissions --agent issue-runner --add-dir "$RUNOQ_ROOT" -- "$payload" >"$output_file" 2>&1 || true
   fi
   rm -f "$payload_file"
 
+  # Log runner stderr for diagnostics
+  if [[ -s "$runner_stderr_file" ]]; then
+    log_info "issue-runner stderr: $(head -5 "$runner_stderr_file")"
+  fi
+  rm -f "$runner_stderr_file"
+
   # Parse issue-runner return payload
-  runner_result="$("$SCRIPTS_DIR/state.sh" extract-payload "$output_file" 2>/dev/null || printf '')"
+  # The issue-runner script outputs clean JSON to stdout; try direct parse first
+  runner_result="$(jq -e '.' "$output_file" 2>/dev/null || printf '')"
   if [[ -z "$runner_result" ]]; then
-    # Try extracting the last JSON block
+    # Fallback: extract from marked payload blocks (agent-based runner)
+    runner_result="$("$SCRIPTS_DIR/state.sh" extract-payload "$output_file" 2>/dev/null || printf '')"
+  fi
+  if [[ -z "$runner_result" ]]; then
     runner_result="$(extract_marked_block "$output_file" 'runoq:payload:issue-runner' 2>/dev/null || printf '')"
   fi
 
