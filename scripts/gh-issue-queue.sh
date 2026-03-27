@@ -10,15 +10,15 @@ Usage:
   gh-issue-queue.sh list <repo> <ready-label>
   gh-issue-queue.sh next <repo> <ready-label>
   gh-issue-queue.sh set-status <repo> <issue-number> <status>
-  gh-issue-queue.sh create <repo> <title> <body> [--depends-on N,M] [--priority N] [--estimated-complexity value] [--type task|epic] [--parent-epic N] [--children N,M]
+  gh-issue-queue.sh create <repo> <title> <body> [--depends-on N,M] [--priority N] [--estimated-complexity value] [--type task|epic] [--parent-epic N]
   gh-issue-queue.sh epic-status <repo> <issue-number>
 EOF
 }
 
 parse_metadata_body() {
   local body_file="$1"
-  local block depends_line priority_line complexity_line type_line parent_epic_line children_line
-  local depends_json priority_json complexity_json type_json parent_epic_json children_json valid
+  local block depends_line priority_line complexity_line type_line parent_epic_line
+  local depends_json priority_json complexity_json type_json parent_epic_json valid
   block="$(awk '
     /<!-- runoq:meta/ { in_block = 1; next }
     in_block && /-->/ { exit }
@@ -26,7 +26,7 @@ parse_metadata_body() {
   ' "$body_file")"
 
   if [[ -z "$block" ]]; then
-    jq -n '{depends_on: [], priority: null, estimated_complexity: null, type: "task", parent_epic: null, children: [], metadata_present: false, metadata_valid: false}'
+    jq -n '{depends_on: [], priority: null, estimated_complexity: null, type: "task", parent_epic: null, metadata_present: false, metadata_valid: false}'
     return
   fi
 
@@ -35,7 +35,6 @@ parse_metadata_body() {
   complexity_line="$(printf '%s\n' "$block" | sed -n 's/^estimated_complexity:[[:space:]]*//p' | head -n1)"
   type_line="$(printf '%s\n' "$block" | sed -n 's/^type:[[:space:]]*//p' | head -n1)"
   parent_epic_line="$(printf '%s\n' "$block" | sed -n 's/^parent_epic:[[:space:]]*//p' | head -n1)"
-  children_line="$(printf '%s\n' "$block" | sed -n 's/^children:[[:space:]]*//p' | head -n1)"
 
   valid=true
   if [[ -n "$depends_line" ]] && printf '%s' "$depends_line" | jq -e '.' >/dev/null 2>&1; then
@@ -71,19 +70,12 @@ parse_metadata_body() {
     parent_epic_json='null'
   fi
 
-  if [[ -n "$children_line" ]] && printf '%s' "$children_line" | jq -e '.' >/dev/null 2>&1; then
-    children_json="$(printf '%s' "$children_line")"
-  else
-    children_json='[]'
-  fi
-
   jq -n \
     --argjson depends_on "$depends_json" \
     --argjson priority "$priority_json" \
     --argjson estimated_complexity "$complexity_json" \
     --arg type_val "$(printf '%s' "$type_json" | jq -r '.')" \
     --argjson parent_epic "$parent_epic_json" \
-    --argjson children "$children_json" \
     --argjson metadata_valid "$([[ "$valid" == true ]] && echo true || echo false)" '
     {
       depends_on: $depends_on,
@@ -91,7 +83,6 @@ parse_metadata_body() {
       estimated_complexity: $estimated_complexity,
       type: $type_val,
       parent_epic: $parent_epic,
-      children: $children,
       metadata_present: true,
       metadata_valid: $metadata_valid
     }
@@ -124,7 +115,6 @@ list_issues() {
         estimated_complexity: $meta.estimated_complexity,
         type: $meta.type,
         parent_epic: $meta.parent_epic,
-        children: $meta.children,
         metadata_present: $meta.metadata_present,
         metadata_valid: $meta.metadata_valid
       }
@@ -216,29 +206,20 @@ next_issue() {
 epic_children_done() {
   local repo="$1"
   local issue_number="$2"
-  local body_file body metadata children done_label child_data pending all_done
+  local done_label sub_issues children pending all_done child_number child_labels
 
-  body="$(runoq::gh issue view "$issue_number" --repo "$repo" --json body | jq -r '.body // ""')"
-  body_file="$(mktemp "${TMPDIR:-/tmp}/runoq-epic-body.XXXXXX")"
-  printf '%s' "$body" >"$body_file"
-  metadata="$(parse_metadata_body "$body_file")"
-  rm -f "$body_file"
-
-  children="$(printf '%s' "$metadata" | jq -c '.children')"
   done_label="$(runoq::config_get '.labels.done')"
+  sub_issues="$(runoq::gh api "repos/${repo}/issues/${issue_number}/sub_issues" --paginate)"
 
+  children="$(printf '%s' "$sub_issues" | jq -c '[.[] | .number]')"
   pending='[]'
   all_done=true
 
-  while IFS= read -r child; do
-    [[ -z "$child" ]] && continue
-    if ! child_data="$(runoq::gh issue view "$child" --repo "$repo" --json number,labels 2>/dev/null)"; then
-      pending="$(jq -n --argjson pending "$pending" --argjson child "$child" '$pending + [$child]')"
-      all_done=false
-      continue
-    fi
-    if ! printf '%s' "$child_data" | jq -e --arg done_label "$done_label" '.labels | map(.name) | index($done_label)' >/dev/null 2>&1; then
-      pending="$(jq -n --argjson pending "$pending" --argjson child "$child" '$pending + [$child]')"
+  while IFS= read -r child_number; do
+    [[ -z "$child_number" ]] && continue
+    child_labels="$(printf '%s' "$sub_issues" | jq -c --argjson num "$child_number" '[.[] | select(.number == $num) | .labels[]?.name] // []')"
+    if ! printf '%s' "$child_labels" | jq -e --arg done_label "$done_label" 'index($done_label)' >/dev/null 2>&1; then
+      pending="$(jq -n --argjson pending "$pending" --argjson child "$child_number" '$pending + [$child]')"
       all_done=false
     fi
   done < <(printf '%s' "$children" | jq -r '.[]')
@@ -297,7 +278,6 @@ case "${1:-}" in
     estimated_complexity='medium'
     issue_type='task'
     parent_epic=''
-    children='[]'
     while [[ $# -gt 0 ]]; do
       case "$1" in
         --depends-on)
@@ -320,10 +300,6 @@ case "${1:-}" in
           parent_epic="${2:-}"
           shift 2
           ;;
-        --children)
-          children="$(jq -cn --arg raw "${2:-}" '$raw | split(",") | map(select(length > 0) | tonumber)')"
-          shift 2
-          ;;
         *)
           usage >&2
           exit 1
@@ -341,9 +317,6 @@ case "${1:-}" in
       if [[ -n "$parent_epic" ]]; then
         printf 'parent_epic: %s\n' "$parent_epic"
       fi
-      if [[ "$(printf '%s' "$children" | jq 'length')" -gt 0 ]]; then
-        printf 'children: %s\n' "$(printf '%s' "$children" | jq -c '.')"
-      fi
       echo "-->"
       echo
       printf '%s\n' "$body"
@@ -352,6 +325,14 @@ case "${1:-}" in
     ready_label="$(runoq::config_get '.labels.ready')"
     result="$(runoq::gh issue create --repo "$repo" --title "$title" --body-file "$body_file" --label "$ready_label")"
     rm -f "$body_file"
+
+    # If parent_epic is set, link the new issue as a sub-issue of the parent epic
+    if [[ -n "$parent_epic" ]]; then
+      new_issue_number="$(printf '%s' "$result" | grep -oE '[0-9]+$')"
+      child_node_id="$(runoq::gh api "repos/${repo}/issues/${new_issue_number}" --jq '.node_id')"
+      runoq::gh api "repos/${repo}/issues/${parent_epic}/sub_issues" --method POST -f "sub_issue_id=${child_node_id}"
+    fi
+
     jq -n --arg title "$title" --arg url "$result" '{title:$title, url:$url}'
     ;;
   epic-status)

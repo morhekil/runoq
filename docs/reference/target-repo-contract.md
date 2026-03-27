@@ -63,7 +63,6 @@ Queue issues are expected to start with the metadata block used by [`templates/i
 <!-- runoq:meta
 type: task
 parent_epic: null
-children: []
 depends_on: []
 priority: 3
 estimated_complexity: medium
@@ -74,12 +73,11 @@ Field requirements:
 
 - `type`: `epic` or `task` (defaults to `task` when absent)
 - `parent_epic`: issue number of the parent epic, or `null`
-- `children`: JSON array of child issue numbers (used by epics)
 - `depends_on`: JSON array of issue numbers
 - `priority`: integer, lower means earlier queue selection
 - `estimated_complexity`: string such as `low`, `medium`, or `high`
 
-Epic issues use `type: epic` and list their child task issue numbers in `children`. Task issues within an epic use `type: task` and reference their parent via `parent_epic`. The queue runner skips epics during normal dispatch; epics are completed via the INTEGRATE phase after all children reach `runoq:done`.
+Epic issues use `type: epic`. Child tasks are tracked via GitHub's native sub-issues API rather than metadata. Task issues within an epic use `type: task` and reference their parent via `parent_epic`. The queue runner skips epics during normal dispatch; epics are completed via the INTEGRATE phase after all children reach `runoq:done`.
 
 ### Required acceptance criteria section
 

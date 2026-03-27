@@ -126,22 +126,21 @@ For each unprocessed mention:
 <!-- runoq:meta
 type: epic
 parent_epic: null
-children: [43, 44, 45]
 depends_on: []
 priority: 1
 estimated_complexity: high
 -->
 ```
 
-New fields: `type` (epic|task, default task), `parent_epic` (issue number or null), `children` (array of issue numbers).
+New fields: `type` (epic|task, default task), `parent_epic` (issue number or null). Child issues of an epic are tracked via GitHub's native sub-issues API rather than metadata.
 
 ## Changes to Existing Components
 
 ### gh-issue-queue.sh
-- Parse `type`, `parent_epic`, `children` from metadata
-- Epic completion detection: check if all children have `runoq:done` label
+- Parse `type`, `parent_epic` from metadata
+- Epic completion detection via GitHub sub-issues API: check if all sub-issues have `runoq:done` label
 - `next` skips epics (only tasks get dispatched directly)
-- `create` accepts `--type`, `--parent-epic`, `--children` flags
+- `create` accepts `--type`, `--parent-epic` flags; links child as sub-issue via API when `--parent-epic` is set
 
 ### state.sh
 - Support `criteria_commit` field in state files
@@ -161,7 +160,7 @@ New fields: `type` (epic|task, default task), `parent_epic` (issue number or nul
 - Show epic/task hierarchy in confirmation UX
 
 ### issue template
-- Add type, parent_epic, children fields
+- Add type, parent_epic fields
 
 ### config/runoq.json
 - No structural changes needed (complexity thresholds use existing estimated_complexity field)
@@ -209,7 +208,7 @@ Epic: "Progress tracking library with output formatters and CLI"
 | clamp-overflow | Clamp overflowing progress values | low | skip | core-formatter |
 | cli-wrapper | Add CLI wrapper with argument validation | medium | yes | clamp-overflow |
 
-Plus the epic issue itself with `type: epic` and `children` list.
+Plus the epic issue itself with `type: epic` and child tasks linked via GitHub sub-issues.
 
 ### Comment/Response Smoke Coverage
 
