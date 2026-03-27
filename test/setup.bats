@@ -21,7 +21,7 @@ write_empty_key() {
 [
   {
     "contains": ["api", "/repos/owner/repo/installation"],
-    "stdout": "{\"id\":789,\"app_id\":123,\"app_slug\":\"runoqapp\"}"
+    "stdout": "{\"id\":789,\"app_id\":123,\"app_slug\":\"runoq\"}"
   },
   {
     "contains": ["label", "list", "--repo owner/repo"],
@@ -94,7 +94,7 @@ EOF
   run "$RUNOQ_ROOT/scripts/setup.sh"
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"Repository installation app slug wrong-app did not match configured identity.appSlug runoqapp."* ]]
+  [[ "$output" == *"Repository installation app slug wrong-app did not match configured identity.appSlug runoq."* ]]
 }
 
 @test "setup init resolves installation with an app JWT even when GH_TOKEN is set" {
@@ -121,7 +121,7 @@ if [[ "${1:-}" == "api" && "$*" == *"/repos/owner/repo/installation"* ]]; then
     echo "expected setup.sh to call installation lookup with Authorization: Bearer <jwt>" >&2
     exit 1
   fi
-  printf '%s' '{"id":789,"app_id":123,"app_slug":"runoqapp"}'
+  printf '%s' '{"id":789,"app_id":123,"app_slug":"runoq"}'
   exit 0
 fi
 

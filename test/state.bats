@@ -89,6 +89,75 @@ EOF
   [[ "$output" == *"Invalid transition from terminal phase DONE to DEVELOP"* ]]
 }
 
+@test "state save allows CRITERIA and INTEGRATE phase transitions" {
+  export TARGET_ROOT="$TEST_TMPDIR/project"
+  mkdir -p "$TARGET_ROOT"
+  export RUNOQ_STATE_DIR="$TARGET_ROOT/.runoq/state"
+
+  # INIT → CRITERIA → DEVELOP path
+  run bash -lc '
+    cat <<EOF | "'"$RUNOQ_ROOT"'/scripts/state.sh" save 42
+{"phase":"INIT","round":0}
+EOF
+    cat <<EOF | "'"$RUNOQ_ROOT"'/scripts/state.sh" save 42 >/dev/null
+{"phase":"CRITERIA","round":0}
+EOF
+    cat <<EOF | "'"$RUNOQ_ROOT"'/scripts/state.sh" save 42
+{"phase":"DEVELOP","round":1}
+EOF
+  '
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"phase": "DEVELOP"'* ]]
+
+  # Test INTEGRATE path: DECIDE → INTEGRATE → DONE
+  run bash -lc '
+    cat <<EOF | "'"$RUNOQ_ROOT"'/scripts/state.sh" save 99
+{"phase":"INIT","round":0}
+EOF
+    cat <<EOF | "'"$RUNOQ_ROOT"'/scripts/state.sh" save 99 >/dev/null
+{"phase":"DEVELOP","round":1}
+EOF
+    cat <<EOF | "'"$RUNOQ_ROOT"'/scripts/state.sh" save 99 >/dev/null
+{"phase":"REVIEW","round":1}
+EOF
+    cat <<EOF | "'"$RUNOQ_ROOT"'/scripts/state.sh" save 99 >/dev/null
+{"phase":"DECIDE","round":1}
+EOF
+    cat <<EOF | "'"$RUNOQ_ROOT"'/scripts/state.sh" save 99 >/dev/null
+{"phase":"INTEGRATE","round":1}
+EOF
+    cat <<EOF | "'"$RUNOQ_ROOT"'/scripts/state.sh" save 99
+{"phase":"DONE","round":1}
+EOF
+  '
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"phase": "DONE"'* ]]
+}
+
+@test "state save rejects invalid CRITERIA transitions" {
+  export TARGET_ROOT="$TEST_TMPDIR/project"
+  mkdir -p "$TARGET_ROOT"
+  export RUNOQ_STATE_DIR="$TARGET_ROOT/.runoq/state"
+
+  # DEVELOP → CRITERIA should be invalid
+  run bash -lc '
+    cat <<EOF | "'"$RUNOQ_ROOT"'/scripts/state.sh" save 42 >/dev/null
+{"phase":"INIT","round":0}
+EOF
+    cat <<EOF | "'"$RUNOQ_ROOT"'/scripts/state.sh" save 42 >/dev/null
+{"phase":"DEVELOP","round":1}
+EOF
+    cat <<EOF | "'"$RUNOQ_ROOT"'/scripts/state.sh" save 42
+{"phase":"CRITERIA","round":1}
+EOF
+  '
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Invalid phase transition: DEVELOP -> CRITERIA"* ]]
+}
+
 @test "state load fails for corrupted state files" {
   export TARGET_ROOT="$TEST_TMPDIR/project"
   export RUNOQ_STATE_DIR="$TARGET_ROOT/.runoq/state"
