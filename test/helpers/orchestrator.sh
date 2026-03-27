@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [[ -n "${FAKE_ORCHESTRATOR_LOG:-}" ]]; then
+  printf '%s\n' "$*" >>"$FAKE_ORCHESTRATOR_LOG"
+fi
+
+if [[ -n "${FAKE_ORCHESTRATOR_ENV_LOG:-}" ]]; then
+  {
+    printf 'PWD=%s\n' "$(pwd -P)"
+    printf 'RUNOQ_ROOT=%s\n' "${RUNOQ_ROOT:-}"
+    printf 'TARGET_ROOT=%s\n' "${TARGET_ROOT:-}"
+    printf 'REPO=%s\n' "${REPO:-}"
+    printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"
+  } >>"$FAKE_ORCHESTRATOR_ENV_LOG"
+fi
+
+printf 'fake orchestrator invoked\n'

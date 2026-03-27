@@ -12,15 +12,6 @@ Usage:
 EOF
 }
 
-claude_exec() {
-  local claude_bin="${RUNOQ_CLAUDE_BIN:-claude}"
-  command -v "$claude_bin" >/dev/null 2>&1 || runoq::die "Claude CLI not found: $claude_bin"
-  (
-    cd "$TARGET_ROOT"
-    "$claude_bin" "$@"
-  )
-}
-
 parse_args() {
   issue_number=""
   dry_run=false
@@ -44,20 +35,8 @@ parse_args() {
   done
 }
 
-build_run_prompt() {
-  jq -cn \
-    --arg command "runoq run" \
-    --arg issue "${issue_number:-}" \
-    --argjson dry_run "$dry_run" '
-    {
-      command: $command,
-      issue: (if $issue == "" then null else ($issue | tonumber) end),
-      dry_run: $dry_run
-    }
-  '
-}
-
 run_production() {
+  local orchestrator="${RUNOQ_ORCHESTRATOR_BIN:-$(cd "$(dirname "$0")" && pwd)/orchestrator.sh}"
   local repo
   repo="$(runoq::repo)"
   local args=("$repo")
@@ -67,7 +46,7 @@ run_production() {
   if [[ "$dry_run" == "true" ]]; then
     args+=(--dry-run)
   fi
-  "$(cd "$(dirname "$0")" && pwd)/orchestrator.sh" run "${args[@]}"
+  "$orchestrator" run "${args[@]}"
 }
 
 main() {

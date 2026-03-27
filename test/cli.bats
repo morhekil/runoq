@@ -11,22 +11,19 @@ setup_cli_project() {
   project_dir="$TEST_TMPDIR/project"
   setup_cli_project "$project_dir"
   export PATH="$RUNOQ_ROOT/test/helpers:$PATH"
-  export RUNOQ_CLAUDE_BIN="claude"
-  export FAKE_CLAUDE_LOG="$TEST_TMPDIR/claude.log"
-  export FAKE_CLAUDE_ENV_LOG="$TEST_TMPDIR/claude-env.log"
+  export RUNOQ_ORCHESTRATOR_BIN="$RUNOQ_ROOT/test/helpers/orchestrator.sh"
+  export FAKE_ORCHESTRATOR_LOG="$TEST_TMPDIR/orchestrator.log"
+  export FAKE_ORCHESTRATOR_ENV_LOG="$TEST_TMPDIR/orchestrator-env.log"
   export GH_TOKEN="existing-token"
   resolved_project_dir="$(cd "$project_dir" && pwd -P)"
 
   run bash -lc 'cd "'"$project_dir"'" && "'"$RUNOQ_ROOT"'/bin/runoq" run --issue 42 --dry-run'
 
   [ "$status" -eq 0 ]
-  run cat "$FAKE_CLAUDE_LOG"
+  run cat "$FAKE_ORCHESTRATOR_LOG"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--print --permission-mode bypassPermissions --agent github-orchestrator --add-dir $RUNOQ_ROOT -- "* ]]
-  [[ "$output" == *'"command":"runoq run"'* ]]
-  [[ "$output" == *'"issue":42'* ]]
-  [[ "$output" == *'"dry_run":true'* ]]
-  run cat "$FAKE_CLAUDE_ENV_LOG"
+  [[ "$output" == *"run owner/repo --issue 42 --dry-run"* ]]
+  run cat "$FAKE_ORCHESTRATOR_ENV_LOG"
   [ "$status" -eq 0 ]
   [[ "$output" == *"PWD=$resolved_project_dir"* ]]
   [[ "$output" == *"TARGET_ROOT=$resolved_project_dir"* ]]
