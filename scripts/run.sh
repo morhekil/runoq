@@ -58,9 +58,16 @@ build_run_prompt() {
 }
 
 run_production() {
-  local prompt
-  prompt="$(build_run_prompt)"
-  claude_exec --print --permission-mode bypassPermissions --agent github-orchestrator --add-dir "$RUNOQ_ROOT" -- "$prompt"
+  local repo
+  repo="$(runoq::repo)"
+  local args=("$repo")
+  if [[ -n "$issue_number" ]]; then
+    args+=(--issue "$issue_number")
+  fi
+  if [[ "$dry_run" == "true" ]]; then
+    args+=(--dry-run)
+  fi
+  "$(cd "$(dirname "$0")" && pwd)/orchestrator.sh" run "${args[@]}"
 }
 
 main() {
