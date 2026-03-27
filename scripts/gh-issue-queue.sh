@@ -329,8 +329,8 @@ case "${1:-}" in
     # If parent_epic is set, link the new issue as a sub-issue of the parent epic
     if [[ -n "$parent_epic" ]]; then
       new_issue_number="$(printf '%s' "$result" | grep -oE '[0-9]+$')"
-      child_node_id="$(runoq::gh api "repos/${repo}/issues/${new_issue_number}" --jq '.node_id')"
-      runoq::gh api "repos/${repo}/issues/${parent_epic}/sub_issues" --method POST -f "sub_issue_id=${child_node_id}"
+      child_id="$(runoq::gh api "repos/${repo}/issues/${new_issue_number}" --jq '.id')"
+      runoq::gh api "repos/${repo}/issues/${parent_epic}/sub_issues" --method POST -F "sub_issue_id=${child_id}"
     fi
 
     jq -n --arg title "$title" --arg url "$result" '{title:$title, url:$url}'

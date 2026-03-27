@@ -737,7 +737,7 @@ seed_lifecycle_issues() {
   done < <(jq -c '.[]' "$fixture_file")
 
   # Link child issues as sub-issues of their parent epics via GitHub API
-  local child_key child_number child_node_id parent_number
+  local child_key child_number child_id parent_number
   while IFS= read -r template; do
     [[ -n "$template" ]] || continue
     parent_epic_key="$(printf '%s' "$template" | jq -r '.parent_epic_key // empty')"
@@ -747,9 +747,9 @@ seed_lifecycle_issues() {
     parent_number="$(printf '%s' "$issue_map" | jq -r --arg k "$parent_epic_key" '.[$k] // empty')"
     [[ -n "$child_number" && -n "$parent_number" ]] || continue
 
-    child_node_id="$(runoq::gh api "repos/${repo}/issues/${child_number}" --jq '.node_id')"
+    child_id="$(runoq::gh api "repos/${repo}/issues/${child_number}" --jq '.id')"
     smoke_log "linking child #${child_number} as sub-issue of epic #${parent_number}"
-    runoq::gh api "repos/${repo}/issues/${parent_number}/sub_issues" --method POST -f "sub_issue_id=${child_node_id}" >/dev/null 2>&1 || true
+    runoq::gh api "repos/${repo}/issues/${parent_number}/sub_issues" --method POST -F "sub_issue_id=${child_id}" >/dev/null 2>&1 || true
   done < <(jq -c '.[]' "$fixture_file")
 
   printf '%s\n' "$issues" | jq --argjson issue_map "$issue_map" '
