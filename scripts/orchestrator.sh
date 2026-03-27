@@ -417,15 +417,25 @@ phase_develop() {
     + (if $previousChecklist != "" then {previousChecklist: $previousChecklist} else {} end)
     + (if $cumulativeTokens > 0 then {cumulativeTokens: $cumulativeTokens} else {} end)')"
 
-  # Invoke issue-runner
-  local output_file runner_result
+  # Add criteria_commit if present in state
+  local criteria_commit
+  criteria_commit="$(printf '%s' "$state_json" | jq -r '.criteria_commit // empty')"
+  if [[ -n "$criteria_commit" ]]; then
+    payload="$(printf '%s' "$payload" | jq --arg cc "$criteria_commit" '. + {criteria_commit: $cc}')"
+  fi
+
+  # Write payload to temp file for issue-runner
+  local payload_file output_file runner_result
+  payload_file="$(mktemp "${TMPDIR:-/tmp}/runoq-runner-payload.XXXXXX.json")"
+  printf '%s' "$payload" > "$payload_file"
   output_file="$(mktemp "${TMPDIR:-/tmp}/runoq-runner-out.XXXXXX")"
 
   if [[ -x "$SCRIPTS_DIR/issue-runner.sh" ]]; then
-    "$SCRIPTS_DIR/issue-runner.sh" "$payload" >"$output_file" 2>&1 || true
+    "$SCRIPTS_DIR/issue-runner.sh" run "$payload_file" >"$output_file" 2>&1 || true
   else
     claude_exec --print --permission-mode bypassPermissions --agent issue-runner --add-dir "$RUNOQ_ROOT" -- "$payload" >"$output_file" 2>&1 || true
   fi
+  rm -f "$payload_file"
 
   # Parse issue-runner return payload
   runner_result="$("$SCRIPTS_DIR/state.sh" extract-payload "$output_file" 2>/dev/null || printf '')"
@@ -902,31 +912,17 @@ process_issue() {
           save_state "$issue_number" "$fail_state" >/dev/null
           return 1
         fi
-        local dev_status
-        dev_status="$(printf '%s' "$state_json" | jq -r '.status // "fail"')"
-        if [[ "$dev_status" == "fail" || "$dev_status" == "budget_exhausted" ]]; then
-          # Skip review, go straight to FINALIZE
-          state_json="$(printf '%s' "$state_json" | jq '.verdict = "FAIL" | .decision = "finalize-needs-review"')"
-          phase="DECIDE"
-          # Save decide state
-          state_json="$(printf '%s' "$state_json" | jq '.phase = "DECIDE"')"
-          save_state "$issue_number" "$state_json" >/dev/null
-          phase="DECIDE"
-          continue
-        fi
         phase="DEVELOP"
         ;;
 
       DEVELOP)
-        # Move to REVIEW (only if status is review_ready)
+        # Move to REVIEW (skip review if status is not review_ready but still transition properly)
         local dev_status
         dev_status="$(printf '%s' "$state_json" | jq -r '.status // "fail"')"
         if [[ "$dev_status" != "review_ready" ]]; then
-          # Go to DECIDE with FAIL verdict
+          # Transition through REVIEW -> DECIDE with FAIL verdict
           state_json="$(printf '%s' "$state_json" | jq '.phase = "REVIEW" | .verdict = "FAIL"')"
           save_state "$issue_number" "$state_json" >/dev/null
-          phase="REVIEW"
-          # Skip review, go straight to decide
           state_json="$(printf '%s' "$state_json" | jq '.phase = "DECIDE" | .decision = "finalize-needs-review" | .next_phase = "FINALIZE"')"
           save_state "$issue_number" "$state_json" >/dev/null
           phase="DECIDE"
