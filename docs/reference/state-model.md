@@ -45,13 +45,16 @@ Fields injected by `state.sh save`:
 - `started_at`: first write timestamp for the run
 - `updated_at`: last write timestamp
 
-Fields commonly written by `run.sh`:
+Fields commonly written by `run.sh` and `orchestrator.sh`:
 
 - `phase`
 - `round`
 - `branch`
 - `worktree`
 - `pr_number`
+- `criteria_commit` when bar-setter has authored acceptance criteria (medium+ complexity tasks)
+- `type` issue type (`epic` or `task`)
+- `parent_epic` parent epic issue number (for tasks within an epic)
 - `outcome` on terminal states
 - `stall` when `watchdog.sh` times out
 
@@ -100,10 +103,12 @@ Fields commonly written by `run.sh`:
 ### Phases
 
 - `INIT`
+- `CRITERIA`
 - `DEVELOP`
 - `REVIEW`
 - `DECIDE`
 - `FINALIZE`
+- `INTEGRATE`
 - `DONE`
 - `FAILED`
 
@@ -111,9 +116,12 @@ Fields commonly written by `run.sh`:
 
 `state.sh` enforces these transitions:
 
+- `INIT -> CRITERIA`
 - `INIT -> DEVELOP`
 - `INIT -> FINALIZE`
 - `INIT -> FAILED`
+- `CRITERIA -> DEVELOP`
+- `CRITERIA -> FAILED`
 - `DEVELOP -> REVIEW`
 - `DEVELOP -> FAILED`
 - `REVIEW -> DECIDE`
@@ -123,6 +131,8 @@ Fields commonly written by `run.sh`:
 - `DECIDE -> FAILED`
 - `FINALIZE -> DONE`
 - `FINALIZE -> FAILED`
+- `INTEGRATE -> DONE`
+- `INTEGRATE -> FAILED`
 
 `DONE` and `FAILED` are terminal. Any later transition is rejected.
 

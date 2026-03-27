@@ -30,7 +30,7 @@ flowchart LR
 
 - Human operator: decides when to initialize a repo, confirm plan slicing, run the queue, inspect output, and triage maintenance findings.
 - GitHub repository: hosts issues, PRs, labels, comments, collaborator permissions, and the long-lived operational audit trail.
-- Claude CLI: runs the `plan-to-issues` skill plus the `github-orchestrator` and `maintenance-reviewer` agents.
+- Claude CLI: runs the `plan-to-issues` skill plus the `bar-setter`, `mention-responder`, `diff-reviewer`, and `maintenance-reviewer` agents.
 - Target repository: provides the source tree, git remote, package scripts, `.gitignore`, and optional `tsconfig.json`.
 
 ## Subsystem View
@@ -70,7 +70,7 @@ flowchart TB
 | --- | --- | --- |
 | CLI entrypoint | Thin command router that resolves repo context and auth, then dispatches to scripts or Claude | `bin/runoq` |
 | Deterministic shell runtime | Owns queue logic, PR lifecycle, auth, verification, maintenance operations, and recovery | `scripts/*.sh`, `config/runoq.json` |
-| Agent layer | Performs plan slicing and bounded orchestration/review tasks around script contracts | `.claude/agents/*`, `.claude/skills/*` |
+| Agent layer | Performs plan slicing, acceptance criteria authoring (bar-setter), code review (diff-reviewer), mention response, and maintenance review around script contracts | `.claude/agents/*`, `.claude/skills/*` |
 | GitHub control surface | Stores queue issues, PRs, labels, review comments, permissions, and audit comments | remote GitHub repo |
 | Local breadcrumb state | Stores resumability state and processed-mention tracking | `.runoq/state/*.json` |
 | Execution workspace | Holds the target repo main checkout plus sibling worktrees created per issue | target repo checkout and worktree siblings |
@@ -89,6 +89,8 @@ flowchart LR
   worktree[worktree.sh]
   pr[gh-pr-lifecycle.sh]
   run[run.sh]
+  orchestrator[orchestrator.sh]
+  issuerunner[issue-runner.sh]
   verify[verify.sh]
   state[state.sh]
   maint[maintenance.sh]
@@ -103,18 +105,23 @@ flowchart LR
   cli --> run
   cli --> maint
   cli --> agents
+  run --> orchestrator
+  orchestrator --> queue
+  orchestrator --> safety
+  orchestrator --> worktree
+  orchestrator --> pr
+  orchestrator --> issuerunner
+  orchestrator --> state
+  orchestrator --> agents
+  issuerunner --> verify
+  issuerunner --> state
+  issuerunner --> watchdog
   run --> queue
   run --> safety
-  run --> worktree
-  run --> pr
-  run --> verify
-  run --> state
-  run --> watchdog
   maint --> state
   maint --> mentions
   maint --> queue
   maint --> pr
-  agents --> maint
   agents --> queue
   agents --> pr
   queue --> github
@@ -138,11 +145,13 @@ flowchart LR
 | `scripts/worktree.sh` | Branch naming, sibling worktree creation/removal | Queue selection, GitHub state |
 | `scripts/gh-pr-lifecycle.sh` | Draft PR creation, audit comments, summary mutation, finalize actions, mention polling, permission checks | Queue ordering, local state transitions |
 | `scripts/state.sh` | Atomic state writes, phase transition validation, payload extraction/normalization, processed-mention tracking | GitHub audit comments, verification commands |
-| `scripts/verify.sh` | Ground-truth diff checks, branch push checks, test/build execution, payload consistency checks | Final PR or issue decisions |
-| `scripts/run.sh` | End-to-end issue execution flow, queue loop, circuit breaker, audit comment sequencing | Complex review reasoning when not in fixture mode |
+| `scripts/verify.sh` | Ground-truth diff checks, branch push checks, test/build execution, payload consistency checks, criteria tamper check, epic integration verification | Final PR or issue decisions |
+| `scripts/run.sh` | End-to-end issue execution flow, queue loop, circuit breaker, audit comment sequencing | Phase dispatch, criteria authoring, review reasoning |
+| `scripts/orchestrator.sh` | Phase dispatch state machine (INIT, CRITERIA, DEVELOP, REVIEW, DECIDE, FINALIZE, INTEGRATE), mention triage via haiku classification, agent spawning, decision table | Implementation, review reasoning, criteria authoring |
+| `scripts/issue-runner.sh` | Drive codex rounds, track token budget, call verify.sh, package payloads, pass criteria_commit to verification | Phase dispatch, PR lifecycle, queue decisions |
 | `scripts/maintenance.sh` | Partition derivation, maintenance tracking issue lifecycle, findings storage, triage-to-issue filing | Code modification |
 | `scripts/mentions.sh` | Mention polling, permission gating, deny comments, deduplication via state | Queue dispatch decisions |
-| Claude skills and agents | Plan decomposition, bounded orchestration, maintenance review reasoning | Deterministic GitHub or filesystem contracts already defined in scripts |
+| Claude skills and agents | Plan decomposition (plan-to-issues), acceptance criteria authoring (bar-setter, opus), code review (diff-reviewer, opus), mention response (mention-responder, sonnet), maintenance review reasoning (maintenance-reviewer, opus) | Deterministic GitHub or filesystem contracts already defined in scripts |
 
 ## Boundaries And Responsibilities
 
@@ -150,9 +159,10 @@ flowchart LR
 
 The core architectural rule is that durable behavior belongs in shell scripts and JSON contracts, not in prompts.
 
-- Scripts own queue ordering, label transitions, worktree paths, PR creation, verification gates, auth behavior, state transitions, mention authorization, and maintenance triage side effects.
-- Agents and skills are intentionally thin. They consume typed inputs, make bounded decisions, and are expected to call repository scripts instead of issuing ad hoc `gh` commands.
-- `run.sh` falls back to the `github-orchestrator` agent outside fixture mode, but the repository still treats the shell/runtime layer as the source of truth for auditable side effects.
+- Scripts own queue ordering, label transitions, worktree paths, PR creation, verification gates, auth behavior, state transitions, mention authorization, maintenance triage side effects, phase dispatch (orchestrator.sh), and dev-round execution (issue-runner.sh).
+- The orchestrator and issue-runner are shell scripts, not agents. Their work is deterministic dispatch and state machine transitions, not reasoning.
+- Agents and skills are intentionally thin. They consume typed inputs, make bounded decisions, and are expected to call repository scripts instead of issuing ad hoc `gh` commands. Current agents: bar-setter (opus, criteria authoring), diff-reviewer (opus, code review), mention-responder (sonnet, PR question answering), maintenance-reviewer (opus, code health review).
+- Mention triage uses a haiku structured-output call for classification (question, change-request, approval, irrelevant), not a full agent.
 
 ### Audit trail vs recovery breadcrumbs
 
@@ -189,8 +199,13 @@ Use this table when deciding where a change belongs:
 | Concern | Owning layer |
 | --- | --- |
 | Queue logic and dependency ordering | `gh-issue-queue.sh`, `dispatch-safety.sh`, `run.sh` |
-| PR lifecycle | `gh-pr-lifecycle.sh`, `run.sh` |
+| Phase dispatch and decision table | `orchestrator.sh` |
+| Dev-round execution and codex loop | `issue-runner.sh` |
+| Acceptance criteria authoring | `bar-setter` agent (opus), invoked by `orchestrator.sh` during CRITERIA phase |
+| PR lifecycle | `gh-pr-lifecycle.sh`, `orchestrator.sh` |
 | Auth and token minting | `gh-auth.sh`, `.runoq/identity.json`, `GH_TOKEN` |
-| Verification | `verify.sh` plus configured test/build commands |
+| Verification and criteria tamper check | `verify.sh` plus configured test/build commands |
+| Epic integration verification | `verify.sh integrate` |
+| Mention triage and response | `orchestrator.sh` (haiku classification), `mention-responder` agent (sonnet) |
 | Maintenance review and triage | `maintenance.sh`, `mentions.sh`, `maintenance-reviewer` |
 | State handling and payload reconstruction | `state.sh` |

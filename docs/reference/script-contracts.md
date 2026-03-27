@@ -27,12 +27,62 @@ Primary callers: `run.sh`, `maintenance.sh`, the `plan-to-issues` skill, tests.
 | `list` | `<repo> <ready-label>` | JSON array of issues with `number`, `title`, `body`, `url`, `labels`, `depends_on`, `priority`, `estimated_complexity`, `metadata_present`, `metadata_valid` | reads GitHub issues |
 | `next` | `<repo> <ready-label>` | JSON object `{ issue, skipped }`; `issue` is either the next actionable issue object or `null`, `skipped` contains blocked items with `blocked_reasons` | reads GitHub issues and dependency labels |
 | `set-status` | `<repo> <issue-number> <status>` where status is `ready`, `in-progress`, `done`, `needs-review`, or `blocked` | JSON object `{ issue, status, label }` | removes existing `runoq:*` labels and applies exactly one new state label |
-| `create` | `<repo> <title> <body> [--depends-on N,M] [--priority N] [--estimated-complexity value]` | JSON object `{ title, url }` | creates a GitHub issue labeled `runoq:ready` with an `runoq:meta` block |
+| `create` | `<repo> <title> <body> [--depends-on N,M] [--priority N] [--estimated-complexity value] [--type epic\|task] [--parent-epic N] [--children N,M]` | JSON object `{ title, url }` | creates a GitHub issue labeled `runoq:ready` with an `runoq:meta` block |
+| `epic-status` | `<repo> <epic-number>` | JSON object `{ epic, children, all_done, pending }` where `children` lists child issue numbers with their labels, `all_done` is boolean, `pending` lists children not yet `runoq:done` | reads GitHub issue metadata and child labels |
 
 Notes:
 
 - `next` sorts actionable items by metadata priority, then issue number.
+- `next` skips issues with `type: epic` — only tasks are dispatched directly.
+- `create` accepts `--type`, `--parent-epic`, and `--children` flags for hierarchical issue structures.
+- `epic-status` checks whether all children of an epic have the `runoq:done` label, enabling INTEGRATE phase triggering.
 - dependency checks require upstream issues to carry the configured done label.
+
+## `orchestrator.sh`
+
+Purpose: phase dispatch state machine for issue execution. Replaces the former `github-orchestrator` agent with a deterministic shell script.
+
+Primary callers: `run.sh`, tests.
+
+| Subcommand | Arguments | JSON/stdout contract | Side effects |
+| --- | --- | --- | --- |
+| `dispatch` | `<repo> <issue-number>` | JSON object with phase progression, outcome, and audit trail references | creates worktree, draft PR, spawns bar-setter/diff-reviewer/mention-responder agents, drives phase transitions, posts audit comments, finalizes PR |
+| `triage-mentions` | `<repo> <handle>` | JSON array of classified mentions with `comment_id`, `classification`, `action_taken` | polls mentions, classifies via haiku structured-output call, dispatches to mention-responder or feeds change-requests into DEVELOP |
+
+Phase transitions driven by orchestrator:
+
+- `INIT -> CRITERIA` (when estimated_complexity is medium or higher)
+- `INIT -> DEVELOP` (when estimated_complexity is low, skipping CRITERIA)
+- `CRITERIA -> DEVELOP`
+- `DEVELOP -> REVIEW`
+- `REVIEW -> DECIDE`
+- `DECIDE -> DEVELOP` (iterate)
+- `DECIDE -> FINALIZE`
+- `FINALIZE -> DONE`
+- `INTEGRATE -> DONE` (epic completion)
+
+Mention classification values: `question`, `change-request`, `approval`, `irrelevant`.
+
+Notes:
+
+- The orchestrator does not perform reasoning. It dispatches to agents for bounded tasks and applies a deterministic decision table for phase transitions.
+- Mention triage uses a haiku structured-output call, not a full agent invocation.
+
+## `issue-runner.sh`
+
+Purpose: drive codex development rounds within the DEVELOP phase.
+
+Primary callers: `orchestrator.sh`, tests.
+
+| Subcommand | Arguments | JSON/stdout contract | Side effects |
+| --- | --- | --- | --- |
+| `run` | `<worktree> <branch> <base-sha> <payload-file> [--criteria-commit SHA]` | `{ ok, review_ready, rounds_used, tokens_used, payload }` | invokes codex, validates payload via state.sh, calls verify.sh round (including criteria tamper check), iterates on failure up to max rounds |
+
+Notes:
+
+- Passes `criteria_commit` to `verify.sh round` when present, enabling the tamper check.
+- Tracks cumulative token usage across rounds.
+- Returns `review_ready` payload on success or escalation payload on max-rounds exhaustion.
 
 ## `gh-pr-lifecycle.sh`
 
@@ -73,11 +123,13 @@ Primary callers: `run.sh`, `mentions.sh`, `gh-pr-lifecycle.sh`, `maintenance.sh`
 
 Allowed phase transitions:
 
-- `INIT -> DEVELOP | FINALIZE | FAILED`
+- `INIT -> CRITERIA | DEVELOP | FINALIZE | FAILED`
+- `CRITERIA -> DEVELOP | FAILED`
 - `DEVELOP -> REVIEW | FAILED`
 - `REVIEW -> DECIDE | FAILED`
 - `DECIDE -> DEVELOP | FINALIZE | FAILED`
 - `FINALIZE -> DONE | FAILED`
+- `INTEGRATE -> DONE | FAILED`
 
 Terminal phases `DONE` and `FAILED` reject further transitions.
 
@@ -89,9 +141,10 @@ Primary callers: `run.sh`, agents, tests.
 
 | Subcommand | Arguments | JSON/stdout contract | Side effects |
 | --- | --- | --- | --- |
-| `round` | `<worktree> <branch> <base-sha> <payload-file>` | `{ ok, review_allowed, failures, actual }` where `actual` contains ground-truth commit and file lists | reads git state, runs configured test/build commands in the worktree |
+| `round` | `<worktree> <branch> <base-sha> <payload-file> [--criteria-commit SHA]` | `{ ok, review_allowed, failures, actual }` where `actual` contains ground-truth commit and file lists | reads git state, runs configured test/build commands in the worktree |
+| `integrate` | `<worktree> <criteria-commit>` | `{ ok, failures }` | confirms epic-level criteria files from `criteria_commit` are unchanged at HEAD, runs test suite in integrated worktree |
 
-Verification checks:
+Verification checks for `round`:
 
 - at least one new commit exists
 - every payload commit exists locally
@@ -100,6 +153,12 @@ Verification checks:
 - configured test command succeeds
 - configured build command succeeds
 - payload reports tests/build as passed
+- when `--criteria-commit` is provided: each file in the criteria commit's diff is byte-identical at HEAD (criteria tamper check); failure reports `criteria tampered: <files>`
+
+Verification checks for `integrate`:
+
+- criteria files from the epic-level `criteria_commit` are unchanged at HEAD
+- configured test command succeeds in the integrated worktree
 
 `review_allowed` currently mirrors `ok`.
 

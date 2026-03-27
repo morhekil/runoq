@@ -2,10 +2,7 @@
 
 This document describes the major runtime sequences in `runoq`: planning, execution, reconciliation, mention handling, and maintenance review.
 
-For `runoq run`, one detail matters: outside fixture mode, [`scripts/run.sh`](../../scripts/run.sh) delegates to the `github-orchestrator` agent after argument parsing. The detailed execution sequence below is therefore an implementation-backed inference from two sources taken together:
-
-- the full scripted flow in fixture mode inside `scripts/run.sh`
-- the hard rules and dispatch steps in `.claude/agents/github-orchestrator.md`
+For `runoq run`, the orchestrator and issue-runner are now shell scripts (`orchestrator.sh` and `issue-runner.sh`), not agents. The orchestrator drives phase transitions (INIT, CRITERIA, DEVELOP, REVIEW, DECIDE, FINALIZE, INTEGRATE), spawns agents for bounded reasoning tasks, and handles mention triage. The issue-runner drives codex rounds within the DEVELOP phase.
 
 ## `runoq plan`
 
@@ -60,12 +57,15 @@ sequenceDiagram
   actor Operator
   participant CLI as bin/runoq
   participant Auth as gh-auth.sh
-  participant Run as run.sh / github-orchestrator
+  participant Run as run.sh
+  participant Orch as orchestrator.sh
   participant Safety as dispatch-safety.sh
   participant Queue as gh-issue-queue.sh
   participant WT as worktree.sh
   participant PR as gh-pr-lifecycle.sh
   participant State as state.sh
+  participant BarSet as bar-setter agent
+  participant IssRun as issue-runner.sh
   participant Verify as verify.sh
   participant GH as GitHub
   participant FS as target repo and sibling worktree
@@ -74,45 +74,55 @@ sequenceDiagram
   CLI->>Auth: export-token
   Auth-->>CLI: GH_TOKEN
   CLI->>Run: invoke run flow
-  Run->>Safety: reconcile REPO
-  Safety-->>Run: reconciliation actions
+  Run->>Orch: dispatch issue
+  Orch->>Safety: reconcile REPO
+  Safety-->>Orch: reconciliation actions
   alt single-issue mode
-    Run->>Safety: eligibility REPO issue
+    Orch->>Safety: eligibility REPO issue
   else queue mode
-    Run->>Queue: next REPO ready-label
-    Queue-->>Run: selected issue plus skipped reasons
-    Run->>Safety: eligibility REPO selected issue
+    Orch->>Queue: next REPO ready-label
+    Queue-->>Orch: selected issue plus skipped reasons
+    Orch->>Safety: eligibility REPO selected issue
   end
-  Safety-->>Run: allowed=true
-  Run->>Queue: set-status in-progress
+  Safety-->>Orch: allowed=true
+  Orch->>Queue: set-status in-progress
   Queue->>GH: replace runoq:* issue label
-  Run->>WT: create issue worktree and branch
+  Orch->>WT: create issue worktree and branch
   WT->>FS: git worktree add from origin/main
-  Run->>PR: create draft PR
+  Orch->>PR: create draft PR
   PR->>GH: create draft PR from issue branch
-  Run->>State: save INIT breadcrumb
-  Run->>PR: comment dispatch payload
-  Run->>State: save DEVELOP breadcrumb
-  Run->>FS: run dev loop in sibling worktree
-  Run->>State: validate or reconstruct payload
-  Run->>PR: comment codex payload
-  Run->>Verify: round worktree branch base-sha payload
-  Verify->>FS: inspect commits, diffs, pushed branch, test/build commands
-  Verify-->>Run: ok=true
-  Run->>State: save REVIEW, DECIDE, FINALIZE breadcrumbs
-  Run->>PR: comment orchestrator result and update summary
+  Orch->>State: save INIT breadcrumb
+  alt estimated_complexity is medium or higher
+    Orch->>State: save CRITERIA breadcrumb
+    Orch->>BarSet: spawn with spec, worktree, branch
+    BarSet->>FS: read spec, write acceptance tests, commit
+    BarSet-->>Orch: criteria_commit, criteria_files, summary
+    Orch->>PR: comment criteria summary
+    Orch->>State: record criteria_commit in state
+  end
+  Orch->>State: save DEVELOP breadcrumb
+  Orch->>IssRun: invoke with payload including criteria_commit
+  IssRun->>FS: run codex dev loop in sibling worktree
+  IssRun->>State: validate or reconstruct payload
+  IssRun->>PR: comment codex payload
+  IssRun->>Verify: round worktree branch base-sha payload
+  Verify->>FS: inspect commits, diffs, pushed branch, test/build, criteria tamper check
+  Verify-->>IssRun: ok=true
+  IssRun-->>Orch: review_ready payload
+  Orch->>State: save REVIEW, DECIDE, FINALIZE breadcrumbs
+  Orch->>PR: comment orchestrator result and update summary
   alt PASS and low complexity and no caveats
-    Run->>PR: finalize auto-merge
+    Orch->>PR: finalize auto-merge
     PR->>GH: ready PR and enable auto-merge
-    Run->>Queue: set-status done
+    Orch->>Queue: set-status done
     Queue->>GH: replace issue label with runoq:done
-    Run->>State: save DONE with outcome
-    Run->>WT: remove worktree
+    Orch->>State: save DONE with outcome
+    Orch->>WT: remove worktree
     WT->>FS: git worktree remove
   else anything else
-    Run->>PR: finalize needs-review
-    Run->>Queue: set-status needs-review
-    Run->>State: save FAILED with outcome
+    Orch->>PR: finalize needs-review
+    Orch->>Queue: set-status needs-review
+    Orch->>State: save FAILED with outcome
   end
 ```
 
@@ -122,6 +132,7 @@ sequenceDiagram
 | --- | --- |
 | Verification passes, verdict is `PASS`, complexity is `low`, and caveats are empty | Auto-merge PR, mark issue `done`, save terminal state, remove worktree |
 | Verification fails | Post verification failure event, mark issue `needs-human-review`, preserve state |
+| Criteria tamper check fails | Feed `criteria tampered: <files>` back as verification failure, iterate or escalate |
 | Verdict is not `PASS` | Mark `needs-human-review` |
 | Verdict is `PASS` but caveats are present | Mark `needs-human-review` |
 | Verdict is `PASS` but issue complexity is not `low` | Mark `needs-human-review` |
@@ -132,7 +143,9 @@ The runtime is designed to stop safely and leave breadcrumbs when the happy path
 
 ```mermaid
 sequenceDiagram
-  participant Run as run.sh / github-orchestrator
+  participant Run as run.sh
+  participant Orch as orchestrator.sh
+  participant IssRun as issue-runner.sh
   participant State as state.sh
   participant PR as gh-pr-lifecycle.sh
   participant Queue as gh-issue-queue.sh
@@ -255,6 +268,82 @@ sequenceDiagram
 | Mention does not contain `@<handle>` or is an audit payload/event comment | Skip it |
 | Collaborator permission below `authorization.minimumPermission` | Deny with comment or ignore silently based on `authorization.denyResponse` |
 | Permission sufficient | Return `action: "process"` and let the caller apply domain-specific logic |
+
+## Epic Completion And Integration
+
+When all child tasks of an epic reach `runoq:done`, the orchestrator triggers the INTEGRATE phase.
+
+```mermaid
+sequenceDiagram
+  participant Orch as orchestrator.sh
+  participant Queue as gh-issue-queue.sh
+  participant WT as worktree.sh
+  participant Verify as verify.sh
+  participant State as state.sh
+  participant GH as GitHub
+  participant FS as target repo and sibling worktree
+
+  Orch->>Queue: epic-status REPO epic-number
+  Queue-->>Orch: all children runoq:done
+  Orch->>WT: create integration worktree from main
+  WT->>FS: git worktree add from origin/main (with all child PRs merged)
+  Orch->>State: save INTEGRATE breadcrumb
+  Orch->>Verify: integrate worktree criteria_commit
+  Verify->>FS: confirm epic criteria files unchanged, run test suite
+  Verify-->>Orch: ok=true/false, failures
+  alt integration passes
+    Orch->>Queue: set-status done for epic
+    Queue->>GH: replace epic label with runoq:done
+    Orch->>State: save DONE with outcome
+    Orch->>WT: remove integration worktree
+  else integration fails
+    Orch->>Queue: create fix task under epic
+    Queue->>GH: create runoq:ready fix issue with parent_epic
+    Orch->>State: save FAILED with outcome
+  end
+```
+
+### Integration decision table
+
+| Condition | Outcome |
+| --- | --- |
+| All child tasks `runoq:done` and `verify.sh integrate` passes | Mark epic `done`, remove integration worktree |
+| `verify.sh integrate` fails (criteria tampered or tests fail) | Create a fix task under the epic, back to queue |
+| Not all children are `runoq:done` | Epic stays in current state, no integration attempted |
+
+## Mention Triage And Response
+
+The orchestrator handles mention triage using a haiku structured-output call for classification, then dispatches to the appropriate handler.
+
+```mermaid
+sequenceDiagram
+  participant Orch as orchestrator.sh
+  participant Poll as gh-pr-lifecycle.sh poll-mentions
+  participant Haiku as haiku classification call
+  participant Responder as mention-responder agent
+  participant State as state.sh
+  participant GH as GitHub
+
+  Orch->>Poll: poll-mentions repo handle
+  Poll-->>Orch: unprocessed mentions
+  loop each mention
+    Orch->>Haiku: classify mention text
+    Haiku-->>Orch: question | change-request | approval | irrelevant
+    alt question
+      Orch->>Responder: spawn with PR context
+      Responder->>GH: post reply with runoq:event marker
+      Orch->>State: record-mention
+    else change-request
+      Orch->>Orch: extract checklist, feed into DEVELOP loop
+      Orch->>State: record-mention
+    else approval
+      Orch->>Orch: handle label change or merge
+      Orch->>State: record-mention
+    else irrelevant
+      Orch->>State: record-mention, no action
+    end
+  end
+```
 
 ## Maintenance Review And Triage
 
