@@ -291,6 +291,19 @@ INDEXEOF
     # Record baseline
     baseline="$(git -C "$worktree" log -1 --format="%H")"
 
+    # Build protected files warning if criteria_commit is set
+    local protected_files_warning=""
+    if [[ "$criteria_commit" != "null" && -n "$criteria_commit" ]]; then
+      local criteria_files
+      criteria_files="$(git -C "$worktree" diff-tree --no-commit-id --name-only -r "$criteria_commit" 2>/dev/null || true)"
+      if [[ -n "$criteria_files" ]]; then
+        protected_files_warning="
+IMPORTANT: The following files are acceptance criteria set by the bar-setter and MUST NOT be modified. They are read-only. Your implementation must satisfy the tests in these files without changing them:
+${criteria_files}
+"
+      fi
+    fi
+
     # Run codex
     local dev_log="$logDir/round-${round}-dev.md"
 
@@ -298,7 +311,7 @@ INDEXEOF
       codex_exec exec --dangerously-bypass-approvals-and-sandbox "Implement the following spec. Read the spec file and all AGENTS.md files for rules and constraints.
 
 Spec: ${specPath}
-
+${protected_files_warning}
 Commit granularity: make one commit per semantic unit of work.
 When done, push your branch: git push origin ${branch}
 
@@ -315,7 +328,7 @@ ${previousChecklist}
 
 Original spec: ${specPath}
 Read all AGENTS.md files for rules and constraints.
-
+${protected_files_warning}
 Commit granularity: make one commit per semantic unit of work.
 When done, push your branch: git push origin ${branch}
 
