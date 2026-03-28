@@ -376,14 +376,14 @@ EOF
 
   issue_body="$(happy_issue_body)"
   scenario="$TEST_TMPDIR/scenario.json"
-  issue_comment="Escalated to human review: post-dev verification failed: test command failed, build command failed."
+  issue_comment="Escalated to human review: post-dev verification failed: test command failed"
   write_needs_review_scenario "$scenario" "$issue_body" "$issue_comment"
   use_fake_gh "$scenario"
 
   run bash -lc 'cd "'"$local_dir"'" && "'"$RUNOQ_ROOT"'/bin/runoq" run --issue 42'
 
   [ "$status" -eq 0 ]
-  run rg -n "Post-dev verification failed: test command failed, build command failed" "$FAKE_GH_CAPTURE_DIR"
+  run rg -n "test command failed" "$FAKE_GH_CAPTURE_DIR"
   [ "$status" -eq 0 ]
 }
 

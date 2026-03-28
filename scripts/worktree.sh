@@ -22,12 +22,14 @@ create_worktree() {
   branch="$(runoq::branch_name "$issue" "$title")"
   path="$(runoq::worktree_path "$issue")"
   base_ref="$(runoq::default_branch_ref)"
+  runoq::log "worktree" "create: source_ref=${base_ref} target_path=${path} branch=${branch}"
 
   git -C "$target_root" fetch origin main >/dev/null 2>&1
   if [[ -d "$path/.git" || -e "$path" ]]; then
     runoq::die "Worktree already exists: $path"
   fi
   git -C "$target_root" worktree add "$path" -b "$branch" "$base_ref" >/dev/null 2>&1
+  runoq::configure_git_bot_identity "$path" 2>/dev/null || true
   jq -n --arg branch "$branch" --arg path "$path" --arg base_ref "$base_ref" '{
     branch: $branch,
     worktree: $path,
@@ -40,6 +42,7 @@ remove_worktree() {
   local target_root path
   target_root="$(runoq::target_root)"
   path="$(runoq::worktree_path "$issue")"
+  runoq::log "worktree" "remove: path=${path}"
   if [[ ! -e "$path" ]]; then
     jq -n --arg worktree "$path" '{removed:false, worktree:$worktree}'
     return

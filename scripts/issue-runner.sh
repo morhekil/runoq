@@ -105,13 +105,34 @@ post_verification_comment() {
   local pr_number="$2"
   local round="$3"
   local failures_json="$4"
+  local round_baseline="$5"
+  local head_hash="$6"
+  local round_commits_text="$7"
   local comment_file
   comment_file="$(mktemp "${TMPDIR:-/tmp}/runoq-verify-comment.XXXXXX")"
+
+  local failure_count
+  failure_count="$(jq 'length' <<< "$failures_json")"
 
   {
     printf '<!-- runoq:event:verification-failure -->\n'
     printf '## Verification failure — round %s\n\n' "$round"
+    printf '> Posted by `issue-runner` / `verify.sh` — round %s of %s, branch `%s`\n\n' "$round" "$maxRounds" "$branch"
+    printf '**Commit range**: `%s..%s`\n' "${round_baseline:0:7}" "${head_hash:0:7}"
+    if [[ -n "$round_commits_text" ]]; then
+      printf '\n**Commits this round**:\n'
+      while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        local sha="${line%% *}"
+        local subject="${line#* }"
+        printf -- '- `%s` %s\n' "${sha:0:7}" "$subject"
+      done <<< "$round_commits_text"
+    else
+      printf '\n**Commits this round**: none\n'
+    fi
+    printf '\n### Failures (%s)\n\n' "$failure_count"
     jq -r '.[] | "- " + .' <<< "$failures_json"
+    printf '\n---\n_This is an automated verification check. The developer agent will attempt to fix these issues in the next round._\n'
   } > "$comment_file"
 
   "$RUNOQ_ROOT/scripts/gh-pr-lifecycle.sh" comment "$repo" "$pr_number" "$comment_file" >/dev/null 2>&1 || true
@@ -274,11 +295,18 @@ INDEXEOF
   summary=""
   caveats_json="[]"
 
+  # Record the initial baseline once — verification always checks full diff
+  local initial_baseline
+  initial_baseline="$(git -C "$worktree" log -1 --format="%H")"
+  baseline="$initial_baseline"
+
   # -----------------------------------------------------------------------
   # Step 2 — Developer loop
   # -----------------------------------------------------------------------
 
   for (( round = start_round; round <= maxRounds; round++ )); do
+
+    runoq::log "issue-runner" "round ${round}/${maxRounds}: baseline=$(git -C "$worktree" log -1 --format="%H") budget=${cumulativeTokens}/${maxTokenBudget}"
 
     # Budget check before starting a round
     if (( cumulativeTokens >= maxTokenBudget )); then
@@ -288,8 +316,9 @@ INDEXEOF
       return 0
     fi
 
-    # Record baseline
-    baseline="$(git -C "$worktree" log -1 --format="%H")"
+    # Per-round baseline for logging which commits were added this round
+    local round_baseline
+    round_baseline="$(git -C "$worktree" log -1 --format="%H")"
 
     # Build protected files warning if criteria_commit is set
     local protected_files_warning=""
@@ -308,6 +337,7 @@ ${criteria_files}
     local dev_log="$logDir/round-${round}-dev.md"
 
     if [[ "$previousChecklist" == "None — first round" ]]; then
+      runoq::log "issue-runner" "round ${round}: invoking codex (first round — implement spec)"
       codex_exec exec --dangerously-bypass-approvals-and-sandbox "Implement the following spec. Read the spec file and all AGENTS.md files for rules and constraints.
 
 Spec: ${specPath}
@@ -321,6 +351,7 @@ Then print the required final stdout payload block:
 { ... }
 \`\`\`" >"$dev_log" 2>&1
     else
+      runoq::log "issue-runner" "round ${round}: invoking codex (subsequent round — address feedback)"
       codex_exec exec --dangerously-bypass-approvals-and-sandbox "Address the following code review or verification feedback.
 
 Checklist:
@@ -339,13 +370,15 @@ Then print the required final stdout payload block:
 \`\`\`" >"$dev_log" 2>&1
     fi
 
-    # Capture new commits
-    local commits_text
+    # Capture new commits — full diff for emit_payload, per-round for index logging
+    local commits_text round_commits_text
     commits_text="$(git -C "$worktree" log --reverse --format="%H %s" "${baseline}..HEAD" 2>/dev/null || true)"
+    round_commits_text="$(git -C "$worktree" log --reverse --format="%H %s" "${round_baseline}..HEAD" 2>/dev/null || true)"
     commit_subjects_json="$(printf '%s\n' "$commits_text" | { grep -v '^$' || true; } | jq -Rsc 'split("\n") | map(select(length > 0))')"
     head_hash="$(git -C "$worktree" log -1 --format="%H")"
     local commit_count
-    commit_count="$(printf '%s\n' "$commits_text" | grep -c -v '^$' || true)"
+    commit_count="$(printf '%s\n' "$round_commits_text" | grep -c -v '^$' || true)"
+    runoq::log "issue-runner" "round ${round}: after codex — commit_count=${commit_count} head=${head_hash}"
 
     # Validate payload via state.sh
     local payload_json_file="$logDir/round-${round}-payload.json"
@@ -377,20 +410,25 @@ Then print the required final stdout payload block:
     # -----------------------------------------------------------------
 
     local verify_output
+    runoq::log "issue-runner" "round ${round}: running verification"
     verify_output="$("$RUNOQ_ROOT/scripts/verify.sh" round "$worktree" "$branch" "$baseline" "$payload_json_file")"
 
     local review_allowed
     review_allowed="$(printf '%s' "$verify_output" | jq -r '.review_allowed')"
     verification_failures_json="$(printf '%s' "$verify_output" | jq -c '.failures')"
+    local verify_failure_count
+    verify_failure_count="$(printf '%s' "$verify_output" | jq -r '.failures | length')"
+    runoq::log "issue-runner" "round ${round}: verification result — review_allowed=${review_allowed} failure_count=${verify_failure_count}"
 
     if [[ "$review_allowed" != "true" ]]; then
       # Verification failed
       verification_passed="false"
 
-      # Post failures as PR comment
-      post_verification_comment "$repo" "$prNumber" "$round" "$verification_failures_json"
+      # Post failures as PR comment with full context
+      post_verification_comment "$repo" "$prNumber" "$round" "$verification_failures_json" \
+        "$round_baseline" "$head_hash" "$round_commits_text"
 
-      # Build commit subjects text for index
+      # Build commit subjects text for index (per-round commits only)
       local commit_subjects_text=""
       while IFS= read -r line; do
         [[ -z "$line" ]] && continue
@@ -398,12 +436,12 @@ Then print the required final stdout payload block:
         local subject="${line#* }"
         commit_subjects_text="${commit_subjects_text}  - \`${sha}\` — ${subject}
 "
-      done <<< "$commits_text"
+      done <<< "$round_commits_text"
 
       local failure_detail
       failure_detail="$(printf '%s' "$verify_output" | jq -r '.failures | join("; ")')"
 
-      append_index_entry "$logDir" "$round" "$baseline" "$head_hash" \
+      append_index_entry "$logDir" "$round" "$round_baseline" "$head_hash" \
         "$commit_count" "$commit_subjects_text" \
         "fail" "$failure_detail" \
         "skipped (verification failure)" "n/a" \
@@ -420,6 +458,7 @@ Then print the required final stdout payload block:
 
       # Feed failures to next round
       previousChecklist="$(printf '%s' "$verify_output" | jq -r '.failures | map("- " + .) | join("\n")')"
+      runoq::log "issue-runner" "round ${round}: verification failed — continuing to next round"
       continue
     fi
 
@@ -452,6 +491,7 @@ Then print the required final stdout payload block:
 
     summary="Verification passed on round $round; ready for review"
     caveats_json="[]"
+    runoq::log "issue-runner" "round ${round}: verification passed — returning review_ready"
     emit_payload "review_ready"
     return 0
 

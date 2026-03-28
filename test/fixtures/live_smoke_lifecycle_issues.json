@@ -2,44 +2,47 @@
   {
     "key": "progress-library",
     "type": "epic",
-    "title": "Progress tracking library with output formatters and CLI",
+    "title": "Progress tracking library with CLI wrapper",
     "depends_on_keys": [],
     "priority": 1,
     "estimated_complexity": "high",
-    "body": "## Context\n\nBuild a progress tracking library that exposes formatted output in multiple styles and a CLI wrapper.\n\n## Acceptance Criteria\n\n- [ ] Library exports `formatProgress(complete, total)` with default style.\n- [ ] Overflowing values are clamped to 100%.\n- [ ] CLI wrapper accepts two integer arguments and prints formatted output.\n- [ ] All modules are CommonJS, no external dependencies.\n- [ ] `npm test` and `npm run build` pass."
+    "body": "## Context\n\nBuild a progress tracking library for Node.js that formats completion status in multiple styles and exposes a CLI wrapper. All modules must be CommonJS with no external dependencies.\n\n## Acceptance Criteria\n\n- [ ] `formatProgress(complete, total)` returns correct human-readable strings.\n- [ ] Overflow values are clamped to 100%.\n- [ ] CLI wrapper accepts two integer arguments and prints formatted progress to stdout.\n- [ ] `npm test` and `npm run build` pass at every stage.\n- [ ] No external dependencies — only Node.js built-ins.\n\n## Notes\n\nThese are integration-level criteria; individual task criteria are on child issues."
   },
   {
     "key": "core-formatter",
     "type": "task",
     "parent_epic_key": "progress-library",
-    "title": "Add formatted progress output with multiple styles",
+    "title": "Implement formatProgress core formatter",
     "depends_on_keys": [],
     "priority": 1,
-    "estimated_complexity": "medium",
-    "body": "## Context\n\nThe target repo only exposes a numeric `percent()` helper right now.\n\n## Acceptance Criteria\n\n- [ ] `src/progress.js` exports `formatProgress(complete, total)`.\n- [ ] `formatProgress(2, 5)` returns `\"2/5 complete (40%)\"`.\n- [ ] `test/progress.test.js` covers the new formatter.\n- [ ] Keep the implementation in CommonJS and use only built-in Node.js modules."
+    "estimated_complexity": "low",
+    "complexity_rationale": "Single-file implementation with straightforward arithmetic and string formatting; no design decisions or edge cases beyond basic math.",
+    "body": "## Context\n\nAdd the foundational `formatProgress(complete, total)` function that returns a human-readable string like `\"2/5 complete (40%)\"`. This is the base module that all other features build on.\n\n## Acceptance Criteria\n\n- [ ] `src/progress.js` exports a `formatProgress(complete, total)` function via CommonJS.\n- [ ] `formatProgress(2, 5)` returns `\"2/5 complete (40%)\"`.\n- [ ] Percentage is computed as `Math.round(complete / total * 100)`.\n- [ ] Uses only built-in Node.js modules.\n- [ ] `test/progress.test.js` covers at least: zero progress, partial progress, full completion.\n- [ ] `npm test` passes.\n\n## Notes\n\nNo external dependencies allowed. CommonJS only (no ESM)."
   },
   {
     "key": "clamp-overflow",
     "type": "task",
     "parent_epic_key": "progress-library",
-    "title": "Clamp overflowing progress values",
+    "title": "Add overflow clamping for progress values exceeding total",
     "depends_on_keys": [
       "core-formatter"
     ],
     "priority": 2,
     "estimated_complexity": "low",
-    "body": "## Context\n\nThe formatter should stay predictable even when `complete` is greater than `total`.\n\n## Acceptance Criteria\n\n- [ ] Progress values are clamped so they never report more than 100%.\n- [ ] `percent(7, 5)` returns `100`.\n- [ ] `formatProgress(7, 5)` returns `\"5/5 complete (100%)\"`.\n- [ ] Add or update tests in `test/progress.test.js`."
+    "complexity_rationale": "Small addition to a single file — adds a Math.min clamp guard and a few extra test cases. No new modules or APIs.",
+    "body": "## Context\n\nProgress values where `complete > total` must be clamped so they never exceed 100%. This hardens the formatter against invalid inputs.\n\n## Acceptance Criteria\n\n- [ ] `formatProgress(7, 5)` returns `\"5/5 complete (100%)\"` (both the displayed count and percentage are clamped).\n- [ ] A `percent(complete, total)` helper returns `100` when `complete > total`.\n- [ ] Existing tests for normal-range inputs still pass.\n- [ ] New tests in `test/progress.test.js` cover: `complete == total`, `complete > total`.\n- [ ] `npm test` passes.\n\n## Notes\n\nDepends on core-formatter being in place first."
   },
   {
     "key": "cli-wrapper",
     "type": "task",
     "parent_epic_key": "progress-library",
-    "title": "Add a CLI wrapper for progress output",
+    "title": "Add CLI wrapper that prints formatted progress to stdout",
     "depends_on_keys": [
       "clamp-overflow"
     ],
     "priority": 3,
     "estimated_complexity": "medium",
-    "body": "## Context\n\nAfter the formatter is stable, expose it through a tiny CLI.\n\n## Acceptance Criteria\n\n- [ ] Add `src/cli.js` that prints the formatted progress for two integer arguments.\n- [ ] Add tests for the CLI success path using built-in Node.js modules only.\n- [ ] Keep `npm test` and `npm run build` green."
+    "complexity_rationale": "Introduces a new file with argument parsing and requires process-spawning test infrastructure, touching two modules with a different testing pattern than unit tests.",
+    "body": "## Context\n\nExpose the formatter through a CLI script so users can call it from the command line with two integer arguments.\n\n## Acceptance Criteria\n\n- [ ] `src/cli.js` is executable and parses two integer positional arguments from `process.argv`.\n- [ ] Running `node src/cli.js 3 10` prints `\"3/10 complete (30%)\"` to stdout.\n- [ ] Overflow clamping is respected (e.g., `node src/cli.js 7 5` prints `\"5/5 complete (100%)\"`).\n- [ ] Tests cover the CLI success path.\n- [ ] `npm test` and `npm run build` pass.\n\n## Notes\n\nDepends on overflow-clamping being done first. Must use CommonJS and only Node.js built-ins."
   }
 ]

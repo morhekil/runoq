@@ -68,12 +68,14 @@ create_pr() {
   local issue_number="$3"
   local title="$4"
   local template tmp result number
+  runoq::log "pr-lifecycle" "create_pr: repo=${repo} branch=${branch} issue=#${issue_number} title=\"${title}\""
   template="$(runoq::root)/templates/pr-template.md"
   tmp="$(mktemp "${TMPDIR:-/tmp}/runoq-pr-create.XXXXXX")"
   sed "s/ISSUE_NUMBER/${issue_number}/g" "$template" >"$tmp"
   result="$(runoq::gh pr create --repo "$repo" --draft --title "$title" --head "$branch" --body-file "$tmp")"
   rm -f "$tmp"
   number="$(printf '%s' "$result" | sed -n 's#.*/pull/\([0-9][0-9]*\).*#\1#p')"
+  runoq::log "pr-lifecycle" "create_pr: result url=${result} number=${number:-null}"
   jq -n --arg url "$result" --argjson number "${number:-null}" '{url:$url, number:$number}'
 }
 
@@ -81,7 +83,9 @@ comment_pr() {
   local repo="$1"
   local pr_number="$2"
   local comment_file="$3"
+  runoq::log "pr-lifecycle" "comment_pr: repo=${repo} pr=#${pr_number} comment_file=${comment_file}"
   runoq::gh pr comment "$pr_number" --repo "$repo" --body-file "$comment_file" >/dev/null
+  runoq::log "pr-lifecycle" "comment_pr: comment posted successfully on PR #${pr_number}"
   jq -n --argjson pr "$pr_number" '{commented:true, pr:$pr}'
 }
 
@@ -89,6 +93,7 @@ update_summary() {
   local repo="$1"
   local pr_number="$2"
   local update_file="$3"
+  runoq::log "pr-lifecycle" "update_summary: repo=${repo} pr=#${pr_number} update_file=${update_file}"
   local current_body_file summary_file attention_file body_file temp_body
   current_body_file="$(mktemp "${TMPDIR:-/tmp}/runoq-pr-body.XXXXXX")"
   summary_file="$(mktemp "${TMPDIR:-/tmp}/runoq-pr-summary.XXXXXX")"
@@ -113,6 +118,7 @@ update_summary() {
   mv "$temp_body" "$current_body_file"
 
   runoq::gh pr edit "$pr_number" --repo "$repo" --body-file "$current_body_file" >/dev/null
+  runoq::log "pr-lifecycle" "update_summary: PR #${pr_number} body updated successfully"
   rm -f "$current_body_file" "$summary_file" "$attention_file"
   jq -n --argjson pr "$pr_number" '{updated:true, pr:$pr}'
 }
@@ -121,6 +127,7 @@ finalize_pr() {
   local repo="$1"
   local pr_number="$2"
   local verdict="$3"
+  runoq::log "pr-lifecycle" "finalize_pr: repo=${repo} pr=#${pr_number} verdict=${verdict}"
   local reviewer=""
   local assigned_reviewer=""
   shift 3
@@ -138,33 +145,36 @@ finalize_pr() {
       return 0
     fi
     if [[ "$output" == *'already "ready for review"'* ]]; then
-      printf '%s\n' "$output" >&2
+      runoq::log "pr-lifecycle" "ready_pr: already ready — $output"
       return 0
     fi
-    printf '%s\n' "$output" >&2
+    runoq::log "pr-lifecycle" "ready_pr: failed — $output"
     return "$status"
   }
 
   case "$verdict" in
     auto-merge)
       local merge_output merge_status
+      runoq::log "pr-lifecycle" "finalize_pr: marking PR #${pr_number} as ready for review"
       ready_pr
       set +e
       merge_output="$(runoq::gh pr merge "$pr_number" --repo "$repo" --auto --squash 2>&1)"
       merge_status=$?
       set -e
       if [[ "$merge_status" -eq 0 ]]; then
-        :
+        runoq::log "pr-lifecycle" "finalize_pr: auto-merge enabled successfully for PR #${pr_number}"
       elif [[ "$merge_output" == *"Protected branch rules not configured for this branch"* ]] || [[ "$merge_output" == *"enablePullRequestAutoMerge"* ]]; then
-        printf '%s\n' "$merge_output" >&2
+        runoq::log "pr-lifecycle" "finalize_pr: auto-merge not available (${merge_output}), falling back to direct squash merge for PR #${pr_number}"
         runoq::gh pr merge "$pr_number" --repo "$repo" --squash --delete-branch >/dev/null
+        runoq::log "pr-lifecycle" "finalize_pr: direct squash merge completed for PR #${pr_number}"
       else
-        printf '%s\n' "$merge_output" >&2
+        runoq::log "pr-lifecycle" "finalize_pr: merge failed — $merge_output"
         return "$merge_status"
       fi
       ;;
     needs-review)
       local edit_output edit_status
+      runoq::log "pr-lifecycle" "finalize_pr: marking PR #${pr_number} as ready for review (needs-review verdict)"
       ready_pr
       if [[ -n "$reviewer" ]]; then
         set +e
@@ -173,8 +183,9 @@ finalize_pr() {
         set -e
         if [[ "$edit_status" -eq 0 ]]; then
           assigned_reviewer="$reviewer"
+          runoq::log "pr-lifecycle" "finalize_pr: assigned reviewer=${reviewer} to PR #${pr_number}"
         else
-          printf '%s\n' "$edit_output" >&2
+          runoq::log "pr-lifecycle" "finalize_pr: failed to assign reviewer=${reviewer} — $edit_output"
         fi
       fi
       ;;
@@ -197,6 +208,7 @@ line_comment() {
   local start_line="$4"
   local end_line="$5"
   local body="$6"
+  runoq::log "pr-lifecycle" "line_comment: repo=${repo} pr=#${pr_number} file=${file} lines=${start_line}-${end_line}"
   local head_sha args
   head_sha="$(runoq::gh pr view "$pr_number" --repo "$repo" --json headRefOid | jq -r '.headRefOid')"
   args=(
@@ -212,6 +224,7 @@ line_comment() {
     args+=(-F start_line="$start_line" -F start_side=RIGHT)
   fi
   runoq::gh api "${args[@]}" >/dev/null
+  runoq::log "pr-lifecycle" "line_comment: posted line comment on ${file}:${start_line}-${end_line}"
   jq -n --arg path "$file" --argjson start "$start_line" --argjson end "$end_line" '{path:$path, start_line:$start, end_line:$end}'
 }
 
@@ -219,6 +232,7 @@ read_actionable() {
   local repo="$1"
   local pr_number="$2"
   local handle="$3"
+  runoq::log "pr-lifecycle" "read_actionable: repo=${repo} pr=#${pr_number} handle=${handle}"
   local issue_comments review_comments
   issue_comments="$(runoq::gh api "repos/${repo}/issues/${pr_number}/comments")"
   review_comments="$(runoq::gh api "repos/${repo}/pulls/${pr_number}/comments")"
@@ -259,6 +273,7 @@ poll_mentions() {
   local repo="$1"
   local handle="$2"
   local since="${3:-}"
+  runoq::log "pr-lifecycle" "poll_mentions: repo=${repo} handle=${handle} since=${since:-<all>}"
   local issues open_items item_number endpoint comments comment mention_state_args
   open_items="$(runoq::gh api "repos/${repo}/issues?state=open&per_page=100")"
 
@@ -306,6 +321,7 @@ check_permission() {
   local repo="$1"
   local username="$2"
   local required="$3"
+  runoq::log "pr-lifecycle" "check_permission: repo=${repo} username=${username} required=${required}"
   local permission rank required_rank
   permission="$(runoq::gh api "repos/${repo}/collaborators/${username}/permission" | jq -r '.permission')"
 
@@ -324,8 +340,10 @@ check_permission() {
   esac
 
   if (( rank >= required_rank )); then
+    runoq::log "pr-lifecycle" "check_permission: allowed=true user=${username} permission=${permission} required=${required}"
     jq -n --arg username "$username" --arg permission "$permission" '{allowed:true, username:$username, permission:$permission}'
   else
+    runoq::log "pr-lifecycle" "check_permission: allowed=false user=${username} permission=${permission} required=${required}"
     jq -n --arg username "$username" --arg permission "$permission" '{allowed:false, username:$username, permission:$permission}'
     exit 1
   fi

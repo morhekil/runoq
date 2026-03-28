@@ -30,7 +30,7 @@ setup_cli_project() {
   [[ "$output" == *"REPO=owner/repo"* ]]
 }
 
-@test "runoq plan resolves the file to an absolute path" {
+@test "runoq plan invokes plan.sh with repo and absolute plan path" {
   project_dir="$TEST_TMPDIR/project"
   setup_cli_project "$project_dir"
   mkdir -p "$project_dir/docs"
@@ -41,12 +41,33 @@ setup_cli_project() {
   export GH_TOKEN="existing-token"
   resolved_project_dir="$(cd "$project_dir" && pwd -P)"
 
-  run bash -lc 'cd "'"$project_dir"'" && "'"$RUNOQ_ROOT"'/bin/runoq" plan docs/plan.md'
+  # Fake claude must return a valid plan-decomposer payload so plan.sh can parse it
+  local fake_claude_script="$TEST_TMPDIR/fake-claude"
+  cat >"$fake_claude_script" <<'FAKECLAUDE'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ -n "${FAKE_CLAUDE_LOG:-}" ]]; then
+  printf '%s\n' "$*" >>"$FAKE_CLAUDE_LOG"
+fi
+cat <<'PAYLOAD'
+<!-- runoq:payload:plan-decomposer -->
+```json
+{"items":[],"warnings":[]}
+```
+PAYLOAD
+FAKECLAUDE
+  chmod +x "$fake_claude_script"
+  export RUNOQ_CLAUDE_BIN="$fake_claude_script"
+
+  run bash -lc 'cd "'"$project_dir"'" && "'"$RUNOQ_ROOT"'/bin/runoq" plan docs/plan.md --dry-run'
 
   [ "$status" -eq 0 ]
   run cat "$FAKE_CLAUDE_LOG"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--skill plan-to-issues --add-dir $RUNOQ_ROOT -- "*"/docs/plan.md" ]]
+  [[ "$output" == *"--agent plan-decomposer --add-dir $RUNOQ_ROOT"* ]]
+  # Verify the payload contains an absolute path to the plan file (not a relative one)
+  [[ "$output" == *'"planPath": "/'* ]]
+  [[ "$output" == *"/docs/plan.md"* ]]
 }
 
 @test "runoq maintenance routes to the maintenance reviewer" {

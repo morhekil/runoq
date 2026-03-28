@@ -17,8 +17,8 @@ EOF
 
 parse_metadata_body() {
   local body_file="$1"
-  local block depends_line priority_line complexity_line type_line parent_epic_line
-  local depends_json priority_json complexity_json type_json parent_epic_json valid
+  local block depends_line priority_line complexity_line complexity_rationale_line type_line parent_epic_line
+  local depends_json priority_json complexity_json complexity_rationale_json type_json parent_epic_json valid
   block="$(awk '
     /<!-- runoq:meta/ { in_block = 1; next }
     in_block && /-->/ { exit }
@@ -26,13 +26,14 @@ parse_metadata_body() {
   ' "$body_file")"
 
   if [[ -z "$block" ]]; then
-    jq -n '{depends_on: [], priority: null, estimated_complexity: null, type: "task", parent_epic: null, metadata_present: false, metadata_valid: false}'
+    jq -n '{depends_on: [], priority: null, estimated_complexity: null, complexity_rationale: null, type: "task", parent_epic: null, metadata_present: false, metadata_valid: false}'
     return
   fi
 
   depends_line="$(printf '%s\n' "$block" | sed -n 's/^depends_on:[[:space:]]*//p' | head -n1)"
   priority_line="$(printf '%s\n' "$block" | sed -n 's/^priority:[[:space:]]*//p' | head -n1)"
   complexity_line="$(printf '%s\n' "$block" | sed -n 's/^estimated_complexity:[[:space:]]*//p' | head -n1)"
+  complexity_rationale_line="$(printf '%s\n' "$block" | sed -n 's/^complexity_rationale:[[:space:]]*//p' | head -n1)"
   type_line="$(printf '%s\n' "$block" | sed -n 's/^type:[[:space:]]*//p' | head -n1)"
   parent_epic_line="$(printf '%s\n' "$block" | sed -n 's/^parent_epic:[[:space:]]*//p' | head -n1)"
 
@@ -58,6 +59,12 @@ parse_metadata_body() {
     valid=false
   fi
 
+  if [[ -n "$complexity_rationale_line" && "$complexity_rationale_line" != "null" ]]; then
+    complexity_rationale_json="$(jq -Rn --arg value "$complexity_rationale_line" '$value')"
+  else
+    complexity_rationale_json='null'
+  fi
+
   if [[ "$type_line" == "epic" || "$type_line" == "task" ]]; then
     type_json="$(jq -Rn --arg value "$type_line" '$value')"
   else
@@ -74,6 +81,7 @@ parse_metadata_body() {
     --argjson depends_on "$depends_json" \
     --argjson priority "$priority_json" \
     --argjson estimated_complexity "$complexity_json" \
+    --argjson complexity_rationale "$complexity_rationale_json" \
     --arg type_val "$(printf '%s' "$type_json" | jq -r '.')" \
     --argjson parent_epic "$parent_epic_json" \
     --argjson metadata_valid "$([[ "$valid" == true ]] && echo true || echo false)" '
@@ -81,6 +89,7 @@ parse_metadata_body() {
       depends_on: $depends_on,
       priority: $priority,
       estimated_complexity: $estimated_complexity,
+      complexity_rationale: $complexity_rationale,
       type: $type_val,
       parent_epic: $parent_epic,
       metadata_present: true,
@@ -113,6 +122,7 @@ list_issues() {
         depends_on: $meta.depends_on,
         priority: $meta.priority,
         estimated_complexity: $meta.estimated_complexity,
+        complexity_rationale: $meta.complexity_rationale,
         type: $meta.type,
         parent_epic: $meta.parent_epic,
         metadata_present: $meta.metadata_present,
@@ -129,6 +139,7 @@ dependency_status() {
   done_label="$(runoq::config_get '.labels.done')"
 
   if ! output="$(runoq::gh issue view "$dependency" --repo "$repo" --json number,labels 2>/dev/null)"; then
+    runoq::log "issue-queue" "dependency_status: dependency #${dependency} not found (missing issue)"
     jq -n --argjson dependency "$dependency" '{
       dependency: $dependency,
       done: false,
@@ -136,6 +147,10 @@ dependency_status() {
     }'
     return
   fi
+
+  local dep_done
+  dep_done="$(printf '%s' "$output" | jq -r --arg done_label "$done_label" 'if (.labels | map(.name) | index($done_label)) then "true" else "false" end')"
+  runoq::log "issue-queue" "dependency_status: dependency #${dependency} done=${dep_done}"
 
   jq -n \
     --argjson dependency "$dependency" \
@@ -158,12 +173,20 @@ next_issue() {
   local ready_label="$2"
   local issues issue dependency dep_status blocked issue_with_status skipped
   issues="$(list_issues "$repo" "$ready_label")"
+  local total_count
+  total_count="$(printf '%s' "$issues" | jq 'length')"
+  runoq::log "issue-queue" "next_issue: found ${total_count} issues with label=${ready_label}"
   skipped='[]'
 
   while IFS= read -r issue; do
     [[ -z "$issue" ]] && continue
+    local issue_num issue_type
+    issue_num="$(printf '%s' "$issue" | jq -r '.number')"
+    issue_type="$(printf '%s' "$issue" | jq -r '.type')"
+    runoq::log "issue-queue" "next_issue: evaluating issue #${issue_num} type=${issue_type}"
 
-    if [[ "$(printf '%s' "$issue" | jq -r '.type')" == "epic" ]]; then
+    if [[ "$issue_type" == "epic" ]]; then
+      runoq::log "issue-queue" "next_issue: skipping #${issue_num} (epic — not directly dispatchable)"
       skipped="$(jq -n --argjson skipped "$skipped" --argjson issue "$issue" '$skipped + [$issue + {actionable: false, blocked_reasons: ["epic issues are not directly dispatchable"]}]')"
       continue
     fi
@@ -186,7 +209,10 @@ next_issue() {
       }
     ')"
 
-    if [[ "$(printf '%s' "$issue_with_status" | jq -r '.actionable')" == "true" ]]; then
+    local is_actionable
+    is_actionable="$(printf '%s' "$issue_with_status" | jq -r '.actionable')"
+    if [[ "$is_actionable" == "true" ]]; then
+      runoq::log "issue-queue" "next_issue: selected #${issue_num} as next actionable issue"
       jq -n --argjson issue "$issue_with_status" --argjson skipped "$skipped" '{
         issue: $issue,
         skipped: $skipped
@@ -194,9 +220,13 @@ next_issue() {
       return
     fi
 
+    local block_reasons
+    block_reasons="$(printf '%s' "$issue_with_status" | jq -r '.blocked_reasons | join(", ")')"
+    runoq::log "issue-queue" "next_issue: skipping #${issue_num} (blocked: ${block_reasons})"
     skipped="$(jq -n --argjson skipped "$skipped" --argjson issue "$issue_with_status" '$skipped + [$issue]')"
   done < <(printf '%s' "$issues" | jq -c 'sort_by((.priority // 999999), .number)[]')
 
+  runoq::log "issue-queue" "next_issue: no actionable issues found"
   jq -n --argjson skipped "$skipped" '{
     issue: null,
     skipped: $skipped
@@ -253,13 +283,16 @@ case "${1:-}" in
     new_label="$(runoq::label_for_status "$status")"
     current_labels="$(runoq::gh issue view "$issue_number" --repo "$repo" --json labels | jq -r '.labels[].name')"
     edit_args=()
+    removing_labels=""
     while IFS= read -r label; do
       [[ -z "$label" ]] && continue
       if [[ "$label" == runoq:* ]]; then
         edit_args+=(--remove-label "$label")
+        removing_labels="${removing_labels:+${removing_labels}, }${label}"
       fi
     done <<<"$current_labels"
     edit_args+=(--add-label "$new_label")
+    runoq::log "issue-queue" "set-status issue=#${issue_number}: removing=[${removing_labels}] adding=[${new_label}]"
     runoq::gh issue edit "$issue_number" --repo "$repo" "${edit_args[@]}" >/dev/null
     jq -n --argjson issue "$issue_number" --arg status "$status" --arg label "$new_label" '{
       issue: $issue,
@@ -276,6 +309,7 @@ case "${1:-}" in
     depends_on='[]'
     priority='3'
     estimated_complexity='medium'
+    complexity_rationale=''
     issue_type='task'
     parent_epic=''
     while [[ $# -gt 0 ]]; do
@@ -290,6 +324,10 @@ case "${1:-}" in
           ;;
         --estimated-complexity)
           estimated_complexity="${2:-medium}"
+          shift 2
+          ;;
+        --complexity-rationale)
+          complexity_rationale="${2:-}"
           shift 2
           ;;
         --type)
@@ -307,12 +345,15 @@ case "${1:-}" in
       esac
     done
 
-    body_file="$(mktemp "${TMPDIR:-/tmp}/runoq-issue-create.XXXXXX.md")"
+    body_file="$(mktemp "${TMPDIR:-/tmp}/runoq-issue-create.XXXXXX")"
     {
       echo "<!-- runoq:meta"
       printf 'depends_on: %s\n' "$(printf '%s' "$depends_on" | jq -c '.')"
       printf 'priority: %s\n' "$priority"
       printf 'estimated_complexity: %s\n' "$estimated_complexity"
+      if [[ -n "$complexity_rationale" ]]; then
+        printf 'complexity_rationale: %s\n' "$complexity_rationale"
+      fi
       printf 'type: %s\n' "$issue_type"
       if [[ -n "$parent_epic" ]]; then
         printf 'parent_epic: %s\n' "$parent_epic"
@@ -325,12 +366,14 @@ case "${1:-}" in
     ready_label="$(runoq::config_get '.labels.ready')"
     result="$(runoq::gh issue create --repo "$repo" --title "$title" --body-file "$body_file" --label "$ready_label")"
     rm -f "$body_file"
+    runoq::log "issue-queue" "create: title=\"${title}\" result_url=${result}"
 
     # If parent_epic is set, link the new issue as a sub-issue of the parent epic
     if [[ -n "$parent_epic" ]]; then
       new_issue_number="$(printf '%s' "$result" | grep -oE '[0-9]+$')"
       child_id="$(runoq::gh api "repos/${repo}/issues/${new_issue_number}" --jq '.id')"
       runoq::gh api "repos/${repo}/issues/${parent_epic}/sub_issues" --method POST -F "sub_issue_id=${child_id}" >/dev/null
+      runoq::log "issue-queue" "create: linked issue #${new_issue_number} as sub-issue of epic #${parent_epic}"
     fi
 
     jq -n --arg title "$title" --arg url "$result" '{title:$title, url:$url}'

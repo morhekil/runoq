@@ -7,6 +7,13 @@ runoq::die() {
   exit 1
 }
 
+# Structured logging — only emits when RUNOQ_LOG is non-empty.
+# Usage: runoq::log <prefix> <message>
+runoq::log() {
+  [[ -n "${RUNOQ_LOG:-}" ]] || return 0
+  printf '[%s] %s\n' "$1" "$2" >&2
+}
+
 runoq::script_dir() {
   cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd
 }
@@ -102,7 +109,54 @@ runoq::ensure_state_dir() {
   mkdir -p "$(runoq::state_dir)"
 }
 
+_RUNOQ_BOT_TOKEN_INIT=0
+
+# Auto-mint a GitHub App installation token using JWT + curl.
+# Uses curl (not gh) to avoid circular dependency with runoq::gh().
+runoq::_mint_bot_token() {
+  local identity_file
+  identity_file="$(runoq::target_root 2>/dev/null)/.runoq/identity.json" || return 1
+  [[ -f "$identity_file" ]] || return 1
+
+  local app_id installation_id key_path
+  app_id="$(jq -r '.appId' "$identity_file")"
+  installation_id="$(jq -r '.installationId' "$identity_file")"
+  key_path="${RUNOQ_APP_KEY:-$(jq -r '.privateKeyPath // empty' "$identity_file")}"
+  key_path="${key_path/#\~/$HOME}"
+
+  [[ -n "$app_id" && "$app_id" != "null" ]] || return 1
+  [[ -n "$installation_id" && "$installation_id" != "null" ]] || return 1
+  [[ -f "$key_path" ]] || return 1
+
+  # Mint JWT
+  local now exp header payload unsigned signature jwt
+  now="$(date +%s)"
+  exp="$((now + 540))"
+  header="$(printf '{"alg":"RS256","typ":"JWT"}' | openssl base64 -A | tr '+/' '-_' | tr -d '=')"
+  payload="$(jq -cnj --argjson iat "$now" --argjson exp "$exp" --arg iss "$app_id" \
+    '{iat:$iat,exp:$exp,iss:$iss}' | openssl base64 -A | tr '+/' '-_' | tr -d '=')"
+  unsigned="${header}.${payload}"
+  signature="$(printf '%s' "$unsigned" | openssl dgst -binary -sha256 -sign "$key_path" \
+    | openssl base64 -A | tr '+/' '-_' | tr -d '=')"
+  jwt="${unsigned}.${signature}"
+
+  # Exchange JWT for installation token via curl (not gh, to avoid re-entry)
+  local response token
+  response="$(curl -sf -X POST \
+    "https://api.github.com/app/installations/${installation_id}/access_tokens" \
+    -H "Authorization: Bearer ${jwt}" \
+    -H "Accept: application/vnd.github+json" 2>/dev/null)" || return 1
+  token="$(printf '%s' "$response" | jq -r '.token // empty')"
+  [[ -n "$token" ]] || return 1
+
+  export GH_TOKEN="$token"
+}
+
 runoq::gh() {
+  if [[ -z "${GH_TOKEN:-}" && "$_RUNOQ_BOT_TOKEN_INIT" -eq 0 ]]; then
+    _RUNOQ_BOT_TOKEN_INIT=1
+    runoq::_mint_bot_token 2>/dev/null || true
+  fi
   local gh_bin="${GH_BIN:-gh}"
   "$gh_bin" "$@"
 }
@@ -132,7 +186,7 @@ runoq::worktree_path() {
 }
 
 runoq::json_tmp() {
-  mktemp "${TMPDIR:-/tmp}/runoq.XXXXXX.json"
+  mktemp "${TMPDIR:-/tmp}/runoq.XXXXXX"
 }
 
 runoq::write_json_file() {
@@ -177,4 +231,74 @@ runoq::absolute_path() {
   else
     printf '%s/%s\n' "$(pwd)" "$path"
   fi
+}
+
+# ---------------------------------------------------------------------------
+# Retry helper for eventual consistency
+# ---------------------------------------------------------------------------
+
+# Retry a command up to N times with a pause between attempts.
+# Usage: runoq::retry <max_attempts> <pause_seconds> <command...>
+# Returns the exit code of the last attempt.
+runoq::retry() {
+  local max_attempts="$1" pause="$2"
+  shift 2
+  local attempt=1
+  while true; do
+    if "$@"; then
+      return 0
+    fi
+    if (( attempt >= max_attempts )); then
+      runoq::log "retry" "all ${max_attempts} attempts failed for: $*"
+      return 1
+    fi
+    runoq::log "retry" "attempt ${attempt}/${max_attempts} failed, retrying in ${pause}s: $*"
+    sleep "$pause"
+    attempt=$((attempt + 1))
+  done
+}
+
+# ---------------------------------------------------------------------------
+# Bot identity for git operations
+# ---------------------------------------------------------------------------
+
+# Returns the GitHub App ID from the identity file or RUNOQ_APP_ID env var.
+runoq::app_id() {
+  if [[ -n "${RUNOQ_APP_ID:-}" ]]; then
+    printf '%s\n' "$RUNOQ_APP_ID"
+    return
+  fi
+  local identity_file
+  identity_file="$(runoq::target_root)/.runoq/identity.json"
+  if [[ -f "$identity_file" ]]; then
+    jq -r '.appId' "$identity_file"
+  fi
+}
+
+# Returns the app slug from config (e.g. "runoq").
+runoq::app_slug() {
+  runoq::config_get '.identity.appSlug'
+}
+
+# Configure git user identity in a directory to match the GitHub App bot.
+# Usage: runoq::configure_git_bot_identity <dir>
+runoq::configure_git_bot_identity() {
+  local dir="$1"
+  local app_id slug
+  slug="$(runoq::app_slug)"
+  app_id="$(runoq::app_id)"
+  [[ -n "$slug" ]] || return 0
+  git -C "$dir" config user.name "${slug}[bot]"
+  if [[ -n "$app_id" ]]; then
+    git -C "$dir" config user.email "${app_id}+${slug}[bot]@users.noreply.github.com"
+  fi
+}
+
+# Rewrite a remote to use HTTPS with the current GH_TOKEN so pushes
+# are authenticated as the bot. No-op if GH_TOKEN is unset.
+# Usage: runoq::configure_git_bot_remote <dir> <repo> [remote]
+runoq::configure_git_bot_remote() {
+  local dir="$1" repo="$2" remote="${3:-origin}"
+  [[ -n "${GH_TOKEN:-}" ]] || return 0
+  git -C "$dir" remote set-url "$remote" "https://x-access-token:${GH_TOKEN}@github.com/${repo}.git"
 }

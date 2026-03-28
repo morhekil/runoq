@@ -273,7 +273,7 @@ eligibility() {
   local issue_json body_file metadata branch reasons reason message
 
   issue_json="$(runoq::gh issue view "$issue_number" --repo "$repo" --json number,title,body,labels,url)"
-  body_file="$(mktemp "${TMPDIR:-/tmp}/runoq-eligibility.XXXXXX.md")"
+  body_file="$(mktemp "${TMPDIR:-/tmp}/runoq-eligibility.XXXXXX")"
   printf '%s' "$issue_json" | jq -r '.body // ""' >"$body_file"
   metadata="$(parse_issue_metadata "$body_file")"
   branch="$(runoq::branch_name "$issue_number" "$(printf '%s' "$issue_json" | jq -r '.title // ""')")"

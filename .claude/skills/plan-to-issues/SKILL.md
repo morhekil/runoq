@@ -1,5 +1,10 @@
 # plan-to-issues
 
+> **Note:** This skill is superseded by `scripts/plan.sh` + the `plan-decomposer` agent.
+> Use `runoq plan <file>` instead, which calls the plan-decomposer agent for AI decomposition
+> and handles confirmation + issue creation deterministically in a shell script.
+> This skill definition is retained for reference.
+
 Use this skill to slice a local plan document into GitHub issues, organized into an epic/task hierarchy when appropriate.
 
 ## Process
@@ -31,13 +36,15 @@ Use this skill to slice a local plan document into GitHub issues, organized into
      See `"$RUNOQ_ROOT/test/fixtures/plans/untestable-example.md"`.
 6. Present the proposed issue queue to the user for confirmation before creating anything. The confirmation step must clearly show:
    - The epic/task tree (epics first, child tasks indented beneath).
-   - Complexity assignments for every task.
+   - Complexity assignments for every task, each with a 1-2 sentence rationale explaining *why* (e.g., "medium — touches two modules and introduces a new public API surface").
    - Which tasks will trigger bar-setter and which will not.
    - Dependency graph and any granularity warnings.
    This must include explicit confirmation before creating GitHub issues.
-7. Only after confirmation, create issues through `"$RUNOQ_ROOT/scripts/gh-issue-queue.sh" create`:
+   **Auto-confirm mode:** If the environment variable `RUNOQ_AUTO_CONFIRM=1` is set, skip the confirmation step and proceed directly to issue creation. This is used in CI and automated evaluation contexts.
+7. Only after confirmation (or auto-confirm), create issues through `"$RUNOQ_ROOT/scripts/gh-issue-queue.sh" create`:
    - **Create epics first** using `--type epic`.
    - **Then create child tasks** using `--type task --parent-epic <N>` where `<N>` is the epic issue number.
+   - **Pass `--complexity-rationale "<rationale>"`** on every task to record *why* the complexity level was chosen. This rationale is stored in the issue metadata and displayed on PRs.
    - **After all children are created**, update each epic with `--children N,M,O` to record the full child list.
    Do not hand-write `gh issue create` calls.
 8. After creation, summarize the created issue numbers, the epic→task hierarchy, and the dependency graph so the queue order is visible.
@@ -52,6 +59,22 @@ Use this skill to slice a local plan document into GitHub issues, organized into
   - Use `"$RUNOQ_ROOT/scripts/gh-issue-queue.sh" create` for each approved issue with the appropriate flags:
     - `--type epic|task`
     - `--parent-epic N` (for child tasks)
+    - `--estimated-complexity low|medium|high`
+    - `--complexity-rationale "<rationale>"`
     - `--children N,M,O` (for updating epics after children are created)
   - Reuse `"$RUNOQ_ROOT/templates/issue-template.md"` language and section structure.
   - Finish with the dependency graph including epic→task relationships and the created issue links or numbers.
+  - Emit a final structured payload for automated consumption:
+
+````markdown
+<!-- runoq:payload:plan-to-issues -->
+```json
+{
+  "issues": [
+    {"number": 1, "type": "epic", "title": "...", "complexity": null, "children": [2, 3]},
+    {"number": 2, "type": "task", "title": "...", "complexity": "medium", "complexity_rationale": "...", "parent_epic": 1, "depends_on": []},
+    {"number": 3, "type": "task", "title": "...", "complexity": "low", "complexity_rationale": "...", "parent_epic": 1, "depends_on": [2]}
+  ]
+}
+```
+````

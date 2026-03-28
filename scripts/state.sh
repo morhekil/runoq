@@ -302,8 +302,8 @@ validate_payload() {
   local source_file="$3"
   local extracted_file truth_file
 
-  extracted_file="$(mktemp "${TMPDIR:-/tmp}/runoq-payload.XXXXXX.json")"
-  truth_file="$(mktemp "${TMPDIR:-/tmp}/runoq-truth.XXXXXX.json")"
+  extracted_file="$(mktemp "${TMPDIR:-/tmp}/runoq-payload.XXXXXX")"
+  truth_file="$(mktemp "${TMPDIR:-/tmp}/runoq-truth.XXXXXX")"
   ground_truth_json "$worktree" "$base_sha" >"$truth_file"
 
   if ! extract_payload_block "$source_file" >"$extracted_file" || [[ ! -s "$extracted_file" ]]; then

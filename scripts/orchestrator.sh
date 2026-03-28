@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
+export RUNOQ_LOG=1
 
 # shellcheck source=./scripts/lib/common.sh
 source "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
@@ -11,7 +12,11 @@ RUNOQ_ROOT="${RUNOQ_ROOT:-$(runoq::root)}"
 # Ensure we use the app installation token for all GitHub operations
 # so comments/labels appear as the runoq bot, not the operator
 export RUNOQ_FORCE_REFRESH_TOKEN=1
-eval "$("$SCRIPTS_DIR/gh-auth.sh" export-token)" 2>/dev/null || true
+if eval "$("$SCRIPTS_DIR/gh-auth.sh" export-token)" 2>/dev/null; then
+  printf '[orchestrator] Token mint succeeded\n' >&2
+else
+  printf '[orchestrator] Token mint failed or skipped (will use ambient credentials)\n' >&2
+fi
 
 ###############################################################################
 # Usage
@@ -70,6 +75,10 @@ config_ready_label() {
   runoq::config_get '.labels.ready'
 }
 
+config_done_label() {
+  runoq::config_get '.labels.done'
+}
+
 config_reviewer() {
   runoq::config_get '.reviewers[0]' 2>/dev/null || printf ''
 }
@@ -115,7 +124,7 @@ post_audit_comment() {
   local body="$4"
   local comment_file
   comment_file="$(mktemp "${TMPDIR:-/tmp}/runoq-audit.XXXXXX")"
-  printf '<!-- runoq:event:%s -->\n%s\n' "$event" "$body" >"$comment_file"
+  printf '<!-- runoq:event:%s -->\n> Posted by `orchestrator` — %s phase\n\n%s\n' "$event" "$event" "$body" >"$comment_file"
   "$SCRIPTS_DIR/gh-pr-lifecycle.sh" comment "$repo" "$pr_number" "$comment_file" >/dev/null 2>&1 || true
   rm -f "$comment_file"
 }
@@ -123,8 +132,11 @@ post_audit_comment() {
 post_issue_comment() {
   local repo="$1"
   local issue_number="$2"
-  local body="$3"
-  runoq::gh issue comment "$issue_number" --repo "$repo" --body "$body" >/dev/null 2>&1 || true
+  local event="$3"
+  local body="$4"
+  local full_body
+  full_body="$(printf '<!-- runoq:event:%s -->\n> Posted by `orchestrator` — %s phase\n\n%s' "$event" "$event" "$body")"
+  runoq::gh issue comment "$issue_number" --repo "$repo" --body "$full_body" >/dev/null 2>&1 || true
 }
 
 ###############################################################################
@@ -189,26 +201,29 @@ get_issue_metadata() {
   local issue_json body_file metadata
 
   issue_json="$(runoq::gh issue view "$issue_number" --repo "$repo" --json number,title,body,labels,url)"
-  body_file="$(mktemp "${TMPDIR:-/tmp}/runoq-meta.XXXXXX.md")"
+  body_file="$(mktemp "${TMPDIR:-/tmp}/runoq-meta.XXXXXX")"
   printf '%s' "$issue_json" | jq -r '.body // ""' >"$body_file"
 
   metadata="$("$SCRIPTS_DIR/gh-issue-queue.sh" list "$repo" "$(config_ready_label)" 2>/dev/null | jq --argjson n "$issue_number" '.[] | select(.number == $n)' 2>/dev/null || printf '{}')"
 
   if [[ -z "$metadata" || "$metadata" == "{}" ]]; then
     # Parse from body directly
-    local block complexity type_val
+    local block complexity complexity_rationale type_val
     block="$(awk '/<!-- runoq:meta/{in_block=1;next} in_block && /-->/{exit} in_block{print}' "$body_file")"
     complexity="$(printf '%s\n' "$block" | sed -n 's/^estimated_complexity:[[:space:]]*//p' | head -n1)"
+    complexity_rationale="$(printf '%s\n' "$block" | sed -n 's/^complexity_rationale:[[:space:]]*//p' | head -n1)"
     type_val="$(printf '%s\n' "$block" | sed -n 's/^type:[[:space:]]*//p' | head -n1)"
     metadata="$(jq -n \
       --argjson issue "$issue_json" \
       --arg complexity "${complexity:-medium}" \
+      --arg complexity_rationale "${complexity_rationale:-}" \
       --arg type_val "${type_val:-task}" '{
       number: $issue.number,
       title: $issue.title,
       body: $issue.body,
       url: $issue.url,
       estimated_complexity: $complexity,
+      complexity_rationale: (if $complexity_rationale == "" or $complexity_rationale == "null" then null else $complexity_rationale end),
       type: $type_val
     }')"
   fi
@@ -247,18 +262,27 @@ phase_init() {
   # 2. Set issue in-progress
   "$SCRIPTS_DIR/gh-issue-queue.sh" set-status "$repo" "$issue_number" "in-progress" >/dev/null
 
-  # 3. Create worktree
+  # 3. Create worktree (bot identity is set by worktree.sh)
   worktree_json="$("$SCRIPTS_DIR/worktree.sh" create "$issue_number" "$title")"
   worktree="$(printf '%s' "$worktree_json" | jq -r '.worktree')"
   branch="$(printf '%s' "$worktree_json" | jq -r '.branch')"
+  log_info "INIT: worktree=${worktree} branch=${branch}"
 
-  # 4. Create initial empty commit and push
+  # 4. Configure HTTPS remote with bot token so pushes are attributed to the app
+  if runoq::configure_git_bot_remote "$worktree" "$repo" 2>/dev/null; then
+    log_info "INIT: bot remote configured for worktree"
+  else
+    log_info "INIT: bot remote configuration failed or skipped for worktree"
+  fi
+
+  # 5. Create initial empty commit and push
   git -C "$worktree" commit --allow-empty -m "runoq: begin work on #${issue_number}" >/dev/null 2>&1
   git -C "$worktree" push -u origin "$branch" >/dev/null 2>&1
 
   # 5. Create draft PR
   pr_json="$("$SCRIPTS_DIR/gh-pr-lifecycle.sh" create "$repo" "$branch" "$issue_number" "$title")"
   pr_number="$(printf '%s' "$pr_json" | jq -r '.number')"
+  log_info "INIT: created draft PR #${pr_number} for branch=${branch}"
 
   # 6. Save state
   local state
@@ -298,6 +322,8 @@ phase_criteria() {
   local complexity worktree branch pr_number
 
   complexity="$(printf '%s' "$4" | jq -r '.estimated_complexity // "medium"')"
+  local complexity_rationale
+  complexity_rationale="$(printf '%s' "$4" | jq -r '.complexity_rationale // empty')"
   worktree="$(printf '%s' "$state_json" | jq -r '.worktree')"
   branch="$(printf '%s' "$state_json" | jq -r '.branch')"
   pr_number="$(printf '%s' "$state_json" | jq -r '.pr_number')"
@@ -317,7 +343,7 @@ phase_criteria() {
   local spec_file payload bar_setter_output output_file criteria_commit
 
   # Write issue body to spec file
-  spec_file="$(mktemp "${TMPDIR:-/tmp}/runoq-spec.XXXXXX.md")"
+  spec_file="$(mktemp "${TMPDIR:-/tmp}/runoq-spec.XXXXXX")"
   runoq::gh issue view "$issue_number" --repo "$repo" --json body | jq -r '.body // ""' >"$spec_file"
 
   payload="$(jq -n \
@@ -347,7 +373,13 @@ phase_criteria() {
   # Post criteria summary as PR comment
   local summary_file
   summary_file="$(mktemp "${TMPDIR:-/tmp}/runoq-criteria-summary.XXXXXX")"
-  printf '<!-- runoq:event:criteria -->\n## Acceptance Criteria Set\n\nCriteria commit: `%s`\nComplexity: %s\n' "$criteria_commit" "$complexity" >"$summary_file"
+  {
+    printf '<!-- runoq:event:criteria -->\n## Acceptance Criteria Set\n\nCriteria commit: `%s`\nComplexity: **%s**' "$criteria_commit" "$complexity"
+    if [[ -n "$complexity_rationale" ]]; then
+      printf -- ' — %s' "$complexity_rationale"
+    fi
+    printf '\n'
+  } >"$summary_file"
   "$SCRIPTS_DIR/gh-pr-lifecycle.sh" comment "$repo" "$pr_number" "$summary_file" >/dev/null 2>&1 || true
   rm -f "$summary_file"
 
@@ -389,7 +421,7 @@ phase_develop() {
 
   # Write issue body to spec file
   local spec_file
-  spec_file="$(mktemp "${TMPDIR:-/tmp}/runoq-spec.XXXXXX.md")"
+  spec_file="$(mktemp "${TMPDIR:-/tmp}/runoq-spec.XXXXXX")"
   runoq::gh issue view "$issue_number" --repo "$repo" --json body | jq -r '.body // ""' >"$spec_file"
 
   # Build issue-runner payload
@@ -431,7 +463,7 @@ phase_develop() {
 
   # Write payload to temp file for issue-runner
   local payload_file output_file runner_result
-  payload_file="$(mktemp "${TMPDIR:-/tmp}/runoq-runner-payload.XXXXXX.json")"
+  payload_file="$(mktemp "${TMPDIR:-/tmp}/runoq-runner-payload.XXXXXX")"
   printf '%s' "$payload" > "$payload_file"
   output_file="$(mktemp "${TMPDIR:-/tmp}/runoq-runner-out.XXXXXX")"
 
@@ -447,12 +479,17 @@ phase_develop() {
 
   # Log runner stderr for diagnostics
   if [[ -s "$runner_stderr_file" ]]; then
-    log_info "issue-runner stderr: $(head -5 "$runner_stderr_file")"
+    log_info "issue-runner stderr ($(wc -l < "$runner_stderr_file") lines): $(head -10 "$runner_stderr_file")"
+    log_info "issue-runner stderr tail: $(tail -5 "$runner_stderr_file")"
+  else
+    log_info "issue-runner stderr: <empty>"
   fi
   rm -f "$runner_stderr_file"
 
   # Parse issue-runner return payload
   # The issue-runner script outputs clean JSON to stdout; try direct parse first
+  log_info "issue-runner output file: size=$(wc -c < "$output_file") lines=$(wc -l < "$output_file")"
+  log_info "issue-runner output head: $(head -3 "$output_file" 2>/dev/null | tr '\n' ' ')"
   runner_result="$(jq -e '.' "$output_file" 2>/dev/null || printf '')"
   if [[ -z "$runner_result" ]]; then
     # Fallback: extract from marked payload blocks (agent-based runner)
@@ -588,10 +625,15 @@ phase_review() {
 
   # Parse verdict from reviewLogPath
   local verdict_json verdict score review_checklist
-  if [[ -n "$review_log_path" && -f "$review_log_path" ]]; then
-    verdict_json="$(parse_review_verdict "$review_log_path")"
+  local review_log_abs="${review_log_path}"
+  if [[ -n "$review_log_path" && "$review_log_path" != /* ]]; then
+    review_log_abs="${worktree}/${review_log_path}"
+  fi
+  log_info "REVIEW: review_log_path=${review_log_path} review_log_abs=${review_log_abs} exists=$([[ -f "${review_log_abs:-/dev/null}" ]] && echo yes || echo no)"
+  if [[ -n "$review_log_abs" && -f "$review_log_abs" ]]; then
+    verdict_json="$(parse_review_verdict "$review_log_abs")"
   else
-    # Try to parse from the output file itself
+    log_info "REVIEW: review log not found, parsing from claude output file"
     verdict_json="$(parse_review_verdict "$review_output_file" 2>/dev/null || jq -n '{verdict:"FAIL",score:"0",checklist:"",review_type:""}')"
   fi
 
@@ -606,16 +648,24 @@ phase_review() {
 
   log_info "REVIEW: verdict=${verdict} score=${score}"
 
-  # Post review result as PR comment
-  local review_comment_file
+  # Post review result as PR comment with full context
+  local review_comment_file max_rounds_val
+  max_rounds_val="$(config_max_rounds)"
   review_comment_file="$(mktemp "${TMPDIR:-/tmp}/runoq-review-comment.XXXXXX")"
   cat >"$review_comment_file" <<REVIEWEOF
 <!-- runoq:event:review -->
-## Diff Review - Round ${round}
+## Diff Review — round ${round} / ${max_rounds_val}
 
-- **Verdict**: ${verdict}
-- **Score**: ${score}
-$(if [[ -n "$review_checklist" ]]; then printf '\n### Checklist\n%s\n' "$review_checklist"; fi)
+> Posted by \`orchestrator\` via \`diff-reviewer\` agent
+
+| Field | Value |
+|-------|-------|
+| **Verdict** | ${verdict} |
+| **Score** | ${score} |
+| **Commit range** | \`${baseline_hash:0:7}..${head_hash:0:7}\` |
+| **Changed files** | ${changed_files} |
+
+$(if [[ -n "$review_checklist" ]]; then printf '### Checklist\n%s\n' "$review_checklist"; fi)
 REVIEWEOF
   "$SCRIPTS_DIR/gh-pr-lifecycle.sh" comment "$repo" "$pr_number" "$review_comment_file" >/dev/null 2>&1 || true
   rm -f "$review_comment_file"
@@ -700,6 +750,10 @@ phase_finalize() {
   complexity="$(printf '%s' "$metadata_json" | jq -r '.estimated_complexity // "medium"')"
   caveats="$(printf '%s' "$state_json" | jq -r '.caveats // ""')"
   worktree="$(printf '%s' "$state_json" | jq -r '.worktree')"
+  local score round max_rounds
+  score="$(printf '%s' "$state_json" | jq -r '.score // "n/a"')"
+  round="$(printf '%s' "$state_json" | jq -r '.round // "?"')"
+  max_rounds="$(config_max_rounds)"
 
   log_info "FINALIZE: issue #${issue_number} decision=${decision} complexity=${complexity}"
 
@@ -739,6 +793,8 @@ phase_finalize() {
     fi
   fi
 
+  log_info "FINALIZE: decision table: auto_merge_enabled=${auto_merge_enabled} max_complexity=${max_complexity} complexity=${complexity} complexity_ok=${complexity_ok:-n/a} finalize_verdict=${finalize_verdict} finalize_reason=${finalize_reason:-none} issue_status=${issue_status}"
+
   # Finalize PR
   local reviewer finalize_args
   reviewer="$(config_reviewer)"
@@ -746,26 +802,52 @@ phase_finalize() {
   if [[ "$finalize_verdict" == "needs-review" && -n "$reviewer" ]]; then
     finalize_args=(--reviewer "$reviewer")
   fi
+  log_info "FINALIZE: calling pr-lifecycle finalize verdict=${finalize_verdict} pr=#${pr_number}"
   "$SCRIPTS_DIR/gh-pr-lifecycle.sh" finalize "$repo" "$pr_number" "$finalize_verdict" "${finalize_args[@]}" >/dev/null 2>&1 || true
 
   # Set issue status
-  "$SCRIPTS_DIR/gh-issue-queue.sh" set-status "$repo" "$issue_number" "$issue_status" >/dev/null 2>&1 || true
+  log_info "FINALIZE: setting issue #${issue_number} status to ${issue_status}"
+  if "$SCRIPTS_DIR/gh-issue-queue.sh" set-status "$repo" "$issue_number" "$issue_status" >/dev/null 2>&1; then
+    log_info "FINALIZE: set-status succeeded for issue #${issue_number}"
+  else
+    log_info "FINALIZE: set-status failed for issue #${issue_number}"
+  fi
 
   # Remove worktree if auto-merged
   if [[ "$finalize_verdict" == "auto-merge" ]]; then
-    "$SCRIPTS_DIR/worktree.sh" remove "$issue_number" >/dev/null 2>&1 || true
+    log_info "FINALIZE: removing worktree for issue #${issue_number} (auto-merged)"
+    if "$SCRIPTS_DIR/worktree.sh" remove "$issue_number" >/dev/null 2>&1; then
+      log_info "FINALIZE: worktree removed successfully"
+    else
+      log_info "FINALIZE: worktree removal failed"
+    fi
   fi
 
-  # Post finalization comment with motivation
-  local finalize_detail="Finalized: ${finalize_verdict}. Issue status: ${issue_status}."
-  if [[ -n "$finalize_reason" ]]; then
-    finalize_detail="${finalize_detail} Reason: ${finalize_reason}"
-  fi
+  # Post finalization comment with full decision context
+  local finalize_detail
+  finalize_detail="$(cat <<FINALIZE
+## Finalize — issue #${issue_number}
+
+| Field | Value |
+|-------|-------|
+| **Decision** | \`${finalize_verdict}\` |
+| **Issue status** | \`${issue_status}\` |
+| **Review verdict** | ${verdict} |
+| **Review score** | ${score} |
+| **Complexity** | ${complexity} |
+| **Auto-merge enabled** | ${auto_merge_enabled} |
+| **Auto-merge max complexity** | ${max_complexity} |
+| **Round** | ${round} / ${max_rounds} |
+
+$(if [[ -n "$finalize_reason" ]]; then printf '**Reason**: %s\n' "$finalize_reason"; fi)
+$(if [[ -n "$caveats" && "$caveats" != "[]" && "$caveats" != "" ]]; then printf '**Caveats**: %s\n' "$caveats"; fi)
+FINALIZE
+)"
   post_audit_comment "$repo" "$pr_number" "finalize" "$finalize_detail"
 
   # Also post status on the issue itself for visibility
   if [[ "$finalize_verdict" == "needs-review" ]]; then
-    post_issue_comment "$repo" "$issue_number" "finalize" "Marked for human review. ${finalize_reason}"
+    post_issue_comment "$repo" "$issue_number" "finalize" "Marked for human review.\n\n**Reason**: ${finalize_reason}\n**Verdict**: ${verdict}\n**Score**: ${score}\n**Complexity**: ${complexity}"
   fi
 
   # Save terminal state
@@ -1052,6 +1134,22 @@ run_queue() {
 
   failure_limit="$(config_consecutive_failure_limit)"
 
+  # Configure target repo git identity + HTTPS remote so all git operations
+  # (commits, pushes) are attributed to the bot, not the operator
+  local target_root
+  target_root="$(runoq::target_root)"
+  log_info "Configuring bot identity for target root: ${target_root}"
+  if runoq::configure_git_bot_identity "$target_root" 2>/dev/null; then
+    log_info "Bot identity configured successfully"
+  else
+    log_info "Bot identity configuration failed or skipped"
+  fi
+  if runoq::configure_git_bot_remote "$target_root" "$repo" 2>/dev/null; then
+    log_info "Bot remote configured successfully for repo=${repo}"
+  else
+    log_info "Bot remote configuration failed or skipped"
+  fi
+
   # Reconcile stale state first
   log_info "Running reconciliation"
   "$SCRIPTS_DIR/dispatch-safety.sh" reconcile "$repo" >/dev/null 2>&1 || true
@@ -1080,16 +1178,22 @@ run_queue() {
     ready_label="$(config_ready_label)"
     queue_result="$("$SCRIPTS_DIR/gh-issue-queue.sh" next "$repo" "$ready_label")"
 
+    local total_skipped skipped_summary
+    total_skipped="$(printf '%s' "$queue_result" | jq -r '.skipped | length')"
+    skipped_summary="$(printf '%s' "$queue_result" | jq -r '.skipped | map("#\(.number // "?") — \(.blocked_reasons // ["unknown"] | join(", "))") | join("; ")')"
     next_issue="$(printf '%s' "$queue_result" | jq -r '.issue // empty')"
+
     if [[ -z "$next_issue" || "$next_issue" == "null" ]]; then
-      log_info "No actionable issues in queue"
-      # Report skipped reasons
-      local skipped
-      skipped="$(printf '%s' "$queue_result" | jq -r '.skipped | length')"
-      if [[ "$skipped" -gt 0 ]]; then
-        log_info "Skipped ${skipped} issues (blocked or ineligible)"
+      log_info "Queue result: 0 actionable issues, ${total_skipped} skipped"
+      if [[ "$total_skipped" -gt 0 ]]; then
+        log_info "Skipped details: ${skipped_summary}"
       fi
       break
+    else
+      log_info "Queue result: 1 actionable issue found, ${total_skipped} skipped"
+      if [[ "$total_skipped" -gt 0 ]]; then
+        log_info "Skipped details: ${skipped_summary}"
+      fi
     fi
 
     next_issue_number="$(printf '%s' "$next_issue" | jq -r '.number')"
@@ -1098,10 +1202,31 @@ run_queue() {
     log_info "Processing issue #${next_issue_number}: ${next_title}"
 
     if process_issue "$repo" "$next_issue_number" "$dry_run" "$next_title"; then
+      local terminal_phase
+      terminal_phase="$(load_state "$next_issue_number" | jq -r '.phase // "unknown"' 2>/dev/null || printf 'unknown')"
+      log_info "Issue #${next_issue_number} succeeded — terminal phase: ${terminal_phase}"
       consecutive_failures=0
+      # Verify label change propagated before re-querying the queue
+      if [[ "$terminal_phase" == "DONE" ]]; then
+        local issue_status expected_label
+        issue_status="$(load_state "$next_issue_number" | jq -r '.issue_status // "done"' 2>/dev/null || printf 'done')"
+        expected_label="$(runoq::label_for_status "$issue_status" 2>/dev/null || config_done_label)"
+        local _attempt
+        for _attempt in 1 2 3 4 5; do
+          if runoq::gh issue view "$next_issue_number" --repo "$repo" --json labels \
+            | jq -e --arg l "$expected_label" '.labels | map(.name) | index($l) != null' >/dev/null 2>&1; then
+            log_info "Label propagation confirmed for issue #${next_issue_number}: ${expected_label} (attempt ${_attempt})"
+            break
+          fi
+          log_info "Waiting for label propagation on issue #${next_issue_number}: expecting ${expected_label} (attempt ${_attempt}/5)"
+          sleep 3
+        done
+      fi
     else
       consecutive_failures=$((consecutive_failures + 1))
-      log_error "Issue #${next_issue_number} failed (consecutive: ${consecutive_failures}/${failure_limit})"
+      local terminal_phase
+      terminal_phase="$(load_state "$next_issue_number" | jq -r '.phase // "unknown"' 2>/dev/null || printf 'unknown')"
+      log_error "Issue #${next_issue_number} failed — terminal phase: ${terminal_phase} (consecutive: ${consecutive_failures}/${failure_limit})"
     fi
 
     # Check for dry run
@@ -1109,6 +1234,56 @@ run_queue() {
       break
     fi
   done
+
+  # ---------------------------------------------------------------------------
+  # Epic sweep: after all tasks drain, check if any epics can be integrated
+  # ---------------------------------------------------------------------------
+  if [[ "$dry_run" != "true" ]]; then
+    local ready_label_epic epic_issues
+    ready_label_epic="$(config_ready_label)"
+    epic_issues="$("$SCRIPTS_DIR/gh-issue-queue.sh" list "$repo" "$ready_label_epic" | jq -c '[.[] | select(.type == "epic")]')"
+    local epic_count
+    epic_count="$(printf '%s' "$epic_issues" | jq 'length')"
+
+    if [[ "$epic_count" -gt 0 ]]; then
+      log_info "Epic sweep: found ${epic_count} epic(s) to evaluate"
+
+      while IFS= read -r epic; do
+        [[ -z "$epic" ]] && continue
+        local epic_number epic_title epic_status_json all_children_done
+        epic_number="$(printf '%s' "$epic" | jq -r '.number')"
+        epic_title="$(printf '%s' "$epic" | jq -r '.title // "untitled"')"
+
+        epic_status_json="$("$SCRIPTS_DIR/gh-issue-queue.sh" epic-status "$repo" "$epic_number")"
+        all_children_done="$(printf '%s' "$epic_status_json" | jq -r '.all_done')"
+
+        if [[ "$all_children_done" != "true" ]]; then
+          local pending_children
+          pending_children="$(printf '%s' "$epic_status_json" | jq -r '.pending | map("#" + tostring) | join(", ")')"
+          log_info "Epic sweep: epic #${epic_number} (${epic_title}) — children pending: ${pending_children}"
+          continue
+        fi
+
+        log_info "Epic sweep: all children done for epic #${epic_number} (${epic_title}) — running integration"
+
+        # Build minimal state for phase_integrate
+        local epic_state
+        if state_file_exists "$epic_number"; then
+          epic_state="$(load_state "$epic_number")"
+        else
+          epic_state="$(jq -n --argjson n "$epic_number" '{issue_number: $n, phase: "DECIDE", next_phase: "INTEGRATE"}')"
+        fi
+
+        if phase_integrate "$repo" "$epic_number" "$epic_state"; then
+          local epic_phase
+          epic_phase="$(load_state "$epic_number" | jq -r '.phase // "unknown"' 2>/dev/null || printf 'unknown')"
+          log_info "Epic sweep: epic #${epic_number} integration complete — phase: ${epic_phase}"
+        else
+          log_error "Epic sweep: epic #${epic_number} integration failed"
+        fi
+      done < <(printf '%s' "$epic_issues" | jq -c '.[]')
+    fi
+  fi
 }
 
 ###############################################################################

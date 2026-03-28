@@ -54,13 +54,9 @@ run_subcommand() {
 }
 
 plan_subcommand() {
-  local plan_file
-  [[ $# -eq 1 ]] || runoq::die "Usage: runoq plan <file>"
+  [[ $# -ge 1 ]] || runoq::die "Usage: runoq plan <file> [--auto-confirm] [--dry-run]"
   prepare_target_context
-  prepare_auth
-  plan_file="$(runoq::absolute_path "$1")"
-  [[ -f "$plan_file" ]] || runoq::die "Plan file not found: $plan_file"
-  claude_exec --skill plan-to-issues --add-dir "$RUNOQ_ROOT" -- "$plan_file"
+  "$RUNOQ_ROOT/scripts/plan.sh" "$REPO" "$@"
 }
 
 maintenance_subcommand() {
