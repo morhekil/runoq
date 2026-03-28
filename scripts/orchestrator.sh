@@ -8,6 +8,11 @@ source "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
 SCRIPTS_DIR="$(cd "$(dirname "$0")" && pwd)"
 RUNOQ_ROOT="${RUNOQ_ROOT:-$(runoq::root)}"
 
+# Ensure we use the app installation token for all GitHub operations
+# so comments/labels appear as the runoq bot, not the operator
+export RUNOQ_FORCE_REFRESH_TOKEN=1
+eval "$("$SCRIPTS_DIR/gh-auth.sh" export-token)" 2>/dev/null || true
+
 ###############################################################################
 # Usage
 ###############################################################################
@@ -699,37 +704,39 @@ phase_finalize() {
   log_info "FINALIZE: issue #${issue_number} decision=${decision} complexity=${complexity}"
 
   # Decision table
-  if [[ "$verdict" == "PASS" && "$complexity" == "low" && -z "$caveats" ]]; then
-    finalize_verdict="auto-merge"
-    issue_status="done"
-  elif [[ "$verdict" == "PASS" ]]; then
-    finalize_verdict="needs-review"
-    issue_status="needs-review"
-  else
-    finalize_verdict="needs-review"
-    issue_status="needs-review"
-  fi
+  local finalize_reason=""
+  local auto_merge_enabled max_complexity
+  auto_merge_enabled="$(config_auto_merge_enabled)"
+  max_complexity="$(config_auto_merge_max_complexity)"
 
-  # Check auto-merge config
-  if [[ "$finalize_verdict" == "auto-merge" ]]; then
-    local auto_merge_enabled max_complexity
-    auto_merge_enabled="$(config_auto_merge_enabled)"
-    max_complexity="$(config_auto_merge_max_complexity)"
-    if [[ "$auto_merge_enabled" != "true" ]]; then
+  if [[ "$verdict" != "PASS" ]]; then
+    finalize_verdict="needs-review"
+    issue_status="needs-review"
+    finalize_reason="Review verdict was ${verdict} (not PASS)."
+  elif [[ -n "$caveats" && "$caveats" != "[]" && "$caveats" != "" ]]; then
+    finalize_verdict="needs-review"
+    issue_status="needs-review"
+    finalize_reason="Caveats present: ${caveats}"
+  elif [[ "$auto_merge_enabled" != "true" ]]; then
+    finalize_verdict="needs-review"
+    issue_status="needs-review"
+    finalize_reason="Auto-merge is disabled in config."
+  else
+    # Check complexity against auto-merge threshold
+    local complexity_ok=false
+    case "$max_complexity" in
+      low)    [[ "$complexity" == "low" ]] && complexity_ok=true ;;
+      medium) [[ "$complexity" == "low" || "$complexity" == "medium" ]] && complexity_ok=true ;;
+      high)   complexity_ok=true ;;
+    esac
+    if [[ "$complexity_ok" == "true" ]]; then
+      finalize_verdict="auto-merge"
+      issue_status="done"
+    else
       finalize_verdict="needs-review"
       issue_status="needs-review"
+      finalize_reason="Complexity '${complexity}' exceeds auto-merge threshold '${max_complexity}'."
     fi
-    # Validate complexity against max
-    case "$max_complexity" in
-      low)
-        [[ "$complexity" == "low" ]] || { finalize_verdict="needs-review"; issue_status="needs-review"; }
-        ;;
-      medium)
-        [[ "$complexity" == "low" || "$complexity" == "medium" ]] || { finalize_verdict="needs-review"; issue_status="needs-review"; }
-        ;;
-      high)
-        ;;
-    esac
   fi
 
   # Finalize PR
@@ -749,8 +756,17 @@ phase_finalize() {
     "$SCRIPTS_DIR/worktree.sh" remove "$issue_number" >/dev/null 2>&1 || true
   fi
 
-  # Post finalization comment
-  post_audit_comment "$repo" "$pr_number" "finalize" "Finalized: ${finalize_verdict}. Issue status: ${issue_status}."
+  # Post finalization comment with motivation
+  local finalize_detail="Finalized: ${finalize_verdict}. Issue status: ${issue_status}."
+  if [[ -n "$finalize_reason" ]]; then
+    finalize_detail="${finalize_detail} Reason: ${finalize_reason}"
+  fi
+  post_audit_comment "$repo" "$pr_number" "finalize" "$finalize_detail"
+
+  # Also post status on the issue itself for visibility
+  if [[ "$finalize_verdict" == "needs-review" ]]; then
+    post_issue_comment "$repo" "$issue_number" "finalize" "Marked for human review. ${finalize_reason}"
+  fi
 
   # Save terminal state
   local final_phase
