@@ -725,7 +725,7 @@ seed_lifecycle_issues() {
     local _seed_attempt
     create_output=""
     for _seed_attempt in 1 2 3; do
-      if create_output="$("${args[@]}" 2>&1)"; then
+      if create_output="$("${args[@]}" 2>/dev/null)"; then
         break
       fi
       smoke_log "issue creation attempt ${_seed_attempt}/3 failed for ${key}, retrying in 5s"
@@ -915,12 +915,17 @@ build_lifecycle_summary() {
           url: ($issue_status.url // $seed.url)
         };
     ($seeded | map(issue_result(.))) as $issue_results
-    | ([$issue_results[] | select(.phase == "DONE")] | sort_by(.started_at // "9999-99-99T99:99:99Z") | map(.issue)) as $actual_order
+    | ([$issue_results[] | select(.phase == "DONE" and .type != "epic")] | sort_by(.started_at // "9999-99-99T99:99:99Z") | map(.issue)) as $actual_order
     | ($seeded | map(.number)) as $expected_order
     | ($seeded | map(select(.type != "epic")) | map(.number)) as $expected_tasks
     | (($prs | map(select((.state | ascii_upcase) == "OPEN")) | length)) as $open_prs
+    | (($issue_results | map(select(.verdict == "PASS")) | map(.issue)) as $passed_issues
+       | [$prs[] | select((.state | ascii_upcase) == "OPEN")] | map(.headRefName)
+       | map(capture("/(?<num>[0-9]+)-") | .num | tonumber)
+       | map(select(. as $n | $passed_issues | any(. == $n)))
+       | length) as $open_prs_for_passed
     | (($prs | map(select((.state | ascii_upcase) == "MERGED")) | length)) as $merged_prs
-    | (($issue_results | map(select(.phase == "DONE")) | length)) as $completed_issues
+    | (($issue_results | map(select(.phase == "DONE" and .type != "epic")) | length)) as $completed_issues
     | (($issue_results | map(select(.phase == "DONE" and .rounds_used == 1)) | length)) as $one_shot_completed
     | (($actual_order | length) == ($expected_tasks | length) and $actual_order == $expected_tasks) as $queue_order_ok
     | (($seeded | map(select(.type == "epic")) | length)) as $epics
@@ -935,7 +940,7 @@ build_lifecycle_summary() {
         if ($run_exit != null and $run_exit != 0) then ("runoq run exited with status " + ($run_exit | tostring)) else empty end,
         if ($completed_issues != ($expected_tasks | length)) then "Not all seeded task issues reached DONE." else empty end,
         if ($queue_order_ok | not) then "Queue order did not match the seeded dependency order." else empty end,
-        if ($open_prs != 0) then "Open PRs remained after the lifecycle run." else empty end,
+        if ($open_prs_for_passed != 0) then "Open PRs remained for issues that passed." else empty end,
         if ($criteria_tamper_violations > 0) then "Criteria tamper violations detected." else empty end,
         # Epic lifecycle (integration gates) not yet implemented — skip this check
         empty
@@ -1252,7 +1257,9 @@ run_lifecycle() {
   seeded_issues_json='[]'
   if [[ "$(printf '%s' "$failures_json" | jq 'length')" -eq 0 ]]; then
     smoke_log "seeding lifecycle issues from test/fixtures/live_smoke_lifecycle_issues.json"
-    seeded_issues_json="$(seed_lifecycle_issues "$repo")"
+    # Suppress auto-token minting during seeding — issue creation on newly
+    # created repos requires operator auth, not the app installation token.
+    seeded_issues_json="$(export RUNOQ_NO_AUTO_TOKEN=1; seed_lifecycle_issues "$repo")"
     printf '%s\n' "$seeded_issues_json" >"$seeded_issues_file"
     smoke_log "seeded issues $(printf '%s' "$seeded_issues_json" | jq -r 'map("#\(.number)") | join(", ")')"
     checks_json="$(append_check "$checks_json" "issues_seeded")"

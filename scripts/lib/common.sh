@@ -153,7 +153,7 @@ runoq::_mint_bot_token() {
 }
 
 runoq::gh() {
-  if [[ -z "${GH_TOKEN:-}" && "$_RUNOQ_BOT_TOKEN_INIT" -eq 0 ]]; then
+  if [[ -z "${GH_TOKEN:-}" && -z "${RUNOQ_NO_AUTO_TOKEN:-}" && "$_RUNOQ_BOT_TOKEN_INIT" -eq 0 ]]; then
     _RUNOQ_BOT_TOKEN_INIT=1
     runoq::_mint_bot_token 2>/dev/null || true
   fi
