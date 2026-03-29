@@ -360,7 +360,7 @@ phase_criteria() {
   }')"
 
   output_file="$(mktemp "${TMPDIR:-/tmp}/runoq-barsetter-out.XXXXXX")"
-  claude_exec --print --permission-mode bypassPermissions --agent bar-setter --add-dir "$RUNOQ_ROOT" -- "$payload" >"$output_file" 2> >(tee -a "$output_file" >&2) || true
+  claude_exec --print --permission-mode bypassPermissions --agent bar-setter --add-dir "$RUNOQ_ROOT" -- "$payload" 2>&1 | tee "$output_file" >&2 || true
 
   # Extract criteria_commit from bar-setter output
   criteria_commit="$(extract_marked_block "$output_file" 'runoq:payload:bar-setter' | jq -r '.criteria_commit // empty' 2>/dev/null || printf '')"
@@ -473,7 +473,7 @@ phase_develop() {
   if [[ -x "$SCRIPTS_DIR/issue-runner.sh" ]]; then
     "$SCRIPTS_DIR/issue-runner.sh" run "$payload_file" >"$output_file" 2>"$runner_stderr_file" || true
   else
-    claude_exec --print --permission-mode bypassPermissions --agent issue-runner --add-dir "$RUNOQ_ROOT" -- "$payload" >"$output_file" 2> >(tee -a "$output_file" >&2) || true
+    claude_exec --print --permission-mode bypassPermissions --agent issue-runner --add-dir "$RUNOQ_ROOT" -- "$payload" 2>&1 | tee "$output_file" >&2 || true
   fi
   rm -f "$payload_file"
 
@@ -621,7 +621,7 @@ phase_review() {
 
   local review_output_file
   review_output_file="$(mktemp "${TMPDIR:-/tmp}/runoq-review-out.XXXXXX")"
-  claude_exec --print --permission-mode bypassPermissions --agent diff-reviewer --add-dir "$RUNOQ_ROOT" -- "$review_payload" >"$review_output_file" 2> >(tee -a "$review_output_file" >&2) || true
+  claude_exec --print --permission-mode bypassPermissions --agent diff-reviewer --add-dir "$RUNOQ_ROOT" -- "$review_payload" 2>&1 | tee "$review_output_file" >&2 || true
 
   # Parse verdict from reviewLogPath
   local verdict_json verdict score review_checklist
