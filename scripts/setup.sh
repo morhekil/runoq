@@ -173,7 +173,10 @@ ensure_symlink() {
   link_path="${link_dir}/runoq"
   target="$(runoq::root)/bin/runoq"
 
-  mkdir -p "$link_dir"
+  if ! mkdir -p "$link_dir" 2>/dev/null || [[ ! -w "$link_dir" ]]; then
+    printf 'Warning: %s is not writable. Set RUNOQ_SYMLINK_DIR to a writable directory on your PATH.\n' "$link_dir" >&2
+    return 0
+  fi
   if [[ -L "$link_path" ]]; then
     [[ "$(readlink "$link_path")" == "$target" ]] && return
     rm -f "$link_path"
