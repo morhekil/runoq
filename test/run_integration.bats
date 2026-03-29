@@ -334,6 +334,96 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+@test "orchestrator stops on init PR creation failure without escalating the issue to needs-human-review" {
+  remote_dir="$TEST_TMPDIR/remote.git"
+  local_dir="$TEST_TMPDIR/local"
+  make_remote_backed_repo "$remote_dir" "$local_dir"
+  git -C "$local_dir" remote set-url origin "$remote_dir"
+
+  export TARGET_ROOT="$local_dir"
+  export RUNOQ_REPO="owner/repo"
+  export REPO="owner/repo"
+  unset GH_TOKEN
+  export RUNOQ_CONFIG="$TEST_TMPDIR/config.json"
+  unset RUNOQ_TEST_RUN_MODE
+  write_run_config "$RUNOQ_CONFIG"
+
+  issue_body="$(happy_issue_body)"
+  ready_queue="$(jq -n --arg body "$issue_body" '[
+    {number: 42, title: "Implement queue", body: $body, labels: [{name:"runoq:ready"}], url: "https://example.test/issues/42"}
+  ]')"
+  scenario="$TEST_TMPDIR/scenario.json"
+  write_fake_gh_scenario "$scenario" <<EOF
+[
+  {
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:in-progress"],
+    "stdout": "[]"
+  },
+  {
+    "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "title"],
+    "stdout": "{\"title\":\"Implement queue\"}"
+  },
+  {
+    "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
+    "stdout": $(jq -Rn --arg body "$issue_body" '{"number":42,"title":"Implement queue","body":$body,"labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/42"}')
+  },
+  {
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:ready"],
+    "stdout": $(printf '%s' "$ready_queue")
+  },
+  {
+    "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
+    "stdout": $(jq -Rn --arg body "$issue_body" '{"number":42,"title":"Implement queue","body":$body,"labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/42"}')
+  },
+  {
+    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "runoq/42-implement-queue"],
+    "stdout": "[]"
+  },
+  {
+    "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "labels"],
+    "stdout": "{\"labels\":[{\"name\":\"runoq:ready\"}]}"
+  },
+  {
+    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "runoq:ready", "--add-label", "runoq:in-progress"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "create", "--repo", "owner/repo", "--draft", "--title", "Implement queue", "--head", "runoq/42-implement-queue"],
+    "exit_code": 1,
+    "stderr": "aborted: you must first push the current branch to a remote, or use the --head flag"
+  },
+  {
+    "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "labels"],
+    "stdout": "{\"labels\":[{\"name\":\"runoq:in-progress\"}]}"
+  },
+  {
+    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "runoq:in-progress", "--add-label", "runoq:ready"],
+    "stdout": ""
+  }
+]
+EOF
+  use_fake_gh "$scenario"
+
+  run bash -lc 'cd "'"$local_dir"'" && "'"$RUNOQ_ROOT"'/scripts/orchestrator.sh" run owner/repo --issue 42'
+
+  [ "$status" -eq 1 ]
+  run jq -r '.phase' "$local_dir/.runoq/state/42.json"
+  [ "$status" -eq 0 ]
+  [ "$output" = "FAILED" ]
+  run jq -r '.failure_stage' "$local_dir/.runoq/state/42.json"
+  [ "$status" -eq 0 ]
+  [ "$output" = "INIT" ]
+
+  worktree_path="$(cd "$local_dir/.." && pwd)/runoq-wt-42"
+  [ ! -e "$worktree_path" ]
+
+  run cat "$FAKE_GH_LOG"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"issue edit 42 --repo owner/repo --remove-label runoq:ready --add-label runoq:in-progress"* ]]
+  [[ "$output" == *"issue edit 42 --repo owner/repo --remove-label runoq:in-progress --add-label runoq:ready"* ]]
+  [[ "$output" != *"issue edit 42 --repo owner/repo --remove-label runoq:in-progress --add-label runoq:needs-human-review"* ]]
+}
+
 @test "runoq run --issue escalates no-commit runs to needs-human-review with verification comments" {
   remote_dir="$TEST_TMPDIR/remote.git"
   local_dir="$TEST_TMPDIR/local"

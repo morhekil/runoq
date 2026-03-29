@@ -97,6 +97,16 @@ save_state() {
   printf '%s' "$1" | "$SCRIPTS_DIR/state.sh" save "$issue"
 }
 
+save_state_checked() {
+  local issue="$1"
+  local state_json="$2"
+  local context="$3"
+  if ! save_state "$issue" "$state_json" >/dev/null; then
+    log_error "${context}: failed to save state"
+    return 1
+  fi
+}
+
 load_state() {
   local issue="$1"
   "$SCRIPTS_DIR/state.sh" load "$issue" 2>/dev/null || printf ''
@@ -107,6 +117,76 @@ state_file_exists() {
   local state_dir
   state_dir="$(runoq::state_dir)"
   [[ -f "${state_dir}/${issue}.json" ]]
+}
+
+capture_command_output() {
+  local __stdout_var="$1"
+  local __stderr_var="$2"
+  shift 2
+
+  local stdout_file stderr_file status
+  stdout_file="$(mktemp "${TMPDIR:-/tmp}/runoq-capture-stdout.XXXXXX")"
+  stderr_file="$(mktemp "${TMPDIR:-/tmp}/runoq-capture-stderr.XXXXXX")"
+
+  set +e
+  "$@" >"$stdout_file" 2>"$stderr_file"
+  status=$?
+  set -e
+
+  printf -v "$__stdout_var" '%s' "$(cat "$stdout_file")"
+  printf -v "$__stderr_var" '%s' "$(cat "$stderr_file")"
+
+  rm -f "$stdout_file" "$stderr_file"
+  return "$status"
+}
+
+init_failure_state() {
+  local reason="$1"
+  local branch="${2:-}"
+  local worktree="${3:-}"
+  local pr_number="${4:-}"
+
+  jq -n \
+    --arg phase "FAILED" \
+    --arg failure_stage "INIT" \
+    --arg failure_scope "internal" \
+    --arg failure_reason "$reason" \
+    --arg branch "$branch" \
+    --arg worktree "$worktree" \
+    --arg pr_number "$pr_number" '
+    {
+      phase: $phase,
+      failure_stage: $failure_stage,
+      failure_scope: $failure_scope,
+      failure_reason: $failure_reason
+    }
+    + (if $branch != "" then {branch: $branch} else {} end)
+    + (if $worktree != "" then {worktree: $worktree} else {} end)
+    + (if ($pr_number | test("^[0-9]+$")) then {pr_number: ($pr_number | tonumber)} else {} end)
+  '
+}
+
+handle_init_failure() {
+  local repo="$1"
+  local issue_number="$2"
+  local reason="$3"
+  local branch="${4:-}"
+  local worktree="${5:-}"
+  local pr_number="${6:-}"
+  local fail_state
+
+  log_error "INIT: ${reason}"
+  fail_state="$(init_failure_state "$reason" "$branch" "$worktree" "$pr_number")"
+  save_state "$issue_number" "$fail_state" >/dev/null 2>&1 || true
+
+  if [[ -z "$pr_number" || "$pr_number" == "null" ]]; then
+    "$SCRIPTS_DIR/gh-issue-queue.sh" set-status "$repo" "$issue_number" "ready" >/dev/null 2>&1 || true
+    if [[ -n "$worktree" ]]; then
+      "$SCRIPTS_DIR/worktree.sh" remove "$issue_number" >/dev/null 2>&1 || true
+    fi
+  fi
+
+  return 1
 }
 
 ###############################################################################
@@ -238,6 +318,7 @@ phase_init() {
   local dry_run="$3"
   local title="$4"
   local eligibility_json worktree_json branch worktree pr_json pr_number
+  local worktree_stderr pr_stderr
 
   log_info "INIT: issue #${issue_number}"
 
@@ -256,10 +337,23 @@ phase_init() {
   fi
 
   # 2. Set issue in-progress
-  "$SCRIPTS_DIR/gh-issue-queue.sh" set-status "$repo" "$issue_number" "in-progress" >/dev/null
+  if ! "$SCRIPTS_DIR/gh-issue-queue.sh" set-status "$repo" "$issue_number" "in-progress" >/dev/null; then
+    handle_init_failure "$repo" "$issue_number" "failed to set issue status to in-progress"
+    return 1
+  fi
 
   # 3. Create worktree (bot identity is set by worktree.sh)
-  worktree_json="$("$SCRIPTS_DIR/worktree.sh" create "$issue_number" "$title")"
+  if ! capture_command_output worktree_json worktree_stderr "$SCRIPTS_DIR/worktree.sh" create "$issue_number" "$title"; then
+    handle_init_failure "$repo" "$issue_number" "worktree creation failed: ${worktree_stderr:-unknown error}"
+    return 1
+  fi
+  if ! printf '%s' "$worktree_json" | jq -e '
+    (.branch | type == "string" and length > 0)
+    and (.worktree | type == "string" and length > 0)
+  ' >/dev/null 2>&1; then
+    handle_init_failure "$repo" "$issue_number" "worktree creation returned an invalid payload"
+    return 1
+  fi
   worktree="$(printf '%s' "$worktree_json" | jq -r '.worktree')"
   branch="$(printf '%s' "$worktree_json" | jq -r '.branch')"
   log_info "INIT: worktree=${worktree} branch=${branch}"
@@ -272,11 +366,24 @@ phase_init() {
   fi
 
   # 5. Create initial empty commit and push
-  git -C "$worktree" commit --allow-empty -m "runoq: begin work on #${issue_number}" >/dev/null 2>&1
-  git -C "$worktree" push -u origin "$branch" >/dev/null 2>&1
+  if ! git -C "$worktree" commit --allow-empty -m "runoq: begin work on #${issue_number}" >/dev/null 2>&1; then
+    handle_init_failure "$repo" "$issue_number" "failed to create the initial worktree commit" "$branch" "$worktree"
+    return 1
+  fi
+  if ! git -C "$worktree" push -u origin "$branch" >/dev/null 2>&1; then
+    handle_init_failure "$repo" "$issue_number" "failed to push the initial worktree branch" "$branch" "$worktree"
+    return 1
+  fi
 
   # 5. Create draft PR
-  pr_json="$("$SCRIPTS_DIR/gh-pr-lifecycle.sh" create "$repo" "$branch" "$issue_number" "$title")"
+  if ! capture_command_output pr_json pr_stderr "$SCRIPTS_DIR/gh-pr-lifecycle.sh" create "$repo" "$branch" "$issue_number" "$title"; then
+    handle_init_failure "$repo" "$issue_number" "draft PR creation failed: ${pr_stderr:-unknown error}" "$branch" "$worktree"
+    return 1
+  fi
+  if ! printf '%s' "$pr_json" | jq -e '.number | numbers' >/dev/null 2>&1; then
+    handle_init_failure "$repo" "$issue_number" "draft PR creation returned an invalid payload" "$branch" "$worktree"
+    return 1
+  fi
   pr_number="$(printf '%s' "$pr_json" | jq -r '.number')"
   log_info "INIT: created draft PR #${pr_number} for branch=${branch}"
 
@@ -300,7 +407,10 @@ phase_init() {
     cumulative_tokens: $cumulative_tokens,
     consecutive_failures: $consecutive_failures
   }')"
-  save_state "$issue_number" "$state" >/dev/null
+  if ! save_state_checked "$issue_number" "$state" "INIT"; then
+    handle_init_failure "$repo" "$issue_number" "failed to persist INIT state" "$branch" "$worktree" "$pr_number"
+    return 1
+  fi
 
   post_audit_comment "$repo" "$pr_number" "init" "Orchestrator initialized. Branch: \`${branch}\`"
 
@@ -329,7 +439,9 @@ phase_criteria() {
     log_info "CRITERIA: skipped (low complexity)"
     local state
     state="$(printf '%s' "$state_json" | jq '.phase = "CRITERIA"')"
-    save_state "$issue_number" "$state" >/dev/null
+    if ! save_state_checked "$issue_number" "$state" "CRITERIA"; then
+      return 1
+    fi
     printf '%s\n' "$state"
     return 0
   fi
@@ -385,7 +497,9 @@ phase_criteria() {
   state="$(printf '%s' "$state_json" | jq \
     --arg phase "CRITERIA" \
     --arg criteria_commit "$criteria_commit" '.phase = $phase | .criteria_commit = $criteria_commit')"
-  save_state "$issue_number" "$state" >/dev/null
+  if ! save_state_checked "$issue_number" "$state" "CRITERIA"; then
+    return 1
+  fi
 
   rm -f "$spec_file" "$output_file"
   printf '%s\n' "$state"
@@ -466,12 +580,19 @@ phase_develop() {
 
   local runner_stderr_file
   runner_stderr_file="$(mktemp "${TMPDIR:-/tmp}/runoq-runner-err.XXXXXX")"
+  local runner_exit=0
 
   if [[ -x "$SCRIPTS_DIR/issue-runner.sh" ]]; then
-    "$SCRIPTS_DIR/issue-runner.sh" run "$payload_file" >"$output_file" 2>"$runner_stderr_file" || true
+    set +e
+    "$SCRIPTS_DIR/issue-runner.sh" run "$payload_file" >"$output_file" 2>"$runner_stderr_file"
+    runner_exit=$?
+    set -e
   else
+    set +e
     runoq::claude_stream "$output_file" \
       --permission-mode bypassPermissions --agent issue-runner --add-dir "$RUNOQ_ROOT" -- "$payload"
+    runner_exit=$?
+    set -e
   fi
   rm -f "$payload_file"
 
@@ -517,12 +638,15 @@ phase_develop() {
     caveats="$(printf '%s' "$runner_result" | jq -r '.caveats // empty')"
     summary="$(printf '%s' "$runner_result" | jq -r '.summary // empty')"
   else
-    status="fail"
-    runner_cumulative_tokens="0"
-    verification_passed="false"
-    caveats="issue-runner did not return a parseable payload"
-    summary=""
     log_error "Failed to parse issue-runner output"
+    rm -f "$spec_file" "$output_file"
+    return 1
+  fi
+
+  if [[ "$runner_exit" -ne 0 ]]; then
+    log_error "issue-runner exited with status ${runner_exit}"
+    rm -f "$spec_file" "$output_file"
+    return 1
   fi
 
   # Save state
@@ -559,7 +683,10 @@ phase_develop() {
     | .caveats = $caveats
     | .summary = $summary
   ')"
-  save_state "$issue_number" "$state" >/dev/null
+  if ! save_state_checked "$issue_number" "$state" "DEVELOP"; then
+    rm -f "$spec_file" "$output_file"
+    return 1
+  fi
 
   rm -f "$spec_file" "$output_file"
   printf '%s\n' "$state"
@@ -681,7 +808,10 @@ REVIEWEOF
     | .score = $score
     | .review_checklist = $review_checklist
   ')"
-  save_state "$issue_number" "$state" >/dev/null
+  if ! save_state_checked "$issue_number" "$state" "REVIEW"; then
+    rm -f "$review_output_file"
+    return 1
+  fi
 
   rm -f "$review_output_file"
   printf '%s\n' "$state"
@@ -726,7 +856,9 @@ phase_decide() {
     | .decision = $decision
     | .next_phase = $next_phase
   ')"
-  save_state "$issue_number" "$state" >/dev/null
+  if ! save_state_checked "$issue_number" "$state" "DECIDE"; then
+    return 1
+  fi
 
   printf '%s\n' "$state"
 }
@@ -866,12 +998,16 @@ FINALIZE
     | .finalize_verdict = $finalize_verdict
     | .issue_status = $issue_status
   ')"
-  save_state "$issue_number" "$state" >/dev/null
+  if ! save_state_checked "$issue_number" "$state" "FINALIZE"; then
+    return 1
+  fi
 
   # Transition to DONE
   local done_state
   done_state="$(printf '%s' "$state" | jq '.phase = "DONE"')"
-  save_state "$issue_number" "$done_state" >/dev/null
+  if ! save_state_checked "$issue_number" "$done_state" "FINALIZE"; then
+    return 1
+  fi
 
   printf '%s\n' "$done_state"
 }
