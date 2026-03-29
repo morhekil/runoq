@@ -59,6 +59,7 @@ Notes:
 - `--auto-confirm` skips interactive confirmation.
 - `--dry-run` outputs the decomposition JSON without creating issues.
 - Epic issues are created with `--type epic`; child tasks reference their parent via `--parent-epic`.
+- Agent invocation artifacts are persisted under `log/claude/plan-decomposer-<timestamp>/`, including the request payload, live raw Claude stream, stderr, progress events, and extracted final response.
 
 ## `orchestrator.sh`
 
@@ -108,6 +109,7 @@ Notes:
 - Tracks cumulative token usage across rounds and checks budget before and after each round.
 - Expands review scope by finding files that import changed files.
 - Returns `review_ready` on verification success, `fail` on max-rounds exhaustion, or `budget_exhausted` when the token budget is exceeded.
+- Each Codex invocation is captured under the issue log directory as `codex-round-<n>/` with `argv.txt`, `context.log`, `request.txt`, `stdout.log`, `stderr.log`, and `response.txt`.
 
 ## `gh-pr-lifecycle.sh`
 

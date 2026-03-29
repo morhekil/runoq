@@ -36,11 +36,7 @@ EOF
 
 claude_exec() {
   local claude_bin="${RUNOQ_CLAUDE_BIN:-claude}"
-  command -v "$claude_bin" >/dev/null 2>&1 || runoq::die "Claude CLI not found: $claude_bin"
-  (
-    cd "$(runoq::target_root)"
-    "$claude_bin" "$@"
-  )
+  runoq::captured_exec claude "$(runoq::target_root)" "$claude_bin" "$@"
 }
 
 ###############################################################################

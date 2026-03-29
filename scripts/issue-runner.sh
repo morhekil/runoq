@@ -19,8 +19,7 @@ EOF
 
 codex_exec() {
   local codex_bin="${RUNOQ_CODEX_BIN:-codex}"
-  command -v "$codex_bin" >/dev/null 2>&1 || runoq::die "Codex CLI not found: $codex_bin"
-  (cd "$worktree" && "$codex_bin" "$@")
+  runoq::captured_exec codex "$worktree" "$codex_bin" "$@"
 }
 
 # ---------------------------------------------------------------------------
@@ -335,9 +334,11 @@ ${criteria_files}
 
     # Run codex
     local dev_log="$logDir/round-${round}-dev.md"
+    local codex_capture_dir="$logDir/codex-round-${round}"
 
     if [[ "$previousChecklist" == "None — first round" ]]; then
       runoq::log "issue-runner" "round ${round}: invoking codex (first round — implement spec)"
+      RUNOQ_CODEX_CAPTURE_DIR="$codex_capture_dir" \
       codex_exec exec --dangerously-bypass-approvals-and-sandbox "Implement the following spec. Read the spec file and all AGENTS.md files for rules and constraints.
 
 Spec: ${specPath}
@@ -352,6 +353,7 @@ Then print the required final stdout payload block:
 \`\`\`" >"$dev_log" 2>&1
     else
       runoq::log "issue-runner" "round ${round}: invoking codex (subsequent round — address feedback)"
+      RUNOQ_CODEX_CAPTURE_DIR="$codex_capture_dir" \
       codex_exec exec --dangerously-bypass-approvals-and-sandbox "Address the following code review or verification feedback.
 
 Checklist:

@@ -49,12 +49,10 @@ set -euo pipefail
 if [[ -n "${FAKE_CLAUDE_LOG:-}" ]]; then
   printf '%s\n' "$*" >>"$FAKE_CLAUDE_LOG"
 fi
-cat <<'PAYLOAD'
-<!-- runoq:payload:plan-decomposer -->
-```json
-{"items":[],"warnings":[]}
-```
-PAYLOAD
+cat <<'EOF'
+{"type":"assistant","message":{"content":[{"type":"text","text":"<!-- runoq:payload:plan-decomposer -->\n```json\n{\"items\":[],\"warnings\":[]}\n```"}]}}
+{"type":"result","result":"<!-- runoq:payload:plan-decomposer -->\n```json\n{\"items\":[],\"warnings\":[]}\n```"}
+EOF
 FAKECLAUDE
   chmod +x "$fake_claude_script"
   export RUNOQ_CLAUDE_BIN="$fake_claude_script"
@@ -68,6 +66,45 @@ FAKECLAUDE
   # Verify the payload contains an absolute path to the plan file (not a relative one)
   [[ "$output" == *'"planPath": "/'* ]]
   [[ "$output" == *"/docs/plan.md"* ]]
+  run bash -lc 'cd "'"$project_dir"'" && find log/claude -mindepth 1 -maxdepth 1 -type d | head -n 1'
+  [ "$status" -eq 0 ]
+  capture_dir="$output"
+  [ -n "$capture_dir" ]
+  [ -f "$project_dir/$capture_dir/request.txt" ]
+  [ -f "$project_dir/$capture_dir/stdout.log" ]
+  [ -f "$project_dir/$capture_dir/stderr.log" ]
+  [ -f "$project_dir/$capture_dir/response.txt" ]
+  run grep -F -- '"planPath": "' "$project_dir/$capture_dir/request.txt"
+  [ "$status" -eq 0 ]
+  run grep -F -- 'runoq:payload:plan-decomposer' "$project_dir/$capture_dir/response.txt"
+  [ "$status" -eq 0 ]
+}
+
+@test "runoq plan dry-run uses assistant payload when stream result is only done" {
+  project_dir="$TEST_TMPDIR/project"
+  setup_cli_project "$project_dir"
+  mkdir -p "$project_dir/docs"
+  echo "# Plan" >"$project_dir/docs/plan.md"
+  export PATH="$RUNOQ_ROOT/test/helpers:$PATH"
+  export GH_TOKEN="existing-token"
+
+  local fake_claude_script="$TEST_TMPDIR/fake-claude-stream"
+  cat >"$fake_claude_script" <<'FAKECLAUDE'
+#!/usr/bin/env bash
+set -euo pipefail
+cat <<'EOF'
+{"type":"assistant","message":{"content":[{"type":"text","text":"<!-- runoq:payload:plan-decomposer -->\n```json\n{\"items\":[{\"key\":\"task-1\",\"type\":\"task\",\"title\":\"Ship task\",\"body\":\"Body\",\"priority\":1,\"estimated_complexity\":\"medium\",\"complexity_rationale\":\"Touches multiple steps.\",\"depends_on_keys\":[]}],\"warnings\":[]}\n```"}]}}
+{"type":"result","result":"done"}
+EOF
+FAKECLAUDE
+  chmod +x "$fake_claude_script"
+  export RUNOQ_CLAUDE_BIN="$fake_claude_script"
+
+  run bash -lc 'cd "'"$project_dir"'" && "'"$RUNOQ_ROOT"'/bin/runoq" plan docs/plan.md --dry-run'
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"items"'* ]]
+  [[ "$output" == *'"task-1"'* ]]
 }
 
 @test "runoq maintenance routes to the maintenance reviewer" {
@@ -85,6 +122,19 @@ FAKECLAUDE
   run cat "$FAKE_CLAUDE_LOG"
   [ "$status" -eq 0 ]
   [[ "$output" == *"--agent maintenance-reviewer --add-dir $RUNOQ_ROOT"* ]]
+  run bash -lc 'cd "'"$project_dir"'" && find log/claude -mindepth 1 -maxdepth 1 -type d | head -n 1'
+  [ "$status" -eq 0 ]
+  capture_dir="$output"
+  [ -n "$capture_dir" ]
+  [ -f "$project_dir/$capture_dir/argv.txt" ]
+  [ -f "$project_dir/$capture_dir/context.log" ]
+  [ -f "$project_dir/$capture_dir/stdout.log" ]
+  [ -f "$project_dir/$capture_dir/stderr.log" ]
+  [ -f "$project_dir/$capture_dir/response.txt" ]
+  run grep -F -- "maintenance-reviewer" "$project_dir/$capture_dir/argv.txt"
+  [ "$status" -eq 0 ]
+  run grep -F -- "fake claude invoked" "$project_dir/$capture_dir/response.txt"
+  [ "$status" -eq 0 ]
 }
 
 @test "runoq report delegates to report.sh" {

@@ -233,6 +233,184 @@ runoq::absolute_path() {
   fi
 }
 
+runoq::runtime_log_root() {
+  if [[ -n "${RUNOQ_LOG_ROOT:-}" ]]; then
+    printf '%s\n' "$RUNOQ_LOG_ROOT"
+    return
+  fi
+  printf '%s/log\n' "$(runoq::target_root)"
+}
+
+runoq::_capture_dir_override() {
+  local tool_kind="$1"
+  case "$tool_kind" in
+    claude)
+      printf '%s\n' "${RUNOQ_CLAUDE_CAPTURE_DIR:-}"
+      ;;
+    codex)
+      printf '%s\n' "${RUNOQ_CODEX_CAPTURE_DIR:-}"
+      ;;
+    *)
+      printf '\n'
+      ;;
+  esac
+}
+
+runoq::_capture_name_from_args() {
+  local tool_kind="$1"
+  shift
+
+  local name="$tool_kind"
+  local i=1
+  while [[ $i -le $# ]]; do
+    if [[ "$tool_kind" == "claude" && "${!i}" == "--agent" ]]; then
+      local next_index=$((i + 1))
+      if [[ $next_index -le $# ]]; then
+        printf '%s\n' "${!next_index}"
+        return
+      fi
+    fi
+    if [[ "$tool_kind" == "claude" && "${!i}" == "--model" ]]; then
+      local next_index=$((i + 1))
+      if [[ $next_index -le $# ]]; then
+        name="model-${!next_index}"
+      fi
+    fi
+    if [[ "$tool_kind" == "codex" && "${!i}" == "exec" ]]; then
+      name="exec"
+    fi
+    i=$((i + 1))
+  done
+
+  printf '%s\n' "$name"
+}
+
+runoq::_capture_request_arg() {
+  local tool_kind="$1"
+  shift
+
+  local saw_payload_delimiter=0
+  local arg
+  for arg in "$@"; do
+    if [[ "$arg" == "--" ]]; then
+      saw_payload_delimiter=1
+      continue
+    fi
+    if [[ "$saw_payload_delimiter" -eq 1 ]]; then
+      printf '%s\n' "$arg"
+      return
+    fi
+  done
+
+  if [[ "$tool_kind" == "codex" && $# -gt 0 ]]; then
+    local last_arg="${!#}"
+    if [[ "$last_arg" != -* ]]; then
+      printf '%s\n' "$last_arg"
+      return
+    fi
+  fi
+
+  printf '\n'
+}
+
+runoq::_capture_dir() {
+  local tool_kind="$1"
+  local tool_name="$2"
+
+  local override_dir
+  override_dir="$(runoq::_capture_dir_override "$tool_kind")"
+  if [[ -n "$override_dir" ]]; then
+    printf '%s\n' "$override_dir"
+    return
+  fi
+
+  printf '%s/%s/%s-%s-%s\n' \
+    "$(runoq::runtime_log_root)" \
+    "$tool_kind" \
+    "$tool_name" \
+    "$(date -u +%Y-%m-%d-%H%M%S)" \
+    "$$"
+}
+
+runoq::_write_capture_context() {
+  local capture_dir="$1"
+  local real_bin="$2"
+  local tool_name="$3"
+  shift 3
+
+  {
+    printf 'cwd=%s\n' "$PWD"
+    printf 'TARGET_ROOT=%s\n' "${TARGET_ROOT:-}"
+    printf 'REPO=%s\n' "${REPO:-}"
+    printf 'RUNOQ_ROOT=%s\n' "${RUNOQ_ROOT:-}"
+    printf 'REAL_BIN=%s\n' "$real_bin"
+    printf 'TOOL=%s\n' "$tool_name"
+  } >"$capture_dir/context.log"
+  printf '%s\n' "$@" >"$capture_dir/argv.txt"
+}
+
+runoq::captured_exec() {
+  local tool_kind="$1"
+  local cwd="$2"
+  local real_bin="$3"
+  shift 3
+
+  command -v "$real_bin" >/dev/null 2>&1 || runoq::die "${tool_kind^} CLI not found: $real_bin"
+
+  local tool_name capture_dir request_arg
+  tool_name="$(runoq::_capture_name_from_args "$tool_kind" "$@")"
+  capture_dir="$(runoq::_capture_dir "$tool_kind" "$tool_name")"
+  request_arg="$(runoq::_capture_request_arg "$tool_kind" "$@")"
+
+  mkdir -p "$capture_dir"
+  case "$tool_kind" in
+    claude)
+      RUNOQ_LAST_CLAUDE_CAPTURE_DIR="$capture_dir"
+      export RUNOQ_LAST_CLAUDE_CAPTURE_DIR
+      ;;
+    codex)
+      RUNOQ_LAST_CODEX_CAPTURE_DIR="$capture_dir"
+      export RUNOQ_LAST_CODEX_CAPTURE_DIR
+      ;;
+  esac
+
+  runoq::_write_capture_context "$capture_dir" "$real_bin" "$tool_name" "$@"
+  if [[ -n "$request_arg" ]]; then
+    printf '%s\n' "$request_arg" >"$capture_dir/request.txt"
+  else
+    : >"$capture_dir/request.txt"
+  fi
+
+  printf '[%s] logs: %s\n' "$tool_kind" "$capture_dir" >&2
+
+  local stdout_pipe stderr_pipe
+  stdout_pipe="$(mktemp "${TMPDIR:-/tmp}/runoq-capture-stdout.XXXXXX")"
+  stderr_pipe="$(mktemp "${TMPDIR:-/tmp}/runoq-capture-stderr.XXXXXX")"
+  rm -f "$stdout_pipe" "$stderr_pipe"
+  mkfifo "$stdout_pipe" "$stderr_pipe"
+
+  tee "$capture_dir/stdout.log" <"$stdout_pipe" &
+  local stdout_tee_pid=$!
+  tee "$capture_dir/stderr.log" <"$stderr_pipe" >&2 &
+  local stderr_tee_pid=$!
+
+  local status=0
+  set +e
+  (
+    cd "$cwd"
+    "$real_bin" "$@"
+  ) >"$stdout_pipe" 2>"$stderr_pipe"
+  status=$?
+  set -e
+
+  wait "$stdout_tee_pid" 2>/dev/null || true
+  wait "$stderr_tee_pid" 2>/dev/null || true
+  rm -f "$stdout_pipe" "$stderr_pipe"
+
+  cp "$capture_dir/stdout.log" "$capture_dir/response.txt"
+  return "$status"
+}
+
 # ---------------------------------------------------------------------------
 # Retry helper for eventual consistency
 # ---------------------------------------------------------------------------
@@ -312,19 +490,58 @@ runoq::claude_stream() {
   local claude_bin="${RUNOQ_CLAUDE_BIN:-claude}"
   command -v "$claude_bin" >/dev/null 2>&1 || runoq::die "Claude CLI not found: $claude_bin"
 
+  local agent_name payload_arg capture_dir
+  agent_name="$(runoq::_capture_name_from_args claude "$@")"
+  payload_arg="$(runoq::_capture_request_arg claude "$@")"
+  capture_dir="$(runoq::_capture_dir claude "$agent_name")"
+  mkdir -p "$capture_dir"
+  RUNOQ_LAST_CLAUDE_CAPTURE_DIR="$capture_dir"
+  export RUNOQ_LAST_CLAUDE_CAPTURE_DIR
+
+  local stderr_file raw_stream_file response_file request_file progress_log
+  stderr_file="$capture_dir/stderr.log"
+  raw_stream_file="$capture_dir/stdout.log"
+  response_file="$capture_dir/response.txt"
+  request_file="$capture_dir/request.txt"
+  progress_log="$capture_dir/progress.log"
+
+  runoq::_write_capture_context "$capture_dir" "$claude_bin" "$agent_name" "$@"
+  if [[ -n "$payload_arg" ]]; then
+    printf '%s\n' "$payload_arg" >"$request_file"
+  else
+    : >"$request_file"
+  fi
+  : >"$progress_log"
+  printf '[agent] logs: %s\n' "$capture_dir" >&2
+
   local stream_file
-  stream_file="$(mktemp "${TMPDIR:-/tmp}/runoq-stream.XXXXXX")"
+  stream_file="$raw_stream_file"
+  : >"$stream_file"
+  local progress_pipe
+  progress_pipe="$(mktemp "${TMPDIR:-/tmp}/runoq-stream-progress.XXXXXX")"
+  rm -f "$progress_pipe"
+  mkfifo "$progress_pipe"
+
+  emit_progress() {
+    local message="$1"
+    printf '%s\n' "$message" >&2
+    printf '%s\n' "$message" >>"$progress_log"
+  }
 
   # Run with stream-json so output arrives incrementally
   (
     cd "$(runoq::target_root)"
     "$claude_bin" --print --verbose --output-format stream-json "$@" < /dev/null
-  ) >"$stream_file" 2>/dev/null &
+  ) >"$stream_file" 2>"$stderr_file" &
   local claude_pid=$!
 
-  # Stream progress: show tool use and thinking indicators as they arrive
+  # Stream progress: show tool use and thinking indicators as they arrive.
+  # Track tail and reader separately so they do not keep command-substitution
+  # pipes open after the Claude process exits.
+  tail -n +1 -f "$stream_file" 2>/dev/null >"$progress_pipe" &
+  local tail_pid=$!
   (
-    tail -f "$stream_file" 2>/dev/null | while IFS= read -r line; do
+    while IFS= read -r line; do
       local type
       type="$(printf '%s' "$line" | jq -r '.type // empty' 2>/dev/null)" || continue
       case "$type" in
@@ -333,36 +550,56 @@ runoq::claude_stream() {
           tool_names="$(printf '%s' "$line" | jq -r '[.message.content[]? | select(.type == "tool_use") | .name] | .[]' 2>/dev/null)" || true
           if [[ -n "$tool_names" ]]; then
             while IFS= read -r name; do
-              [[ -n "$name" ]] && printf '[agent] tool: %s\n' "$name" >&2
+              [[ -n "$name" ]] && emit_progress "[agent] tool: $name"
             done <<< "$tool_names"
           fi
           thinking_count="$(printf '%s' "$line" | jq '[.message.content[]? | select(.type == "thinking")] | length' 2>/dev/null)" || true
           if [[ "${thinking_count:-0}" -gt 0 ]]; then
-            printf '[agent] thinking...\n' >&2
+            emit_progress "[agent] thinking..."
           fi
           ;;
         result)
-          printf '[agent] done\n' >&2
+          emit_progress "[agent] done"
           ;;
       esac
-    done
+    done <"$progress_pipe"
   ) &
-  local progress_pid=$!
+  local reader_pid=$!
 
-  wait "$claude_pid" || true
+  local claude_status=0
+  wait "$claude_pid" || claude_status=$?
   sleep 0.5
-  kill "$progress_pid" 2>/dev/null; wait "$progress_pid" 2>/dev/null || true
+  kill "$tail_pid" "$reader_pid" 2>/dev/null || true
+  wait "$tail_pid" 2>/dev/null || true
+  wait "$reader_pid" 2>/dev/null || true
 
-  # Extract final text from the result event and write to output_file
-  # Also write the raw stream for payload extraction via markers
-  local result_text
+  # Extract final text from the stream and prefer the content that actually
+  # contains the agent payload over status-only result summaries.
+  local result_text assistant_text final_text normalized_result
   result_text="$(jq -r 'select(.type == "result") | .result // empty' "$stream_file" 2>/dev/null || printf '')"
-  if [[ -n "$result_text" ]]; then
-    printf '%s\n' "$result_text" >"$output_file"
-  else
-    # Fallback: concatenate all assistant text blocks
-    jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text // empty' "$stream_file" 2>/dev/null >"$output_file" || true
+  assistant_text="$(jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text // empty' "$stream_file" 2>/dev/null || printf '')"
+  normalized_result="$(printf '%s' "$result_text" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+
+  if [[ -n "$result_text" && "$result_text" == *'<!-- runoq:payload:'* ]]; then
+    final_text="$result_text"
+  elif [[ -n "$assistant_text" && "$assistant_text" == *'<!-- runoq:payload:'* ]]; then
+    final_text="$assistant_text"
+  elif [[ -n "$result_text" && "$normalized_result" != "done" ]]; then
+    final_text="$result_text"
+  elif [[ -n "$assistant_text" ]]; then
+    final_text="$assistant_text"
+  elif [[ -n "$result_text" ]]; then
+    final_text="$result_text"
   fi
 
-  rm -f "$stream_file"
+  if [[ -n "${final_text:-}" ]]; then
+    printf '%s\n' "$final_text" >"$output_file"
+    printf '%s\n' "$final_text" >"$response_file"
+  else
+    : >"$output_file"
+    : >"$response_file"
+  fi
+
+  rm -f "$progress_pipe"
+  return "$claude_status"
 }

@@ -85,6 +85,7 @@ What it does:
   2. Presents the proposed issue hierarchy to the operator for confirmation
   3. Creates GitHub issues deterministically via `gh-issue-queue.sh create` (epics first, then tasks with resolved dependency numbers)
 - Supports `--auto-confirm` and `--dry-run` flags
+- Persists the plan-decomposer invocation under `log/claude/plan-decomposer-<timestamp>/` with `argv.txt`, `context.log`, `request.txt`, live `stdout.log`, `stderr.log`, `progress.log`, and `response.txt`
 
 Common failures:
 
@@ -114,6 +115,8 @@ Behavior:
 - Runs startup reconciliation through `dispatch-safety.sh reconcile`
 - In queue mode, selects the next actionable `runoq:ready` issue by dependency and priority
 - In execution mode, delegates to `orchestrator.sh run` which creates a sibling worktree, opens a draft PR, drives the phase state machine (INIT, CRITERIA, DEVELOP, REVIEW, DECIDE, FINALIZE), and finalizes with either `auto-merge` or `needs-human-review`
+- Persists Claude invocation artifacts under `log/claude/<name>-<timestamp>/`
+- Persists Codex round artifacts under each issue log directory, for example `log/issue-42-.../codex-round-1/`
 
 Dry-run output:
 
@@ -170,6 +173,7 @@ What it does:
 - Resolves target repo context and GitHub auth
 - Runs `claude --agent maintenance-reviewer --add-dir "$RUNOQ_ROOT"`
 - Hands control to the maintenance workflow, which uses deterministic scripts for partitioning, tracking issue management, findings posting, and triage
+- Persists the maintenance-reviewer invocation under `log/claude/maintenance-reviewer-<timestamp>/`
 
 Expected side effects:
 
