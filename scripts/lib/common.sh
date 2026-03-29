@@ -302,3 +302,67 @@ runoq::configure_git_bot_remote() {
   [[ -n "${GH_TOKEN:-}" ]] || return 0
   git -C "$dir" remote set-url "$remote" "https://x-access-token:${GH_TOKEN}@github.com/${repo}.git"
 }
+
+# Run claude --print with live streaming progress to stderr.
+# Outputs the final text result to stdout (same as --print would).
+# Usage: runoq::claude_stream <output_file> [claude args...]
+runoq::claude_stream() {
+  local output_file="$1"
+  shift
+  local claude_bin="${RUNOQ_CLAUDE_BIN:-claude}"
+  command -v "$claude_bin" >/dev/null 2>&1 || runoq::die "Claude CLI not found: $claude_bin"
+
+  local stream_file
+  stream_file="$(mktemp "${TMPDIR:-/tmp}/runoq-stream.XXXXXX")"
+
+  # Run with stream-json so output arrives incrementally
+  (
+    cd "$(runoq::target_root)"
+    "$claude_bin" --print --verbose --output-format stream-json "$@" < /dev/null
+  ) >"$stream_file" 2>/dev/null &
+  local claude_pid=$!
+
+  # Stream progress: show tool use and thinking indicators as they arrive
+  (
+    tail -f "$stream_file" 2>/dev/null | while IFS= read -r line; do
+      local type
+      type="$(printf '%s' "$line" | jq -r '.type // empty' 2>/dev/null)" || continue
+      case "$type" in
+        assistant)
+          local tool_names thinking_count
+          tool_names="$(printf '%s' "$line" | jq -r '[.message.content[]? | select(.type == "tool_use") | .name] | .[]' 2>/dev/null)" || true
+          if [[ -n "$tool_names" ]]; then
+            while IFS= read -r name; do
+              [[ -n "$name" ]] && printf '[agent] tool: %s\n' "$name" >&2
+            done <<< "$tool_names"
+          fi
+          thinking_count="$(printf '%s' "$line" | jq '[.message.content[]? | select(.type == "thinking")] | length' 2>/dev/null)" || true
+          if [[ "${thinking_count:-0}" -gt 0 ]]; then
+            printf '[agent] thinking...\n' >&2
+          fi
+          ;;
+        result)
+          printf '[agent] done\n' >&2
+          ;;
+      esac
+    done
+  ) &
+  local progress_pid=$!
+
+  wait "$claude_pid" || true
+  sleep 0.5
+  kill "$progress_pid" 2>/dev/null; wait "$progress_pid" 2>/dev/null || true
+
+  # Extract final text from the result event and write to output_file
+  # Also write the raw stream for payload extraction via markers
+  local result_text
+  result_text="$(jq -r 'select(.type == "result") | .result // empty' "$stream_file" 2>/dev/null || printf '')"
+  if [[ -n "$result_text" ]]; then
+    printf '%s\n' "$result_text" >"$output_file"
+  else
+    # Fallback: concatenate all assistant text blocks
+    jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text // empty' "$stream_file" 2>/dev/null >"$output_file" || true
+  fi
+
+  rm -f "$stream_file"
+}
