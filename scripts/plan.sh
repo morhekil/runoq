@@ -94,7 +94,12 @@ decompose_plan() {
   log_info "calling plan-decomposer agent"
   claude_exec --print --permission-mode bypassPermissions \
     --agent plan-decomposer --add-dir "$RUNOQ_ROOT" \
-    -- "$payload" 2>&1 | tee "$output_file" >&2 || true
+    -- "$payload" >"$output_file" 2>&1 &
+  local claude_pid=$!
+  tail -f "$output_file" >&2 &
+  local tail_pid=$!
+  wait "$claude_pid" || true
+  kill "$tail_pid" 2>/dev/null; wait "$tail_pid" 2>/dev/null || true
 
   local decomposition
   decomposition="$(extract_marked_block "$output_file" 'runoq:payload:plan-decomposer' 2>/dev/null || printf '')"
