@@ -167,6 +167,33 @@ ensure_claude_managed_files() {
   ensure_claude_managed_tree "$runoq_root/.claude/skills" "$target_root/.claude/skills"
 }
 
+ensure_gitignore() {
+  local target_root gitignore
+  target_root="$(runoq::target_root)"
+  gitignore="$target_root/.gitignore"
+
+  local entries=(".runoq/")
+  local missing=()
+  for entry in "${entries[@]}"; do
+    if [[ ! -f "$gitignore" ]] || ! grep -Fxq "$entry" "$gitignore"; then
+      missing+=("$entry")
+    fi
+  done
+
+  if [[ ${#missing[@]} -eq 0 ]]; then
+    return
+  fi
+
+  # Ensure trailing newline before appending
+  if [[ -f "$gitignore" ]] && [[ -s "$gitignore" ]] && [[ "$(tail -c1 "$gitignore" | xxd -p)" != "0a" ]]; then
+    printf '\n' >>"$gitignore"
+  fi
+
+  for entry in "${missing[@]}"; do
+    printf '%s\n' "$entry" >>"$gitignore"
+  done
+}
+
 ensure_symlink() {
   local link_dir link_path target
   link_dir="${RUNOQ_SYMLINK_DIR:-/usr/local/bin}"
@@ -192,6 +219,7 @@ main() {
   ensure_labels
   ensure_package_json
   ensure_claude_managed_files
+  ensure_gitignore
   ensure_symlink
 }
 
