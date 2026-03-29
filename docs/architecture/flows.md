@@ -6,32 +6,34 @@ For `runoq run`, the orchestrator and issue-runner are now shell scripts (`orche
 
 ## `runoq plan`
 
-`runoq plan <file>` is the plan-slicing entrypoint. The shell CLI resolves context and auth, then hands the local file to the `plan-to-issues` skill.
+`runoq plan <file>` is the plan-decomposition entrypoint. The CLI resolves context, then `scripts/plan.sh` invokes the `plan-decomposer` agent to produce an epic/task hierarchy. Each item receives an `estimated_complexity` and `complexity_rationale`. Issue creation is handled deterministically by `plan.sh` itself (not by the agent), using `gh-issue-queue.sh create`. Epics are created first, then tasks are created and linked as sub-issues via the GitHub sub-issues API.
 
 ```mermaid
 sequenceDiagram
   actor Operator
   participant CLI as bin/runoq
-  participant Auth as gh-auth.sh
-  participant Claude as plan-to-issues skill
+  participant Plan as plan.sh
+  participant Claude as plan-decomposer agent
   participant Queue as gh-issue-queue.sh
   participant GH as GitHub
 
   Operator->>CLI: runoq plan docs/plan.md
   CLI->>CLI: resolve TARGET_ROOT, REPO, absolute plan path
-  CLI->>Auth: export-token
-  Auth-->>CLI: GH_TOKEN
-  CLI->>Claude: --skill plan-to-issues -- <absolute plan path>
-  Claude->>Claude: read plan and prepare proposed issue queue
-  Claude-->>Operator: proposal, dependencies, granularity warnings
-  alt operator confirms
-    Claude->>Queue: create issue for each approved item
-    Queue->>GH: create ready issues with runoq:meta blocks
-    GH-->>Queue: issue URLs
-    Queue-->>Claude: created issue references
-    Claude-->>Operator: created queue summary and dependency graph
+  CLI->>Plan: invoke plan.sh with repo and plan file
+  Plan->>Claude: --agent plan-decomposer -- payload
+  Claude->>Claude: read plan, decompose into epic/task hierarchy
+  Claude-->>Plan: JSON with items[], each having complexity and rationale
+  Plan->>Plan: validate JSON, extract items
+  Plan-->>Operator: proposal with hierarchy, complexity, rationale, warnings
+  alt operator confirms (or --auto-confirm)
+    Plan->>Queue: create epic issues first
+    Queue->>GH: create ready epic issues with runoq:meta blocks
+    Plan->>Queue: create task issues with --parent-epic and --depends-on
+    Queue->>GH: create ready task issues with runoq:meta blocks
+    Queue->>GH: link tasks as sub-issues of parent epics via sub-issues API
+    Plan-->>Operator: created queue summary with issue map
   else operator declines
-    Claude-->>Operator: stop without GitHub mutation
+    Plan-->>Operator: stop without GitHub mutation
   end
 ```
 
@@ -39,9 +41,11 @@ sequenceDiagram
 
 | Decision point | Current behavior |
 | --- | --- |
-| Plan granularity too broad, too narrow, or untestable | The skill must call that out before creation |
-| User confirmation | No issues should be created before explicit confirmation |
-| Issue creation path | The skill should use `gh-issue-queue.sh create`, not ad hoc `gh issue create` |
+| Plan granularity too broad, too narrow, or untestable | The agent must call that out in warnings before creation |
+| User confirmation | No issues are created before explicit confirmation (unless `--auto-confirm`) |
+| Issue creation path | `plan.sh` uses `gh-issue-queue.sh create` deterministically, not the agent |
+| Epic/task linking | Tasks with a `parent_epic_key` are linked via the GitHub sub-issues API |
+| Complexity rationale | Each task receives a `complexity_rationale` explaining the complexity estimate |
 
 ## `runoq run` Happy Path
 
@@ -111,7 +115,7 @@ sequenceDiagram
   IssRun-->>Orch: review_ready payload
   Orch->>State: save REVIEW, DECIDE, FINALIZE breadcrumbs
   Orch->>PR: comment orchestrator result and update summary
-  alt PASS and low complexity and no caveats
+  alt PASS and complexity at or below maxComplexity and no caveats
     Orch->>PR: finalize auto-merge
     PR->>GH: ready PR and enable auto-merge
     Orch->>Queue: set-status done
@@ -130,12 +134,12 @@ sequenceDiagram
 
 | Condition | Outcome |
 | --- | --- |
-| Verification passes, verdict is `PASS`, complexity is `low`, and caveats are empty | Auto-merge PR, mark issue `done`, save terminal state, remove worktree |
+| Verification passes, verdict is `PASS`, complexity is at or below `maxComplexity` (currently `medium`), and caveats are empty | Auto-merge PR, mark issue `done`, save terminal state, remove worktree |
 | Verification fails | Post verification failure event, mark issue `needs-human-review`, preserve state |
 | Criteria tamper check fails | Feed `criteria tampered: <files>` back as verification failure, iterate or escalate |
 | Verdict is not `PASS` | Mark `needs-human-review` |
 | Verdict is `PASS` but caveats are present | Mark `needs-human-review` |
-| Verdict is `PASS` but issue complexity is not `low` | Mark `needs-human-review` |
+| Verdict is `PASS` but issue complexity exceeds `maxComplexity` (currently `medium`) | Mark `needs-human-review` |
 
 ## Failure And Escalation Path
 

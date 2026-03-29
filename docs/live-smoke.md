@@ -4,10 +4,11 @@ The live smoke suite validates `runoq` against real GitHub resources. It remains
 
 Interactive smoke commands log progress to stderr automatically. Set `RUNOQ_SMOKE_VERBOSE=1` to force those logs in non-interactive contexts, or `RUNOQ_SMOKE_VERBOSE=0` to silence them.
 
-There are now two distinct live lanes:
+There are now three distinct live lanes:
 
 - sandbox smoke: a narrow GitHub/App/auth probe
 - lifecycle eval: a full end-to-end queue run fused with an LLM eval
+- planning smoke: plan decomposition and epic/task issue creation
 
 They intentionally serve different purposes and should not be conflated.
 
@@ -36,7 +37,8 @@ It validates:
 
 - disposable managed repo provisioning through `gh repo create`
 - `runoq init` against a real GitHub repo
-- deterministic queue seeding with dependent issues
+- deterministic queue seeding with an epic and dependent task issues
+- epic/task hierarchy via the GitHub sub-issues API
 - `runoq run` queue mode through the real orchestrator/developer flow
 - worktree creation, PR lifecycle, verification, and finalization
 - queue ordering across follow-up issues
@@ -44,7 +46,20 @@ It validates:
 
 It is intentionally more expensive and less deterministic than the sandbox smoke probe.
 
-## Why Two Lanes Exist
+### Planning smoke
+
+This lane lives in `scripts/smoke-planning.sh preflight`, `scripts/smoke-planning.sh run`, and `scripts/smoke-planning.sh cleanup`.
+
+It validates:
+
+- plan decomposition via `scripts/plan.sh` against a fixture plan
+- epic and task issue creation on a managed GitHub repo
+- complexity rationale metadata in task issue bodies
+- epic/task hierarchy via sub-issues API
+
+It does not run the full `runoq run` workflow or exercise codex.
+
+## Why Three Lanes Exist
 
 Keep the narrow smoke lane because it is better for:
 
@@ -58,6 +73,12 @@ Use the lifecycle eval when you want a higher-cost acceptance test that answers:
 - can `runoq` run the real workflow end to end on GitHub?
 - can the configured model stack complete a short dependent issue chain cleanly?
 - does the result still look one-shotable after recent changes?
+
+Use the planning smoke when you want to validate plan decomposition without running the full queue:
+
+- does `runoq plan` decompose a plan into epics and tasks correctly?
+- are issues created on GitHub with the right metadata and hierarchy?
+- does complexity rationale appear in task issue bodies?
 
 ## Sandbox Smoke Setup
 
@@ -118,9 +139,40 @@ scripts/smoke-lifecycle.sh run
 scripts/smoke-lifecycle.sh cleanup --repo OWNER/REPO
 ```
 
+## Planning Smoke Setup
+
+Set all of the following:
+
+- `RUNOQ_SMOKE=1`
+- `RUNOQ_SMOKE_PLANNING=1` when using the Bats wrapper
+- `RUNOQ_SMOKE_REPO_OWNER=<owner-or-org-for-managed-repos>`
+- `RUNOQ_SMOKE_APP_ID=<github-app-id>`
+- `RUNOQ_SMOKE_APP_KEY=/absolute/path/to/app-key.pem`
+
+Optional:
+
+- `RUNOQ_SMOKE_REPO_PREFIX=runoq-live-eval`
+- `RUNOQ_SMOKE_REPO_VISIBILITY=private`
+- `RUNOQ_SMOKE_RUN_ID=<stable-id>`
+- `RUNOQ_CLAUDE_BIN=<claude-cli>`
+
+Additional prerequisites:
+
+- operator `gh` auth must be ready for repo creation, issue mutation, and cleanup
+- `claude` must be available on `PATH` unless overridden
+- `codex` is not required for this lane
+
+Commands:
+
+```bash
+scripts/smoke-planning.sh preflight
+scripts/smoke-planning.sh run
+scripts/smoke-planning.sh cleanup --repo OWNER/REPO
+```
+
 ## Managed Repo Model
 
-The lifecycle eval provisions a disposable repo by:
+Both the lifecycle eval and planning smoke lanes provision disposable repos. The lifecycle eval provisions a disposable repo by:
 
 1. copying a tiny seeded target repo from `test/fixtures/live_smoke_lifecycle_target/`
 2. creating a real GitHub repo with `gh repo create --source ... --push`
@@ -131,11 +183,12 @@ The lifecycle eval provisions a disposable repo by:
 
 The seeded issue chain is intentionally small and predictable:
 
-- issue 1 adds formatted output
-- issue 2 revises the same area with a follow-up change
-- issue 3 adds a thin CLI on top
+- one epic defines the overall progress-tracking library scope
+- task 1 implements the core formatter (no dependencies)
+- task 2 adds overflow clamping (depends on task 1)
+- task 3 adds a CLI wrapper (depends on task 2)
 
-That gives end-to-end coverage plus a useful LLM eval signal without depending on highly variable reviewer-driven iteration.
+Tasks are linked to their parent epic via the GitHub sub-issues API. That gives end-to-end coverage of epic/task hierarchy plus a useful LLM eval signal without depending on highly variable reviewer-driven iteration.
 
 ## Lifecycle Eval Output
 
@@ -150,10 +203,22 @@ That gives end-to-end coverage plus a useful LLM eval signal without depending o
 - `checks`
 - `failures`
 - `lifecycle.seeded_issues`
+- `lifecycle.seeded_tasks`
 - `lifecycle.completed_issues`
-- `lifecycle.all_issues_done`
+- `lifecycle.all_tasks_done`
+- `lifecycle.one_shot_completed`
 - `lifecycle.one_shotable`
 - `lifecycle.queue_order_ok`
+- `lifecycle.open_prs`
+- `lifecycle.merged_prs`
+- `lifecycle.epics`
+- `lifecycle.criteria_phases_run`
+- `lifecycle.criteria_phases_skipped`
+- `lifecycle.criteria_commits_recorded`
+- `lifecycle.criteria_tamper_violations`
+- `lifecycle.integration_gates_passed`
+- `lifecycle.mentions`
+- `lifecycle.issue_numbers`
 - `lifecycle.issue_results`
 - `lifecycle.report_summary`
 - `lifecycle.prs`
@@ -208,11 +273,14 @@ Opt-in real GitHub runs:
 ```bash
 bats test/live_smoke.bats test/live_smoke_sandbox.bats
 bats test/live_smoke.bats test/live_smoke_lifecycle.bats
+bats test/live_smoke.bats test/live_smoke_planning.bats
 ```
 
 `test/live_smoke_sandbox.bats` is skipped unless sandbox smoke preflight is ready.
 
 `test/live_smoke_lifecycle.bats` is skipped unless lifecycle preflight is ready and `RUNOQ_SMOKE_LIFECYCLE=1` is set.
+
+`test/live_smoke_planning.bats` is skipped unless planning smoke preflight is ready and `RUNOQ_SMOKE_PLANNING=1` is set.
 
 ## Recommended Usage Pattern
 
@@ -221,6 +289,14 @@ For narrow GitHub validation:
 1. Run `scripts/smoke-sandbox.sh preflight`.
 2. Fix anything in `missing`.
 3. Run `bats test/live_smoke.bats test/live_smoke_sandbox.bats`.
+
+For plan decomposition validation:
+
+1. Run `scripts/smoke-planning.sh preflight`.
+2. Confirm operator `gh` auth and GitHub App access are both ready.
+3. Run `bats test/live_smoke.bats test/live_smoke_planning.bats` or call `scripts/smoke-planning.sh run` directly.
+4. Inspect the JSON summary and local artifacts under `.runoq/live-smoke/runs/<run_id>/`.
+5. Delete managed repos intentionally with `scripts/smoke-planning.sh cleanup ...`.
 
 For full lifecycle eval:
 

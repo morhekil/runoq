@@ -53,10 +53,24 @@ Prepare a local plan document in the target repository, then run:
 runoq plan docs/plan.md
 ```
 
-The `plan-to-issues` skill reads the file, proposes a queue, and asks for explicit confirmation before creating anything in GitHub. After you confirm, it creates issues with:
+The plan pipeline uses the `plan-decomposer` agent to break the document into an epic/task hierarchy. The decomposer proposes epics (grouping units) and tasks (implementable units), each with an estimated complexity (`low`, `medium`, or `high`) and a rationale for the complexity assessment. It then presents the proposal for interactive confirmation before creating anything in GitHub.
+
+Additional flags:
+
+```bash
+runoq plan docs/plan.md --auto-confirm   # skip confirmation prompt
+runoq plan docs/plan.md --dry-run        # show proposal without creating issues
+```
+
+After confirmation, the pipeline creates issues in two passes:
+
+1. **Epics** — created first, labeled `runoq:ready`, with `type: epic` in the metadata block
+2. **Tasks** — created in dependency order, linked to their parent epic via the GitHub sub-issues API, with `type: task` in the metadata block
+
+Each issue includes:
 
 - The `runoq:ready` label
-- An `<!-- runoq:meta -->` block containing dependencies, priority, and estimated complexity
+- An `<!-- runoq:meta -->` block containing dependencies, priority, estimated complexity, complexity rationale, and type
 - Acceptance criteria in the issue body
 
 At this point GitHub becomes the queue surface. Operators can inspect issue titles, labels, and metadata without reading local state files.
@@ -69,17 +83,18 @@ Use single-issue mode when you want to drive one queue item explicitly:
 runoq run --issue 42
 ```
 
-During a successful run, `runoq`:
+During a successful run, `runoq` drives the issue through a deterministic phase sequence:
 
-- Verifies the issue is eligible for dispatch
-- Moves the issue label from `runoq:ready` to `runoq:in-progress`
-- Creates a sibling worktree next to the target repo
-- Creates a draft PR for the issue branch
-- Posts structured audit comments to the PR
-- Writes `.runoq/state/42.json` so interrupted runs can be reconciled
-- Verifies the resulting changes before finalization
+1. **INIT** — eligibility check, label transition to `runoq:in-progress`, worktree and draft PR creation
+2. **CRITERIA** — for medium/high complexity issues, the `bar-setter` agent writes acceptance tests and specs in the worktree before development begins. Low-complexity issues skip this phase.
+3. **DEVELOP** — the `issue-runner` script drives a Codex dev round in the worktree
+4. **REVIEW** — the `diff-reviewer` agent evaluates the diff against the spec
+5. **DECIDE** — the orchestrator routes to another DEVELOP round (if the review verdict is `ITERATE` and rounds remain), to FINALIZE, or to INTEGRATE for epics
+6. **FINALIZE** — PR finalization, label transition, worktree cleanup
 
-If the outcome is a clean low-complexity pass, the issue is marked `runoq:done` and the worktree is removed. Otherwise the run is escalated to `runoq:needs-human-review`.
+State is saved to `.runoq/state/42.json` after each phase so interrupted runs can be reconciled.
+
+If the outcome is a clean pass and complexity is at or below the auto-merge threshold (currently `medium`), the issue is marked `runoq:done`, auto-merge is enabled on the PR, and the worktree is removed. Otherwise the run is escalated to `runoq:needs-human-review`.
 
 ## Running The Queue
 
@@ -90,6 +105,8 @@ runoq run
 ```
 
 Queue selection is based on open issues labeled `runoq:ready`. The runtime skips issues whose dependencies are not yet labeled `runoq:done` and continues until there are no actionable items left or the consecutive-failure circuit breaker halts the queue.
+
+After the task queue drains, the orchestrator performs an **epic sweep**: it checks all `runoq:ready` epics to see whether all of their child tasks are `runoq:done`. For each completed epic, it runs the **INTEGRATE** phase — which verifies acceptance criteria against the combined work of all child tasks — and marks the epic `runoq:done` if integration passes.
 
 Use queue mode after the plan has been converted into issues and you want the runtime to keep draining ready work without naming each issue manually.
 
@@ -109,6 +126,7 @@ What to inspect after a run:
 - The draft or finalized PR for audit comments and summary updates
 - `.runoq/state/<issue>.json` for resumability state and the final outcome
 - `.runoq/state/maintenance.json` after maintenance review starts
+- Epic status via `gh-issue-queue.sh epic-status` for parent/child completion tracking
 
 `report summary` aggregates local state files. `report issue <n>` prints the saved JSON for one issue. `report cost` estimates token cost from the configured per-million rates.
 
@@ -126,4 +144,4 @@ This invokes the `maintenance-reviewer` agent. The runtime creates a tracking is
 
 - Use the [README](../../README.md) for the repo overview and prerequisite list
 - Use [docs/live-smoke.md](../live-smoke.md) for sandboxed real-GitHub validation
-- Use [docs/documentation-backlog.md](../documentation-backlog.md) to track the remaining operator, architecture, and reference docs
+- Use [docs/adr/](../adr/README.md) for architectural decision records

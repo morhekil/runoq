@@ -30,7 +30,7 @@ flowchart LR
 
 - Human operator: decides when to initialize a repo, confirm plan slicing, run the queue, inspect output, and triage maintenance findings.
 - GitHub repository: hosts issues, PRs, labels, comments, collaborator permissions, and the long-lived operational audit trail.
-- Claude CLI: runs the `plan-to-issues` skill plus the `bar-setter`, `mention-responder`, `diff-reviewer`, and `maintenance-reviewer` agents.
+- Claude CLI: runs the `plan-decomposer`, `bar-setter`, `mention-responder`, `diff-reviewer`, and `maintenance-reviewer` agents.
 - Target repository: provides the source tree, git remote, package scripts, `.gitignore`, and optional `tsconfig.json`.
 
 ## Subsystem View
@@ -139,8 +139,9 @@ flowchart LR
 | Component | Owns | Does not own |
 | --- | --- | --- |
 | `bin/runoq` | Public CLI shape, repo context export, auth bootstrap, command routing | Queue logic, verification, PR mutation details |
-| `scripts/gh-auth.sh` | GitHub token export, `GH_TOKEN` reuse, installation-token minting | Queue state, issue or PR decisions |
-| `scripts/gh-issue-queue.sh` | Queue listing, metadata parsing, dependency ordering, label transitions, issue creation | PR lifecycle, verification, reconciliation |
+| `scripts/lib/common.sh` (`runoq::gh()`) | Global bot auth: auto-mints app installation token on first `gh` call, configures bot identity for worktrees | Queue state, issue or PR decisions |
+| `scripts/gh-auth.sh` | Explicit token export for CLI bootstrap, `GH_TOKEN` reuse | Queue state, issue or PR decisions |
+| `scripts/gh-issue-queue.sh` | Queue listing, metadata parsing, dependency ordering, label transitions, issue creation, epic/task sub-issue linking via GitHub sub-issues API, epic-status queries | PR lifecycle, verification, reconciliation |
 | `scripts/dispatch-safety.sh` | Startup reconciliation, stale-label cleanup, eligibility checks, interrupted-run handling | PR creation, verification checks |
 | `scripts/worktree.sh` | Branch naming, sibling worktree creation/removal | Queue selection, GitHub state |
 | `scripts/gh-pr-lifecycle.sh` | Draft PR creation, audit comments, summary mutation, finalize actions, mention polling, permission checks | Queue ordering, local state transitions |
@@ -151,7 +152,7 @@ flowchart LR
 | `scripts/issue-runner.sh` | Drive codex rounds, track token budget, call verify.sh, package payloads, pass criteria_commit to verification | Phase dispatch, PR lifecycle, queue decisions |
 | `scripts/maintenance.sh` | Partition derivation, maintenance tracking issue lifecycle, findings storage, triage-to-issue filing | Code modification |
 | `scripts/mentions.sh` | Mention polling, permission gating, deny comments, deduplication via state | Queue dispatch decisions |
-| Claude skills and agents | Plan decomposition (plan-to-issues), acceptance criteria authoring (bar-setter, opus), code review (diff-reviewer, opus), mention response (mention-responder, sonnet), maintenance review reasoning (maintenance-reviewer, opus) | Deterministic GitHub or filesystem contracts already defined in scripts |
+| Claude skills and agents | Plan decomposition (plan-decomposer agent, produces epic/task hierarchy with complexity rationale), acceptance criteria authoring (bar-setter, opus), code review (diff-reviewer, opus), mention response (mention-responder, sonnet), maintenance review reasoning (maintenance-reviewer, opus) | Deterministic GitHub or filesystem contracts already defined in scripts |
 
 ## Boundaries And Responsibilities
 
@@ -198,12 +199,13 @@ Use this table when deciding where a change belongs:
 
 | Concern | Owning layer |
 | --- | --- |
+| Plan decomposition and issue creation | `plan.sh` (orchestrates decomposition and deterministic issue creation), `plan-decomposer` agent (produces epic/task hierarchy), `gh-issue-queue.sh` (creates issues and sub-issue links) |
 | Queue logic and dependency ordering | `gh-issue-queue.sh`, `dispatch-safety.sh`, `run.sh` |
 | Phase dispatch and decision table | `orchestrator.sh` |
 | Dev-round execution and codex loop | `issue-runner.sh` |
 | Acceptance criteria authoring | `bar-setter` agent (opus), invoked by `orchestrator.sh` during CRITERIA phase |
 | PR lifecycle | `gh-pr-lifecycle.sh`, `orchestrator.sh` |
-| Auth and token minting | `gh-auth.sh`, `.runoq/identity.json`, `GH_TOKEN` |
+| Auth and token minting | `runoq::gh()` in `common.sh` (auto-mints app installation token globally on first call), `gh-auth.sh`, `.runoq/identity.json`, `GH_TOKEN` |
 | Verification and criteria tamper check | `verify.sh` plus configured test/build commands |
 | Epic integration verification | `verify.sh integrate` |
 | Mention triage and response | `orchestrator.sh` (haiku classification), `mention-responder` agent (sonnet) |

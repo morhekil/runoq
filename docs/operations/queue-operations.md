@@ -100,14 +100,16 @@ Typical reasons:
 - you want to retry a previously escalated or reconciled issue
 - you do not want the runner to keep draining the queue afterward
 
-Single-issue mode still performs:
+Single-issue mode still performs the full phase sequence:
 
 - startup reconciliation
 - eligibility checks
-- label transition to `runoq:in-progress`
-- worktree creation
-- PR creation and audit comments
-- verification and finalization
+- INIT: label transition to `runoq:in-progress`, worktree creation, draft PR creation
+- CRITERIA: bar-setter writes acceptance tests/specs (skipped for low complexity)
+- DEVELOP: issue-runner drives a Codex dev round
+- REVIEW: diff-reviewer evaluates the diff
+- DECIDE: route to another DEVELOP round, FINALIZE, or INTEGRATE
+- FINALIZE: PR finalization, label transition, worktree cleanup
 
 It stops after that one issue.
 
@@ -122,9 +124,10 @@ runoq run
 Queue mode:
 
 - reconciles interrupted runs first
-- processes issues in dependency-safe priority order
+- processes task issues in dependency-safe priority order
 - resets the consecutive-failure counter after each clean completion
-- stops when no actionable `runoq:ready` issue remains
+- stops when no actionable `runoq:ready` task issue remains
+- performs an **epic sweep** after the task queue drains: evaluates each `runoq:ready` epic to check whether all child tasks are done, and runs the INTEGRATE phase for completed epics
 
 ## Finalization Outcomes
 
@@ -139,7 +142,7 @@ What happens:
 - local state becomes terminal with `phase: "DONE"`
 - sibling worktree is removed
 
-This only happens when verification passes, the orchestrator verdict is `PASS`, caveats are empty, and the issue complexity is `low`.
+This happens when the review verdict is `PASS`, caveats are empty, and the issue complexity is at or below the auto-merge threshold (`maxComplexity`, currently `medium`).
 
 ### Human-review escalation
 
@@ -153,11 +156,22 @@ What happens:
 
 Common triggers:
 
-- verification failure
-- non-`PASS` orchestrator verdict
-- caveats in the orchestrator result
-- medium or high complexity issue metadata
+- non-`PASS` review verdict (`FAIL` or `ITERATE` at max rounds)
+- caveats present in the dev-round result
+- complexity exceeding the auto-merge threshold
+- auto-merge disabled in config
 - unrecoverable interrupted state at reconciliation time
+
+## Epic Integration
+
+Epics are grouping issues created by `runoq plan` with `type: epic`. They do not go through the normal DEVELOP/REVIEW cycle. Instead, after the task queue drains, the orchestrator performs an epic sweep:
+
+1. For each `runoq:ready` epic, check whether all child tasks (linked via the GitHub sub-issues API) are `runoq:done`
+2. If all children are done, run the **INTEGRATE** phase:
+   - If the epic has a `criteria_commit` (from the CRITERIA phase), run `verify.sh integrate` against it to confirm acceptance criteria are met
+   - If no criteria commit exists, mark the epic done directly
+3. On integration success, the epic moves to `runoq:done`
+4. On integration failure, the epic moves to `runoq:needs-human-review` with failure details
 
 ## Circuit Breaker Behavior
 
@@ -190,11 +204,11 @@ Look for:
 
 Look for:
 
-- dispatch payload comment
-- `runoq:payload:codex-return` comment for the dev round
+- `runoq:event:init` — orchestrator initialization
+- `runoq:event:criteria` — bar-setter acceptance criteria (medium/high complexity)
+- `runoq:event:review` — diff review verdict, score, and checklist per round
+- `runoq:event:finalize` — finalization decision table with complexity, verdict, and auto-merge status
 - payload reconstruction comments when malformed output was patched or synthesized
-- verification failure comments
-- final orchestrator verdict comment
 
 ### PR body
 

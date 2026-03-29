@@ -23,7 +23,7 @@ The CLI must be run from inside the target git repository. It resolves:
 | Command | Local filesystem mutation | GitHub mutation |
 | --- | --- | --- |
 | `runoq init` | Yes | Yes |
-| `runoq plan <file>` | No | Yes, but only after user confirmation inside the skill |
+| `runoq plan <file>` | No | Yes, but only after user confirmation in the plan pipeline |
 | `runoq run --issue N` | Yes | Yes |
 | `runoq run` | Yes | Yes |
 | `runoq run --dry-run` | No intended durable mutation beyond reconciliation side effects | Reconciliation comments or label cleanup may occur before the dry-run output |
@@ -67,7 +67,7 @@ Common failures:
 
 ### `runoq plan <file>`
 
-Sends a local plan document to the `plan-to-issues` skill.
+Decomposes a plan document into GitHub issues using the plan decomposition pipeline (`scripts/plan.sh`).
 
 ```bash
 runoq plan docs/plan.md
@@ -75,14 +75,16 @@ runoq plan docs/plan.md
 
 Arguments:
 
-- `<file>`: required path to a local plan document; the CLI resolves it to an absolute path before invoking Claude
+- `<file>`: required path to a local plan document; the CLI resolves it to an absolute path before invoking the pipeline
 
 What it does:
 
 - Resolves target repo context and GitHub auth
-- Runs `claude --skill plan-to-issues --add-dir "$RUNOQ_ROOT" -- <absolute-path>`
-- Lets the skill propose issue slicing, dependencies, and granularity warnings
-- Creates GitHub issues only after explicit user confirmation
+- Runs `scripts/plan.sh <repo> <absolute-path>`, which:
+  1. Calls the `plan-decomposer` agent to decompose the plan into epics and tasks with dependency ordering, complexity estimates, and complexity rationales
+  2. Presents the proposed issue hierarchy to the operator for confirmation
+  3. Creates GitHub issues deterministically via `gh-issue-queue.sh create` (epics first, then tasks with resolved dependency numbers)
+- Supports `--auto-confirm` and `--dry-run` flags
 
 Common failures:
 
@@ -111,7 +113,7 @@ Behavior:
 - Resolves target repo context and GitHub auth
 - Runs startup reconciliation through `dispatch-safety.sh reconcile`
 - In queue mode, selects the next actionable `runoq:ready` issue by dependency and priority
-- In execution mode, creates a sibling worktree, opens a draft PR, writes local state, verifies results, and finalizes with either `done` or `needs-human-review`
+- In execution mode, delegates to `orchestrator.sh run` which creates a sibling worktree, opens a draft PR, drives the phase state machine (INIT, CRITERIA, DEVELOP, REVIEW, DECIDE, FINALIZE), and finalizes with either `auto-merge` or `needs-human-review`
 
 Dry-run output:
 

@@ -37,7 +37,7 @@ The default runtime config lives at [`config/runoq.json`](../../config/runoq.jso
 | `autoMerge.enabled` | Auto-merge policy setting | currently informational; finalization logic is enforced in `run.sh` |
 | `autoMerge.requireVerification` | Auto-merge gating expectation | currently informational; verification is always run in `run.sh` |
 | `autoMerge.requireZeroCritical` | Auto-merge review expectation | currently informational; not independently enforced in shell code |
-| `autoMerge.maxComplexity` | Intended complexity threshold for auto-merge | current shell logic hard-codes low-complexity auto-merge in `run.sh` |
+| `autoMerge.maxComplexity` | Complexity threshold for auto-merge (`low`, `medium`, or `high`) | `orchestrator.sh` reads this value and applies it in the FINALIZE decision table |
 | `reviewers[]` | First reviewer/assignee for needs-review finalization | `run.sh` |
 | `branchPrefix` | Prefix for per-issue branches | `common.sh`, `worktree.sh`, `dispatch-safety.sh` |
 | `worktreePrefix` | Prefix for sibling worktree directories | `common.sh`, `worktree.sh` |
@@ -48,13 +48,12 @@ The default runtime config lives at [`config/runoq.json`](../../config/runoq.jso
 
 ### Notes On Config Drift
 
-The `autoMerge.*` block expresses desired policy, but the current shell implementation only enforces a subset directly. Today:
+The `autoMerge.*` block is enforced by the orchestrator's FINALIZE decision table. Today:
 
 - verification is always required before successful finalization
-- low issue complexity is required for auto-merge
+- issue complexity must be at or below `autoMerge.maxComplexity` for auto-merge (default: `medium`)
 - caveats or non-`PASS` verdicts force `needs-human-review`
-
-If you change config in this area, verify whether the shell code also needs to change.
+- `autoMerge.enabled` must be `true` for auto-merge to activate
 
 ## Identity Files
 
@@ -126,11 +125,19 @@ This means a shell session with an exported `GH_TOKEN` will bypass GitHub App mi
 
 If that bootstrap succeeds, later commands can mint installation tokens from the saved identity.
 
+### Global Bot Auth Via `runoq::gh()`
+
+All scripts that source `lib/common.sh` gain access to `runoq::gh()`, a wrapper around the `gh` CLI that auto-mints an app installation token on first use when `GH_TOKEN` is not already set. This means any script using `runoq::gh` instead of bare `gh` automatically runs under the bot identity without per-callsite token setup.
+
+- On the first `runoq::gh` call per process, if `GH_TOKEN` is unset and `RUNOQ_NO_AUTO_TOKEN` is unset, `runoq::_mint_bot_token` reads `.runoq/identity.json`, signs a JWT, exchanges it for an installation token, and exports `GH_TOKEN`.
+- Subsequent `runoq::gh` calls reuse the minted token.
+- Set `RUNOQ_NO_AUTO_TOKEN=1` to suppress automatic minting.
+
 ### During `plan`, `run`, and `maintenance`
 
-These commands call `gh-auth.sh export-token` before invoking the runtime flow or Claude.
+These commands call `gh-auth.sh export-token` before invoking the runtime flow or Claude. The orchestrator also sets `RUNOQ_FORCE_REFRESH_TOKEN=1` at startup to ensure all GitHub operations appear under the bot identity.
 
-- If `GH_TOKEN` is already present, it is reused by default.
+- If `GH_TOKEN` is already present and refresh is not forced, it is reused by default.
 - If not, `gh-auth.sh` signs a JWT with the private key and exchanges it for an installation token.
 - The resulting token is injected into the current `runoq` process environment via `eval`.
 

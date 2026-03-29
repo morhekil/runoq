@@ -42,7 +42,7 @@ If you want to see reconciliation output without dispatching new work, use `runo
 
 Symptoms:
 
-- `.runoq/state/<issue>.json` has a non-terminal phase like `DEVELOP` or `REVIEW`
+- `.runoq/state/<issue>.json` has a non-terminal phase like `INIT`, `CRITERIA`, `DEVELOP`, `REVIEW`, or `DECIDE`
 - the saved branch is still pushed to `origin`
 - the PR still exists and is open
 - issue or PR comments show `Detected interrupted run ... Resuming.`
@@ -139,6 +139,38 @@ Fix:
 
 - inspect the existing branch and resolve or discard it
 - if the branch belongs to stale work, clean up the PR/branch before retrying
+
+## CRITERIA Phase Failures
+
+The CRITERIA phase runs the `bar-setter` agent to write acceptance tests and specs before development begins. It is only invoked for medium or high complexity issues; low-complexity issues skip it.
+
+Symptoms:
+
+- `.runoq/state/<issue>.json` has `phase: "FAILED"` with `failure_reason: "criteria phase failed"`
+- No `criteria_commit` was recorded in state
+
+What to do:
+
+- Check whether the bar-setter agent produced output (look for the `runoq:event:criteria` PR comment)
+- If the worktree and PR are still intact, you can manually write criteria files and rerun
+- If the issue is not worth the bar-setter overhead, consider lowering its complexity to `low` in the issue metadata block
+
+## Epic Integration Failures
+
+The INTEGRATE phase runs after the task queue drains, when all child tasks of an epic are `runoq:done`. It verifies the combined work meets the epic-level acceptance criteria.
+
+Symptoms:
+
+- `.runoq/state/<epic>.json` has `phase: "FAILED"` with `integrate_failures`
+- The epic is labeled `runoq:needs-human-review`
+- `verify.sh integrate` reported failures
+
+What to do:
+
+- Inspect the `integrate_failures` field in the state file for specific failure details
+- Check whether the criteria commit is still reachable
+- Fix the underlying integration failures (often test/build failures across combined child work)
+- Rerun `runoq run` — the epic sweep will retry integration for epics whose children are all done
 
 ## Verification Failures
 

@@ -21,6 +21,7 @@ Key paths:
 - `test/fixtures/`: canned issues, comments, payloads, and plan examples
 - `scripts/smoke-sandbox.sh`: sandbox-only real GitHub smoke runner
 - `scripts/smoke-lifecycle.sh`: full lifecycle/eval live runner
+- `scripts/smoke-planning.sh`: plan decomposition live smoke runner
 
 ## Choosing The Right Test Layer
 
@@ -95,6 +96,7 @@ Current lanes:
 
 - sandbox smoke: narrow GitHub/App/auth validation
 - lifecycle eval: managed disposable repo plus full queue execution and eval scoring
+- planning smoke: plan decomposition and issue creation in a managed repo
 
 ## The Bats Harness
 
@@ -225,6 +227,7 @@ Use it only when you are intentionally validating:
 - real collaborator permission checks
 - cleanup of temporary sandbox artifacts
 - full lifecycle/eval behavior in a disposable managed repo
+- plan decomposition and epic/task issue creation against a managed repo
 
 Why it stays opt-in:
 

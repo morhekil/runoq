@@ -53,6 +53,7 @@ Fields commonly written by `run.sh` and `orchestrator.sh`:
 - `worktree`
 - `pr_number`
 - `criteria_commit` when bar-setter has authored acceptance criteria (medium+ complexity tasks)
+- `complexity_rationale` free-text explanation of the complexity estimate (from issue metadata)
 - `type` issue type (`epic` or `task`)
 - `parent_epic` parent epic issue number (for tasks within an epic)
 - `outcome` on terminal states
@@ -334,9 +335,9 @@ GitHub comments are the audit trail. The runtime uses machine-recognizable marke
 | Marker | Meaning | Typical location |
 | --- | --- | --- |
 | `<!-- runoq:event -->` | human-readable operational event | issue comments, PR comments, maintenance tracking issue comments |
-| `<!-- runoq:payload:github-orchestrator-dispatch -->` | dispatch payload sent into orchestration | PR comment |
+| `<!-- runoq:event:<phase> -->` | phase-specific event posted by the orchestrator (e.g., `runoq:event:init`, `runoq:event:criteria`, `runoq:event:review`, `runoq:event:finalize`) | PR and issue comments |
+| `<!-- runoq:event:verification-failure -->` | verification failure posted by `issue-runner` after a failed round | PR comment |
 | `<!-- runoq:payload:codex-return -->` | normalized or reconstructed dev-round payload | PR comment |
-| `<!-- runoq:payload:orchestrator-return -->` | orchestration verdict payload | PR comment |
 
 ### PR body markers
 

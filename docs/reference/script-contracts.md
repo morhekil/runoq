@@ -24,19 +24,41 @@ Primary callers: `run.sh`, `maintenance.sh`, the `plan-to-issues` skill, tests.
 
 | Subcommand | Arguments | JSON/stdout contract | Side effects |
 | --- | --- | --- | --- |
-| `list` | `<repo> <ready-label>` | JSON array of issues with `number`, `title`, `body`, `url`, `labels`, `depends_on`, `priority`, `estimated_complexity`, `metadata_present`, `metadata_valid` | reads GitHub issues |
+| `list` | `<repo> <ready-label>` | JSON array of issues with `number`, `title`, `body`, `url`, `labels`, `depends_on`, `priority`, `estimated_complexity`, `complexity_rationale`, `type`, `parent_epic`, `metadata_present`, `metadata_valid` | reads GitHub issues |
 | `next` | `<repo> <ready-label>` | JSON object `{ issue, skipped }`; `issue` is either the next actionable issue object or `null`, `skipped` contains blocked items with `blocked_reasons` | reads GitHub issues and dependency labels |
 | `set-status` | `<repo> <issue-number> <status>` where status is `ready`, `in-progress`, `done`, `needs-review`, or `blocked` | JSON object `{ issue, status, label }` | removes existing `runoq:*` labels and applies exactly one new state label |
-| `create` | `<repo> <title> <body> [--depends-on N,M] [--priority N] [--estimated-complexity value] [--type epic\|task] [--parent-epic N] [--children N,M]` | JSON object `{ title, url }` | creates a GitHub issue labeled `runoq:ready` with an `runoq:meta` block |
+| `create` | `<repo> <title> <body> [--depends-on N,M] [--priority N] [--estimated-complexity value] [--type epic\|task] [--parent-epic N] [--complexity-rationale text]` | JSON object `{ title, url }` | creates a GitHub issue labeled `runoq:ready` with an `runoq:meta` block |
 | `epic-status` | `<repo> <epic-number>` | JSON object `{ epic, children, all_done, pending }` where `children` lists child issue numbers with their labels, `all_done` is boolean, `pending` lists children not yet `runoq:done` | reads GitHub issue metadata and child labels |
 
 Notes:
 
 - `next` sorts actionable items by metadata priority, then issue number.
 - `next` skips issues with `type: epic` — only tasks are dispatched directly.
-- `create` accepts `--type`, `--parent-epic`, and `--children` flags for hierarchical issue structures.
+- `create` accepts `--type`, `--parent-epic`, and `--complexity-rationale` flags for hierarchical issue structures and rationale tracking.
 - `epic-status` checks whether all children of an epic have the `runoq:done` label, enabling INTEGRATE phase triggering.
 - dependency checks require upstream issues to carry the configured done label.
+
+## `plan.sh`
+
+Purpose: plan decomposition pipeline. Decomposes a plan document into epics and tasks, presents the proposal, and creates GitHub issues deterministically.
+
+Primary callers: `bin/runoq`, operators, tests.
+
+| Invocation | Arguments | JSON/stdout contract | Side effects |
+| --- | --- | --- | --- |
+| `plan.sh` | `<repo> <plan-file> [--auto-confirm] [--dry-run]` | JSON object `{ status, issues, issue_map }` on success; decomposition JSON on dry run | calls `plan-decomposer` agent, creates GitHub issues via `gh-issue-queue.sh create` |
+
+Pipeline phases:
+
+1. **Decompose**: calls the `plan-decomposer` agent to produce a structured decomposition with `items` (epics and tasks), each containing `key`, `type`, `title`, `body`, `priority`, `estimated_complexity`, `complexity_rationale`, dependency keys, and parent/children relationships.
+2. **Present**: displays the proposed issue hierarchy to the operator with complexity, dependency, and bar-setter annotations. Shows warnings if the agent produced any.
+3. **Create**: creates epics first, then tasks in order, resolving dependency keys to real issue numbers. Passes `--complexity-rationale` when present.
+
+Notes:
+
+- `--auto-confirm` skips interactive confirmation.
+- `--dry-run` outputs the decomposition JSON without creating issues.
+- Epic issues are created with `--type epic`; child tasks reference their parent via `--parent-epic`.
 
 ## `orchestrator.sh`
 
@@ -46,8 +68,8 @@ Primary callers: `run.sh`, tests.
 
 | Subcommand | Arguments | JSON/stdout contract | Side effects |
 | --- | --- | --- | --- |
-| `dispatch` | `<repo> <issue-number>` | JSON object with phase progression, outcome, and audit trail references | creates worktree, draft PR, spawns bar-setter/diff-reviewer/mention-responder agents, drives phase transitions, posts audit comments, finalizes PR |
-| `triage-mentions` | `<repo> <handle>` | JSON array of classified mentions with `comment_id`, `classification`, `action_taken` | polls mentions, classifies via haiku structured-output call, dispatches to mention-responder or feeds change-requests into DEVELOP |
+| `run` | `<repo> [--issue N] [--dry-run]` | JSON object with phase progression, outcome, and audit trail references | creates worktree, draft PR, spawns bar-setter/diff-reviewer agents, drives phase transitions, posts audit comments, finalizes PR |
+| `mention-triage` | `<repo> <pr-number>` | JSON array of classified mentions with `comment_id`, `classification`, `action_taken` | polls mentions, classifies via haiku structured-output call, dispatches to mention-responder or feeds change-requests into DEVELOP |
 
 Phase transitions driven by orchestrator:
 
@@ -76,13 +98,16 @@ Primary callers: `orchestrator.sh`, tests.
 
 | Subcommand | Arguments | JSON/stdout contract | Side effects |
 | --- | --- | --- | --- |
-| `run` | `<worktree> <branch> <base-sha> <payload-file> [--criteria-commit SHA]` | `{ ok, review_ready, rounds_used, tokens_used, payload }` | invokes codex, validates payload via state.sh, calls verify.sh round (including criteria tamper check), iterates on failure up to max rounds |
+| `run` | `<payload-json-file>` | JSON object with `status` (`review_ready`, `fail`, `budget_exhausted`), `issueNumber`, `prNumber`, `round`, `verificationPassed`, `verificationFailures`, `changedFiles`, `relatedFiles`, `cumulativeTokens`, `summary`, `caveats` | invokes codex in worktree, validates payload via `state.sh`, calls `verify.sh round` (including criteria tamper check when `criteria_commit` is present in payload), iterates on failure up to `maxRounds`, posts verification failure comments to PR |
+
+The payload JSON file must include: `issueNumber`, `prNumber`, `worktree`, `branch`, `specPath`, `repo`, `maxRounds`, `maxTokenBudget`. Optional fields: `round`, `logDir`, `previousChecklist`, `cumulativeTokens`, `guidelines`, `criteria_commit`.
 
 Notes:
 
-- Passes `criteria_commit` to `verify.sh round` when present, enabling the tamper check.
-- Tracks cumulative token usage across rounds.
-- Returns `review_ready` payload on success or escalation payload on max-rounds exhaustion.
+- Injects `criteria_commit` into the payload file before verification when present, enabling the tamper check.
+- Tracks cumulative token usage across rounds and checks budget before and after each round.
+- Expands review scope by finding files that import changed files.
+- Returns `review_ready` on verification success, `fail` on max-rounds exhaustion, or `budget_exhausted` when the token budget is exceeded.
 
 ## `gh-pr-lifecycle.sh`
 
@@ -141,7 +166,7 @@ Primary callers: `run.sh`, agents, tests.
 
 | Subcommand | Arguments | JSON/stdout contract | Side effects |
 | --- | --- | --- | --- |
-| `round` | `<worktree> <branch> <base-sha> <payload-file> [--criteria-commit SHA]` | `{ ok, review_allowed, failures, actual }` where `actual` contains ground-truth commit and file lists | reads git state, runs configured test/build commands in the worktree |
+| `round` | `<worktree> <branch> <base-sha> <payload-file>` | `{ ok, review_allowed, failures, actual }` where `actual` contains ground-truth commit and file lists | reads git state, runs configured test/build commands in the worktree |
 | `integrate` | `<worktree> <criteria-commit>` | `{ ok, failures }` | confirms epic-level criteria files from `criteria_commit` are unchanged at HEAD, runs test suite in integrated worktree |
 
 Verification checks for `round`:
@@ -153,7 +178,7 @@ Verification checks for `round`:
 - configured test command succeeds
 - configured build command succeeds
 - payload reports tests/build as passed
-- when `--criteria-commit` is provided: each file in the criteria commit's diff is byte-identical at HEAD (criteria tamper check); failure reports `criteria tampered: <files>`
+- when `criteria_commit` is present in the payload file: each file in the criteria commit's diff is byte-identical at HEAD (criteria tamper check); failure reports `criteria tampered: <files>`
 
 Verification checks for `integrate`:
 

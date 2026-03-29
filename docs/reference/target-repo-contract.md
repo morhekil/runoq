@@ -66,6 +66,7 @@ parent_epic: null
 depends_on: []
 priority: 3
 estimated_complexity: medium
+complexity_rationale: Touches multiple modules with test coverage gaps
 -->
 ```
 
@@ -76,6 +77,7 @@ Field requirements:
 - `depends_on`: JSON array of issue numbers
 - `priority`: integer, lower means earlier queue selection
 - `estimated_complexity`: string such as `low`, `medium`, or `high`
+- `complexity_rationale`: optional free-text explanation of the complexity estimate
 
 Epic issues use `type: epic`. Child tasks are tracked via GitHub's native sub-issues API rather than metadata. Task issues within an epic use `type: task` and reference their parent via `parent_epic`. The queue runner skips epics during normal dispatch; epics are completed via the INTEGRATE phase after all children reach `runoq:done`.
 
@@ -120,7 +122,7 @@ Those are part of the expected operator-facing PR shape, even though the summary
 
 ## `AGENTS.md` In The Target Repo
 
-The shell runtime does not parse `AGENTS.md`, but the prompt layer does. The `github-orchestrator` startup contract explicitly tells the agent to read `AGENTS.md` from the target repo context.
+The shell runtime does not parse `AGENTS.md`, but the prompt layer does. Agent startup contracts (such as bar-setter and diff-reviewer) read `AGENTS.md` from the target repo context.
 
 Downstream guidance:
 
