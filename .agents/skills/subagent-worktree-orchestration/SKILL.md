@@ -1,0 +1,119 @@
+---
+name: subagent-worktree-orchestration
+description: Create and manage coding or verification subagents with hard isolation boundaries. Use when delegating implementation, testing, or review work to subagents in this repo or similar repos where the main checkout must stay clean, sibling git worktrees are preferred, and prompt-only scope control is not sufficient.
+---
+
+# Subagent Worktree Orchestration
+
+Use this skill when delegation is desirable, but only if the orchestration boundary is stricter than "please stay in scope."
+
+## Goal
+
+Keep delegation safe by making the control boundary explicit:
+
+- one sibling git worktree per worker
+- exact owned files
+- exact forbidden files
+- no nested delegation
+- focused tests only
+- early inspection and cleanup
+
+In this mode, file ownership is not an implementation detail. It is the safety boundary.
+
+## Hard Rules
+
+1. Create a separate sibling git worktree before spawning a coding or verification worker.
+2. Never let a worker write in the main checkout.
+3. Spawn one worker at a time until the control loop has proven reliable.
+4. Every worker prompt must explicitly forbid nested delegation:
+   - Do NOT use `spawn_agent`
+   - Do NOT use `send_input`
+   - Do NOT use `wait_agent`
+   - Do NOT use `close_agent`
+5. If the repo has an `AGENTS.md` file or named skills relevant to the task, explicitly instruct the worker to read and follow them before implementation.
+6. For Go tasks, explicitly require the worker to use the available Go skills and repo guidance rather than silently ignoring them.
+7. For Go tasks, include lint setup and lint verification early unless the task is explicitly read-only and lint would add no value.
+8. Give every worker an exact write set:
+   - exact owned files
+   - exact forbidden files or "all other files are out of bounds"
+9. Give every worker an exact validation set:
+   - exact tests to run
+   - no unrelated exploration
+10. Require the worker to stop and report if it needs anything outside its assigned files or tests.
+11. Inspect the worker early. Do not wait for a long run before checking branch state.
+12. Do not treat an empty early diff as a failure by itself. Discovery, contract reading, and behavior alignment are normal before the first edit.
+13. If a worker violates scope once, stop, clean up, and tighten the boundary before retrying.
+
+## Recommended Flow
+
+1. Confirm the main checkout is clean.
+2. Create a sibling worktree and branch for the worker.
+3. Spawn one `worker` only.
+4. In the worker prompt, specify:
+   - worktree path
+   - branch name
+   - required repo guidance to read first (`AGENTS.md`, relevant skill files)
+   - exact owned files
+   - exact forbidden files
+   - exact task
+   - exact tests
+   - exact lint command when the task includes Go code
+   - no nested subagents
+   - stop if blocked
+5. Check progress early with:
+   - `git status --short`
+   - `git diff --stat`
+   - first worker output
+   Use these to confirm scope and direction, not to require immediate file edits.
+   A worker that is still reading the relevant contracts or comparing behavior may be making normal progress even if the diff is still empty.
+6. Review the diff and test results before starting the next worker.
+7. Only after the implementation slice is stable should a second worker handle parity/docs or verification.
+8. Remove temporary worktrees and branches when the run is over or reset is needed.
+
+## Worker Prompt Shape
+
+Use constraints like these in the worker prompt:
+
+- Work only in `<worktree-path>` on branch `<branch>`.
+- Do not edit the main checkout.
+- Do NOT spawn subagents.
+- Assigned files: `<list>`
+- Forbidden files: `<list>` or "all other files are out of bounds"
+- Run only these tests: `<list>`
+- Stop and report if you need anything outside this scope.
+
+## Scope Discipline
+
+What may remain implementation detail inside a worker:
+
+- internal function design
+- package shape inside the owned slice
+- local code structure
+- exact test order
+
+What must not remain implementation detail:
+
+- which checkout it may write in
+- which files it owns
+- which files are forbidden
+- whether it may delegate further
+- which contract boundary it may change
+
+## Failure Handling
+
+If the run goes wrong:
+
+- close the worker
+- inspect repo state immediately
+- revert or discard only the worker's isolated changes
+- remove temporary worktrees if resetting from scratch
+- restart with a smaller scope, not a broader prompt
+
+Before concluding that the control loop is broken, distinguish between:
+
+- normal early exploration: reading contracts, tracing entrypoints, comparing shell behavior, planning the first edits
+- actual stall: no substantive worker output for an extended period, explicit blockage, or repeated aimless exploration without converging on owned files
+
+Early `wait_agent` timeouts or an empty `git diff --stat` are not enough on their own to classify the run as broken.
+
+Do not pile more delegation on top of a broken control loop.

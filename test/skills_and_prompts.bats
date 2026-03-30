@@ -175,3 +175,18 @@ load test_helper
   run grep -n '^description:' "$RUNOQ_ROOT/.claude/agents/maintenance-reviewer.md"
   [ "$status" -eq 0 ]
 }
+
+@test "subagent worktree orchestration skill defines hard delegation boundaries" {
+  run grep -n "^name: subagent-worktree-orchestration$" "$RUNOQ_ROOT/.agents/skills/subagent-worktree-orchestration/SKILL.md"
+  [ "$status" -eq 0 ]
+  run grep -n "one sibling git worktree per worker" "$RUNOQ_ROOT/.agents/skills/subagent-worktree-orchestration/SKILL.md"
+  [ "$status" -eq 0 ]
+  run grep -n "exact owned files" "$RUNOQ_ROOT/.agents/skills/subagent-worktree-orchestration/SKILL.md"
+  [ "$status" -eq 0 ]
+  run grep -n "exact forbidden files" "$RUNOQ_ROOT/.agents/skills/subagent-worktree-orchestration/SKILL.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'Do NOT use `spawn_agent`' "$RUNOQ_ROOT/.agents/skills/subagent-worktree-orchestration/SKILL.md"
+  [ "$status" -eq 0 ]
+  run grep -n "git status --short" "$RUNOQ_ROOT/.agents/skills/subagent-worktree-orchestration/SKILL.md"
+  [ "$status" -eq 0 ]
+}
