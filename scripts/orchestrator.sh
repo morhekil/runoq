@@ -1,12 +1,39 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+RUNOQ_ROOT="${RUNOQ_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+export RUNOQ_ROOT
+
+orchestrator_implementation="${RUNOQ_ORCHESTRATOR_IMPLEMENTATION:-${RUNOQ_IMPLEMENTATION:-shell}}"
+case "$orchestrator_implementation" in
+  shell|"")
+    ;;
+  runtime)
+    runtime_bin="${RUNOQ_RUNTIME_BIN:-}"
+    if [[ -n "$runtime_bin" ]]; then
+      exec "$runtime_bin" "__orchestrator" "$@"
+    fi
+    go_bin="${RUNOQ_GO_BIN:-go}"
+    command -v "$go_bin" >/dev/null 2>&1 || {
+      echo "runoq: Go toolchain not found: $go_bin" >&2
+      exit 1
+    }
+    exec "$go_bin" run "$RUNOQ_ROOT/cmd/runoq-runtime" "__orchestrator" "$@"
+    ;;
+  *)
+    echo "runoq: Unknown RUNOQ_ORCHESTRATOR_IMPLEMENTATION: $orchestrator_implementation (expected shell or runtime)" >&2
+    exit 1
+    ;;
+esac
+
 export RUNOQ_LOG=1
 
 # shellcheck source=./scripts/lib/common.sh
-source "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
+source "$SCRIPT_DIR/lib/common.sh"
 
-SCRIPTS_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPTS_DIR="$SCRIPT_DIR"
 RUNOQ_ROOT="${RUNOQ_ROOT:-$(runoq::root)}"
 
 # Ensure we use the app installation token for all GitHub operations
