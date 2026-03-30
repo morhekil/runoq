@@ -20,6 +20,19 @@ Keep delegation safe by making the control boundary explicit:
 
 In this mode, file ownership is not an implementation detail. It is the safety boundary.
 
+## Model Selection
+
+Default model split for this workflow:
+
+- implementation workers: `gpt-5.4`
+- verification workers: `gpt-5.4-mini`
+
+Use the smaller/faster verification model by default because verification tasks should be read-only, tightly scoped, and prompt-constrained.
+
+Escalate a verification worker to `gpt-5.4` only when the review question is unusually subtle, contract-heavy, or blocked on nuanced reasoning.
+
+Do not silently downgrade implementation workers to an older or smaller model for contract-sensitive migration work.
+
 ## Hard Rules
 
 1. Create a separate sibling git worktree before spawning a coding or verification worker.
@@ -42,7 +55,9 @@ In this mode, file ownership is not an implementation detail. It is the safety b
 10. Require the worker to stop and report if it needs anything outside its assigned files or tests.
 11. Inspect the worker early. Do not wait for a long run before checking branch state.
 12. Do not treat an empty early diff as a failure by itself. Discovery, contract reading, and behavior alignment are normal before the first edit.
-13. If a worker violates scope once, stop, clean up, and tighten the boundary before retrying.
+13. Keep at most the 3 latest completed agents around for review. As new completed agents accumulate, close older completed agents promptly so dead threads do not pile up.
+14. When you discover a durable orchestration-related lesson during the run, update and commit this skill promptly so the behavior change becomes part of the repository workflow instead of a one-off memory.
+15. If a worker violates scope once, stop, clean up, and tighten the boundary before retrying.
 
 ## Recommended Flow
 
@@ -68,7 +83,10 @@ In this mode, file ownership is not an implementation detail. It is the safety b
    A worker that is still reading the relevant contracts or comparing behavior may be making normal progress even if the diff is still empty.
 6. Review the diff and test results before starting the next worker.
 7. Only after the implementation slice is stable should a second worker handle parity/docs or verification.
-8. Remove temporary worktrees and branches when the run is over or reset is needed.
+8. Keep only the most recent few completed agents you still need for inspection; close older completed agents as part of the normal control loop.
+9. Once a slice has passed its intended verification gate, integrate it back into the main checkout promptly instead of letting completed work sit in side branches.
+10. Keep the orchestration loop moving without waiting for the user to ask for the next step. Stop only for a real blocker, a meaningful decision, or explicit user redirection.
+11. Remove temporary worktrees and branches when the run is over or reset is needed.
 
 ## Worker Prompt Shape
 
@@ -77,6 +95,7 @@ Use constraints like these in the worker prompt:
 - Work only in `<worktree-path>` on branch `<branch>`.
 - Do not edit the main checkout.
 - Do NOT spawn subagents.
+- Use model `<model>` for this role (`gpt-5.4` for implementation, `gpt-5.4-mini` for read-only verification unless explicitly escalated).
 - Assigned files: `<list>`
 - Forbidden files: `<list>` or "all other files are out of bounds"
 - Run only these tests: `<list>`
