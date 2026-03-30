@@ -9,6 +9,7 @@ import (
 	"github.com/saruman/runoq/internal/runtimeorchestrator"
 	"github.com/saruman/runoq/internal/runtimestate"
 	"github.com/saruman/runoq/internal/runtimeverify"
+	"github.com/saruman/runoq/internal/runtimeworktree"
 )
 
 func main() {
@@ -43,6 +44,16 @@ func main() {
 			os.Stderr,
 		)
 		os.Exit(verifyApp.Run(context.Background()))
+	}
+	if len(args) > 0 && args[0] == "__worktree" {
+		worktreeApp := runtimeworktree.New(
+			args[1:],
+			os.Environ(),
+			cwd,
+			os.Stdout,
+			os.Stderr,
+		)
+		os.Exit(worktreeApp.Run(context.Background()))
 	}
 	if len(args) > 0 && args[0] == "__dispatch_safety" {
 		dispatchSafetyApp := runtimedispatchsafety.New(
