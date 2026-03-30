@@ -30,6 +30,10 @@ write_empty_queue_scenario() {
 EOF
 }
 
+normalize_runtime_stderr() {
+  printf '%s' "$1" | sed -E 's/plan-decomposer-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}-[0-9]+/plan-decomposer-NORMALIZED/g'
+}
+
 @test "acceptance parity: run --dry-run queue mode matches shell and runtime" {
   project_dir="$TEST_TMPDIR/project"
   setup_acceptance_project "$project_dir"
@@ -49,11 +53,16 @@ EOF
   run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION=runtime "'"$RUNOQ_ROOT"'/bin/runoq" run --dry-run 2>"'"$TEST_TMPDIR"'/runtime-run.err"'
   runtime_status="$status"
   runtime_output="$output"
+  run cat "$TEST_TMPDIR/shell-run.err"
+  shell_err="$(normalize_runtime_stderr "$output")"
+  run cat "$TEST_TMPDIR/runtime-run.err"
+  runtime_err="$(normalize_runtime_stderr "$output")"
 
   [ "$shell_status" -eq "$runtime_status" ]
   shell_norm="$(printf '%s' "$shell_output" | jq -S -c .)"
   runtime_norm="$(printf '%s' "$runtime_output" | jq -S -c .)"
   [ "$shell_norm" = "$runtime_norm" ]
+  [ "$shell_err" = "$runtime_err" ]
 }
 
 @test "acceptance parity: plan --dry-run matches shell and runtime output contract" {
@@ -70,9 +79,14 @@ EOF
   run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION=runtime "'"$RUNOQ_ROOT"'/bin/runoq" plan docs/plan.md --dry-run 2>"'"$TEST_TMPDIR"'/runtime-plan.err"'
   runtime_status="$status"
   runtime_output="$output"
+  run cat "$TEST_TMPDIR/shell-plan.err"
+  shell_err="$(normalize_runtime_stderr "$output")"
+  run cat "$TEST_TMPDIR/runtime-plan.err"
+  runtime_err="$(normalize_runtime_stderr "$output")"
 
   [ "$shell_status" -eq "$runtime_status" ]
   shell_norm="$(printf '%s' "$shell_output" | jq -S -c .)"
   runtime_norm="$(printf '%s' "$runtime_output" | jq -S -c .)"
   [ "$shell_norm" = "$runtime_norm" ]
+  [ "$shell_err" = "$runtime_err" ]
 }

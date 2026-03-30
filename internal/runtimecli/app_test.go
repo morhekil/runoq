@@ -137,6 +137,63 @@ func TestRunRunSubcommandRoutesToRunScript(t *testing.T) {
 	}
 }
 
+func TestRunConfigEmptyFallsBackToDefault(t *testing.T) {
+	t.Parallel()
+
+	executor := &scriptedExecutor{
+		t: t,
+		matchers: []callMatcher{
+			{
+				name: "git",
+				args: []string{"rev-parse", "--show-toplevel"},
+				result: callResult{
+					stdout: "/tmp/project\n",
+				},
+			},
+			{
+				name: "git",
+				args: []string{"-C", "/tmp/project", "remote", "get-url", "origin"},
+				result: callResult{
+					stdout: "git@github.com:owner/repo.git\n",
+				},
+			},
+			{
+				name:       "bash",
+				argsPrefix: []string{"-lc"},
+				result: callResult{
+					stdout: "runtime-token",
+				},
+			},
+			{
+				name: "/runoq/scripts/run.sh",
+				args: []string{"--dry-run"},
+			},
+		},
+	}
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	app := New(
+		[]string{"run", "--dry-run"},
+		[]string{"RUNOQ_ROOT=/runoq", "RUNOQ_CONFIG=", "PATH=/usr/bin"},
+		"/tmp/project",
+		&stdout,
+		&stderr,
+		"",
+	)
+	app.SetCommandExecutor(executor.run)
+
+	code := app.Run(context.Background())
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d (stderr=%q)", code, stderr.String())
+	}
+
+	runCall := executor.calls[3]
+	if value, ok := envLookup(runCall.Env, "RUNOQ_CONFIG"); !ok || value != "/runoq/config/runoq.json" {
+		t.Fatalf("RUNOQ_CONFIG mismatch: %q", value)
+	}
+}
+
 func TestPlanRequiresPath(t *testing.T) {
 	t.Parallel()
 

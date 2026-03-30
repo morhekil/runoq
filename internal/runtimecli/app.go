@@ -140,7 +140,8 @@ func (a *App) resolveRuntimeEnv() (string, []string, bool) {
 	}
 
 	env = envSet(env, "RUNOQ_ROOT", runoqRoot)
-	if _, hasConfig := envLookup(env, "RUNOQ_CONFIG"); !hasConfig {
+	configValue, hasConfig := envLookup(env, "RUNOQ_CONFIG")
+	if !hasConfig || configValue == "" {
 		env = envSet(env, "RUNOQ_CONFIG", filepath.Join(runoqRoot, "config", "runoq.json"))
 	}
 	return runoqRoot, env, true
@@ -224,7 +225,7 @@ func (a *App) resolveRepo(ctx context.Context, env []string, targetRoot string) 
 		Env:  env,
 	})
 	if err != nil {
-		return "", errors.New("No 'origin' remote found. runoq requires a GitHub-hosted repo.")
+		return "", errors.New("no 'origin' remote found: runoq requires a GitHub-hosted repo")
 	}
 
 	repo, err := parseRepoFromRemote(originURL)
@@ -240,14 +241,14 @@ func parseRepoFromRemote(remote string) (string, error) {
 		repo := strings.TrimPrefix(remote, "git@github.com:")
 		repo = strings.TrimSuffix(repo, ".git")
 		if repo == "" {
-			return "", fmt.Errorf("Origin remote is not a GitHub URL: %s", remote)
+			return "", fmt.Errorf("origin remote is not a GitHub URL: %s", remote)
 		}
 		return repo, nil
 	case strings.HasPrefix(remote, "ssh://git@github.com/"):
 		repo := strings.TrimPrefix(remote, "ssh://git@github.com/")
 		repo = strings.TrimSuffix(repo, ".git")
 		if repo == "" {
-			return "", fmt.Errorf("Origin remote is not a GitHub URL: %s", remote)
+			return "", fmt.Errorf("origin remote is not a GitHub URL: %s", remote)
 		}
 		return repo, nil
 	case strings.HasPrefix(remote, "https://"):
@@ -256,16 +257,16 @@ func parseRepoFromRemote(remote string) (string, error) {
 			trimmed = trimmed[at+1:]
 		}
 		if !strings.HasPrefix(trimmed, "github.com/") {
-			return "", fmt.Errorf("Origin remote is not a GitHub URL: %s", remote)
+			return "", fmt.Errorf("origin remote is not a GitHub URL: %s", remote)
 		}
 		repo := strings.TrimPrefix(trimmed, "github.com/")
 		repo = strings.TrimSuffix(repo, ".git")
 		if repo == "" {
-			return "", fmt.Errorf("Origin remote is not a GitHub URL: %s", remote)
+			return "", fmt.Errorf("origin remote is not a GitHub URL: %s", remote)
 		}
 		return repo, nil
 	default:
-		return "", fmt.Errorf("Origin remote is not a GitHub URL: %s", remote)
+		return "", fmt.Errorf("origin remote is not a GitHub URL: %s", remote)
 	}
 }
 
