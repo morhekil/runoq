@@ -6,6 +6,7 @@ import (
 
 	"github.com/saruman/runoq/internal/runtimecli"
 	"github.com/saruman/runoq/internal/runtimestate"
+	"github.com/saruman/runoq/internal/runtimeverify"
 )
 
 func main() {
@@ -30,6 +31,16 @@ func main() {
 			os.Stderr,
 		)
 		os.Exit(stateApp.Run(context.Background()))
+	}
+	if len(args) > 0 && args[0] == "__verify" {
+		verifyApp := runtimeverify.New(
+			args[1:],
+			os.Environ(),
+			cwd,
+			os.Stdout,
+			os.Stderr,
+		)
+		os.Exit(verifyApp.Run(context.Background()))
 	}
 
 	cliApp := runtimecli.New(

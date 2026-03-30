@@ -193,6 +193,10 @@ Verification checks for `integrate`:
 
 `review_allowed` currently mirrors `ok`.
 
+Notes:
+
+- `verify.sh` remains the stable shell entrypoint; when `RUNOQ_VERIFY_IMPLEMENTATION=runtime` (or global `RUNOQ_IMPLEMENTATION=runtime`) it dispatches to the Go runtime verify engine while preserving this contract.
+
 ## `worktree.sh`
 
 Purpose: isolate execution in sibling worktrees instead of mutating the target checkout.

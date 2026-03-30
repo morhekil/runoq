@@ -68,9 +68,9 @@ prepare_verify_repo() {
 @test "verify round succeeds when commits files push and commands all match" {
   remote_dir="$TEST_TMPDIR/remote.git"
   local_dir="$TEST_TMPDIR/local"
-  mapfile -t shas < <(prepare_verify_repo "$remote_dir" "$local_dir")
-  base_sha="${shas[0]}"
-  commit_sha="${shas[1]}"
+  shas="$(prepare_verify_repo "$remote_dir" "$local_dir")"
+  base_sha="$(printf '%s\n' "$shas" | sed -n '1p')"
+  commit_sha="$(printf '%s\n' "$shas" | sed -n '2p')"
   config_file="$TEST_TMPDIR/config.json"
   write_verify_config "$config_file"
   export RUNOQ_CONFIG="$config_file"
@@ -103,8 +103,8 @@ EOF
 @test "verify round reports mismatched commits and files" {
   remote_dir="$TEST_TMPDIR/remote.git"
   local_dir="$TEST_TMPDIR/local"
-  mapfile -t shas < <(prepare_verify_repo "$remote_dir" "$local_dir")
-  base_sha="${shas[0]}"
+  shas="$(prepare_verify_repo "$remote_dir" "$local_dir")"
+  base_sha="$(printf '%s\n' "$shas" | sed -n '1p')"
   config_file="$TEST_TMPDIR/config.json"
   write_verify_config "$config_file"
   export RUNOQ_CONFIG="$config_file"
@@ -179,9 +179,9 @@ EOF
 @test "verify round detects criteria tamper when criteria_commit is present" {
   remote_dir="$TEST_TMPDIR/remote.git"
   local_dir="$TEST_TMPDIR/local"
-  mapfile -t shas < <(prepare_verify_repo "$remote_dir" "$local_dir")
-  base_sha="${shas[0]}"
-  commit_sha="${shas[1]}"
+  shas="$(prepare_verify_repo "$remote_dir" "$local_dir")"
+  base_sha="$(printf '%s\n' "$shas" | sed -n '1p')"
+  commit_sha="$(printf '%s\n' "$shas" | sed -n '2p')"
   config_file="$TEST_TMPDIR/config.json"
   write_verify_config "$config_file"
   export RUNOQ_CONFIG="$config_file"
@@ -230,9 +230,9 @@ EOF
 @test "verify round passes when criteria files are untouched" {
   remote_dir="$TEST_TMPDIR/remote.git"
   local_dir="$TEST_TMPDIR/local"
-  mapfile -t shas < <(prepare_verify_repo "$remote_dir" "$local_dir")
-  base_sha="${shas[0]}"
-  commit_sha="${shas[1]}"
+  shas="$(prepare_verify_repo "$remote_dir" "$local_dir")"
+  base_sha="$(printf '%s\n' "$shas" | sed -n '1p')"
+  commit_sha="$(printf '%s\n' "$shas" | sed -n '2p')"
   config_file="$TEST_TMPDIR/config.json"
   write_verify_config "$config_file"
   export RUNOQ_CONFIG="$config_file"
@@ -282,9 +282,9 @@ EOF
 @test "verify round skips criteria check when no criteria_commit in payload" {
   remote_dir="$TEST_TMPDIR/remote.git"
   local_dir="$TEST_TMPDIR/local"
-  mapfile -t shas < <(prepare_verify_repo "$remote_dir" "$local_dir")
-  base_sha="${shas[0]}"
-  commit_sha="${shas[1]}"
+  shas="$(prepare_verify_repo "$remote_dir" "$local_dir")"
+  base_sha="$(printf '%s\n' "$shas" | sed -n '1p')"
+  commit_sha="$(printf '%s\n' "$shas" | sed -n '2p')"
   config_file="$TEST_TMPDIR/config.json"
   write_verify_config "$config_file"
   export RUNOQ_CONFIG="$config_file"
@@ -373,9 +373,9 @@ EOF
 @test "verify round fails fast when verification commands are not configured" {
   remote_dir="$TEST_TMPDIR/remote.git"
   local_dir="$TEST_TMPDIR/local"
-  mapfile -t shas < <(prepare_verify_repo "$remote_dir" "$local_dir")
-  base_sha="${shas[0]}"
-  commit_sha="${shas[1]}"
+  shas="$(prepare_verify_repo "$remote_dir" "$local_dir")"
+  base_sha="$(printf '%s\n' "$shas" | sed -n '1p')"
+  commit_sha="$(printf '%s\n' "$shas" | sed -n '2p')"
   config_file="$TEST_TMPDIR/config.json"
   write_verify_config "$config_file"
   jq '.verification.testCommand = ""' "$config_file" >"$TEST_TMPDIR/config-bad.json"
