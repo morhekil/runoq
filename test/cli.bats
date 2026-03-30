@@ -30,6 +30,31 @@ setup_cli_project() {
   [[ "$output" == *"REPO=owner/repo"* ]]
 }
 
+@test "runoq runtime implementation routes run flags through runtime cli" {
+  project_dir="$TEST_TMPDIR/project"
+  setup_cli_project "$project_dir"
+  prepare_runtime_bin
+  export PATH="$RUNOQ_ROOT/test/helpers:$PATH"
+  export RUNOQ_IMPLEMENTATION="runtime"
+  export RUNOQ_ORCHESTRATOR_BIN="$RUNOQ_ROOT/test/helpers/runtime-orchestrator"
+  export FAKE_RUNTIME_ORCHESTRATOR_LOG="$TEST_TMPDIR/runtime-orchestrator.log"
+  export FAKE_RUNTIME_ORCHESTRATOR_ENV_LOG="$TEST_TMPDIR/runtime-orchestrator-env.log"
+  export GH_TOKEN="existing-token"
+  resolved_project_dir="$(cd "$project_dir" && pwd -P)"
+
+  run bash -lc 'cd "'"$project_dir"'" && "'"$RUNOQ_ROOT"'/bin/runoq" run --issue 42 --dry-run'
+
+  [ "$status" -eq 0 ]
+  run cat "$FAKE_RUNTIME_ORCHESTRATOR_LOG"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"run owner/repo --issue 42 --dry-run"* ]]
+  run cat "$FAKE_RUNTIME_ORCHESTRATOR_ENV_LOG"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PWD=$resolved_project_dir"* ]]
+  [[ "$output" == *"TARGET_ROOT=$resolved_project_dir"* ]]
+  [[ "$output" == *"REPO=owner/repo"* ]]
+}
+
 @test "runoq plan invokes plan.sh with repo and absolute plan path" {
   project_dir="$TEST_TMPDIR/project"
   setup_cli_project "$project_dir"
@@ -105,6 +130,25 @@ FAKECLAUDE
   [ "$status" -eq 0 ]
   [[ "$output" == *'"items"'* ]]
   [[ "$output" == *'"task-1"'* ]]
+}
+
+@test "runoq runtime implementation supports plan dry-run routing" {
+  project_dir="$TEST_TMPDIR/project"
+  setup_cli_project "$project_dir"
+  mkdir -p "$project_dir/docs"
+  echo "# Plan" >"$project_dir/docs/plan.md"
+  prepare_runtime_bin
+  export RUNOQ_IMPLEMENTATION="runtime"
+  export RUNOQ_CLAUDE_BIN="$RUNOQ_ROOT/test/helpers/runtime-plan-claude"
+  export FAKE_RUNTIME_PLAN_CLAUDE_LOG="$TEST_TMPDIR/runtime-plan-claude.log"
+
+  run bash -lc 'cd "'"$project_dir"'" && "'"$RUNOQ_ROOT"'/bin/runoq" plan docs/plan.md --dry-run'
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"runtime-task"'* ]]
+  run cat "$FAKE_RUNTIME_PLAN_CLAUDE_LOG"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--agent plan-decomposer --add-dir $RUNOQ_ROOT"* ]]
 }
 
 @test "runoq maintenance routes to the maintenance reviewer" {

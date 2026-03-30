@@ -68,3 +68,9 @@ use_fake_gh() {
   export FAKE_GH_CAPTURE_DIR="${4:-$TEST_TMPDIR/fake-gh-capture}"
   export GH_BIN="$RUNOQ_ROOT/test/helpers/gh"
 }
+
+prepare_runtime_bin() {
+  local runtime_bin="$TEST_TMPDIR/runoq-runtime"
+  go build -o "$runtime_bin" "$RUNOQ_ROOT/cmd/runoq-runtime"
+  export RUNOQ_RUNTIME_BIN="$runtime_bin"
+}

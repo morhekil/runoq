@@ -18,6 +18,17 @@ The CLI must be run from inside the target git repository. It resolves:
 - `REPO` from the `origin` remote, unless `RUNOQ_REPO` is set
 - `RUNOQ_CONFIG` from `config/runoq.json`, unless overridden
 
+## Implementation Selection
+
+`bin/runoq` supports explicit implementation routing during the migration.
+
+- Default behavior remains shell-backed (`RUNOQ_IMPLEMENTATION` unset or `shell`).
+- Set `RUNOQ_IMPLEMENTATION=runtime` to route through the Go runtime shim.
+- Optional test/operator override: `RUNOQ_RUNTIME_BIN=/abs/path/to/runoq-runtime` to use a prebuilt runtime binary instead of `go run`.
+- Optional toolchain override when using `go run`: `RUNOQ_GO_BIN`.
+
+The public CLI contract is unchanged; this routing is an internal migration switch used for parity testing and staged cutovers.
+
 ## Mutation Summary
 
 | Command | Local filesystem mutation | GitHub mutation |

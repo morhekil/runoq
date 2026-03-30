@@ -2,7 +2,13 @@
 
 ## Status
 
-Draft planning document.
+In progress. The M1/M2 foundation slice is now implemented in-repo:
+
+- Go runtime skeleton (`cmd/runoq-runtime`, `internal/runtimecli`)
+- explicit shell/runtime selection at `bin/runoq` (shell remains default)
+- first acceptance parity scenarios for `run --dry-run` and `plan --dry-run`
+
+Remaining milestones (M3+) are still pending.
 
 ## Purpose
 
@@ -567,8 +573,8 @@ The recommended starting sequence is:
 1. approve this migration plan and the contract taxonomy
 2. document the compatibility matrix
 3. run and store baseline smoke results for the current shell implementation
-4. build the acceptance harness
-5. add the first parity scenarios
-6. introduce the runtime skeleton
+4. build the acceptance harness (implemented)
+5. add the first parity scenarios (implemented for `run --dry-run` and `plan --dry-run`)
+6. introduce the runtime skeleton (implemented)
 
 That sequence creates the migration gates before large behavior changes begin.

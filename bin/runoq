@@ -13,6 +13,28 @@ RUNOQ_ROOT="$(cd "$(dirname "$SELF_PATH")/.." && pwd)"
 export RUNOQ_ROOT
 export RUNOQ_CONFIG="${RUNOQ_CONFIG:-$RUNOQ_ROOT/config/runoq.json}"
 
+implementation="${RUNOQ_IMPLEMENTATION:-shell}"
+case "$implementation" in
+  shell|"")
+    ;;
+  runtime)
+    runtime_bin="${RUNOQ_RUNTIME_BIN:-}"
+    if [[ -n "$runtime_bin" ]]; then
+      exec "$runtime_bin" "$@"
+    fi
+    go_bin="${RUNOQ_GO_BIN:-go}"
+    command -v "$go_bin" >/dev/null 2>&1 || {
+      echo "runoq: Go toolchain not found: $go_bin" >&2
+      exit 1
+    }
+    exec "$go_bin" run "$RUNOQ_ROOT/cmd/runoq-runtime" "$@"
+    ;;
+  *)
+    echo "runoq: Unknown RUNOQ_IMPLEMENTATION: $implementation (expected shell or runtime)" >&2
+    exit 1
+    ;;
+esac
+
 source "$RUNOQ_ROOT/scripts/lib/common.sh"
 
 usage() {

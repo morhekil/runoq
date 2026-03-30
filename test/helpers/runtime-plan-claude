@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [[ -n "${FAKE_RUNTIME_PLAN_CLAUDE_LOG:-}" ]]; then
+  printf '%s\n' "$*" >>"$FAKE_RUNTIME_PLAN_CLAUDE_LOG"
+fi
+
+cat <<'EOF'
+{"type":"assistant","message":{"content":[{"type":"text","text":"<!-- runoq:payload:plan-decomposer -->\n```json\n{\"items\":[{\"key\":\"runtime-task\",\"type\":\"task\",\"title\":\"Runtime task\",\"body\":\"Body\",\"priority\":1,\"estimated_complexity\":\"medium\",\"complexity_rationale\":\"Runtime parity scaffold\",\"depends_on_keys\":[]}],\"warnings\":[]}\n```"}]}}
+{"type":"result","result":"done"}
+EOF
