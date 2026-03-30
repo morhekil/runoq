@@ -2,12 +2,6 @@
 
 load test_helper
 
-ensure_modern_bash() {
-  if [[ -x "/opt/homebrew/bin/bash" ]]; then
-    export PATH="/opt/homebrew/bin:$PATH"
-  fi
-}
-
 @test "report summary aggregates completed state files" {
   ensure_modern_bash
   export TARGET_ROOT="$TEST_TMPDIR/project"

@@ -4,9 +4,7 @@ load test_helper
 
 setup_acceptance_project() {
   local dir="$1"
-  if [[ -x "/opt/homebrew/bin/bash" ]]; then
-    export PATH="/opt/homebrew/bin:$PATH"
-  fi
+  ensure_modern_bash
   make_git_repo "$dir" "git@github.com:owner/repo.git"
   prepare_runtime_bin
   export GH_TOKEN="existing-token"
@@ -118,6 +116,39 @@ EOF
   [ "$shell_status" -eq "$runtime_status" ]
   [ "$shell_status" -ne 0 ]
   [ "$shell_output" = "$runtime_output" ]
+  [ "$shell_err" = "$runtime_err" ]
+}
+
+@test "acceptance parity: report issue success matches shell and runtime contract" {
+  project_dir="$TEST_TMPDIR/project"
+  setup_acceptance_project "$project_dir"
+  mkdir -p "$project_dir/.runoq/state"
+  cat >"$project_dir/.runoq/state/42.json" <<'EOF'
+{
+  "phase": "DONE",
+  "outcome": { "verdict": "PASS" },
+  "tokens_used": 100
+}
+EOF
+
+  run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION=shell "'"$RUNOQ_ROOT"'/bin/runoq" report issue 42 2>"'"$TEST_TMPDIR"'/shell-issue-success.err"'
+  shell_status="$status"
+  shell_output="$output"
+
+  run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION=runtime "'"$RUNOQ_ROOT"'/bin/runoq" report issue 42 2>"'"$TEST_TMPDIR"'/runtime-issue-success.err"'
+  runtime_status="$status"
+  runtime_output="$output"
+
+  run cat "$TEST_TMPDIR/shell-issue-success.err"
+  shell_err="$output"
+  run cat "$TEST_TMPDIR/runtime-issue-success.err"
+  runtime_err="$output"
+
+  [ "$shell_status" -eq "$runtime_status" ]
+  [ "$shell_status" -eq 0 ]
+  shell_norm="$(printf '%s' "$shell_output" | jq -S -c .)"
+  runtime_norm="$(printf '%s' "$runtime_output" | jq -S -c .)"
+  [ "$shell_norm" = "$runtime_norm" ]
   [ "$shell_err" = "$runtime_err" ]
 }
 

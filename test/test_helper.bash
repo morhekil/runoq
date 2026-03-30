@@ -74,3 +74,39 @@ prepare_runtime_bin() {
   go build -o "$runtime_bin" "$RUNOQ_ROOT/cmd/runoq-runtime"
   export RUNOQ_RUNTIME_BIN="$runtime_bin"
 }
+
+ensure_modern_bash() {
+  if [[ -n "${RUNOQ_TEST_BASH:-}" && -x "${RUNOQ_TEST_BASH}" ]]; then
+    return 0
+  fi
+
+  local candidate major
+  local -a candidates=()
+
+  if command -v bash >/dev/null 2>&1; then
+    candidates+=("$(command -v bash)")
+  fi
+  if command -v which >/dev/null 2>&1; then
+    while IFS= read -r candidate; do
+      [[ -n "$candidate" ]] || continue
+      candidates+=("$candidate")
+    done < <(which -a bash 2>/dev/null || true)
+  fi
+  if command -v brew >/dev/null 2>&1; then
+    candidate="$(brew --prefix bash 2>/dev/null)/bin/bash"
+    [[ -n "$candidate" ]] && candidates+=("$candidate")
+  fi
+  candidates+=("/usr/local/bin/bash" "/opt/homebrew/bin/bash" "/bin/bash" "/usr/bin/bash")
+
+  for candidate in "${candidates[@]}"; do
+    [[ -x "$candidate" ]] || continue
+    major="$("$candidate" -lc 'printf "%s" "${BASH_VERSINFO[0]}"' 2>/dev/null || true)"
+    if [[ "$major" =~ ^[0-9]+$ ]] && (( major >= 4 )); then
+      export RUNOQ_TEST_BASH="$candidate"
+      export PATH="$(dirname "$candidate"):$PATH"
+      return 0
+    fi
+  done
+
+  skip "requires bash >= 4 to run scripts/report.sh tests"
+}

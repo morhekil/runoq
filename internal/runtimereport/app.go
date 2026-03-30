@@ -163,12 +163,13 @@ func (a *App) runIssue(args []string) int {
 		}
 		return a.failf("Failed to read state file: %v", err)
 	}
-
-	var payload any
-	if err := json.Unmarshal(data, &payload); err != nil {
-		return a.failf("Failed to parse state file: %v", err)
+	if !json.Valid(data) {
+		return a.failf("Failed to parse state file: invalid JSON")
 	}
-	return a.writeJSON(payload)
+	if _, err := a.stdout.Write(data); err != nil {
+		return a.failf("Failed to write state file: %v", err)
+	}
+	return 0
 }
 
 func (a *App) runCost(args []string) int {

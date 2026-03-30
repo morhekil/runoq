@@ -96,6 +96,39 @@ func TestIssueMissingFileFailsWithContractMessage(t *testing.T) {
 	}
 }
 
+func TestIssueReturnsStoredStateVerbatim(t *testing.T) {
+	t.Parallel()
+
+	targetRoot := t.TempDir()
+	stateDir := filepath.Join(targetRoot, ".runoq", "state")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatalf("mkdir state dir: %v", err)
+	}
+
+	expected := "{\"phase\":\"DONE\",\"outcome\":{\"verdict\":\"PASS\"},\"tokens_used\":100}\n"
+	if err := os.WriteFile(filepath.Join(stateDir, "42.json"), []byte(expected), 0o644); err != nil {
+		t.Fatalf("write state file: %v", err)
+	}
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	app := New(
+		[]string{"issue", "42"},
+		[]string{"TARGET_ROOT=" + targetRoot},
+		targetRoot,
+		&stdout,
+		&stderr,
+	)
+
+	code := app.Run()
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d, stderr=%q", code, stderr.String())
+	}
+	if stdout.String() != expected {
+		t.Fatalf("expected verbatim output %q, got %q", expected, stdout.String())
+	}
+}
+
 func TestCostUsesConfigRates(t *testing.T) {
 	t.Parallel()
 
