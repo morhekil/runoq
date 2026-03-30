@@ -238,7 +238,7 @@ Primary callers: `bin/runoq`, operators, tests.
 | Subcommand | Arguments | JSON/stdout contract | Side effects |
 | --- | --- | --- | --- |
 | `summary` | `[--last N]` | `{ issues, pass, fail, caveats, tokens, average_rounds }` | reads state files only |
-| `issue` | `<issue-number>` | prints the stored issue JSON verbatim | reads one state file |
+| `issue` | `<issue-number>` | prints the stored issue JSON as formatted JSON (shell behavior matches `jq '.'`) | reads one state file |
 | `cost` | `[--last N]` | `{ issues, tokens, estimated_cost }` | reads state files and config only |
 
 Notes:

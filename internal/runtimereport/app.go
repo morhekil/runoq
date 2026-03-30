@@ -1,6 +1,7 @@
 package runtimereport
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -166,7 +167,16 @@ func (a *App) runIssue(args []string) int {
 	if !json.Valid(data) {
 		return a.failf("Failed to parse state file: invalid JSON")
 	}
-	if _, err := a.stdout.Write(data); err != nil {
+
+	var formatted bytes.Buffer
+	if err := json.Indent(&formatted, bytes.TrimSpace(data), "", "  "); err != nil {
+		return a.failf("Failed to format state file JSON: %v", err)
+	}
+	if err := formatted.WriteByte('\n'); err != nil {
+		return a.failf("Failed to format state file JSON: %v", err)
+	}
+
+	if _, err := a.stdout.Write(formatted.Bytes()); err != nil {
 		return a.failf("Failed to write state file: %v", err)
 	}
 	return 0

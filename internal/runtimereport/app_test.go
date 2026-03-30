@@ -96,7 +96,7 @@ func TestIssueMissingFileFailsWithContractMessage(t *testing.T) {
 	}
 }
 
-func TestIssueReturnsStoredStateVerbatim(t *testing.T) {
+func TestIssueReturnsStoredStatePrettyPrintedLikeShell(t *testing.T) {
 	t.Parallel()
 
 	targetRoot := t.TempDir()
@@ -105,10 +105,18 @@ func TestIssueReturnsStoredStateVerbatim(t *testing.T) {
 		t.Fatalf("mkdir state dir: %v", err)
 	}
 
-	expected := "{\"phase\":\"DONE\",\"outcome\":{\"verdict\":\"PASS\"},\"tokens_used\":100}\n"
-	if err := os.WriteFile(filepath.Join(stateDir, "42.json"), []byte(expected), 0o644); err != nil {
+	stored := "{\"phase\":\"DONE\",\"outcome\":{\"verdict\":\"PASS\"},\"tokens_used\":100}\n"
+	if err := os.WriteFile(filepath.Join(stateDir, "42.json"), []byte(stored), 0o644); err != nil {
 		t.Fatalf("write state file: %v", err)
 	}
+	expected := `{
+  "phase": "DONE",
+  "outcome": {
+    "verdict": "PASS"
+  },
+  "tokens_used": 100
+}
+`
 
 	var stdout strings.Builder
 	var stderr strings.Builder
@@ -125,7 +133,7 @@ func TestIssueReturnsStoredStateVerbatim(t *testing.T) {
 		t.Fatalf("expected exit code 0, got %d, stderr=%q", code, stderr.String())
 	}
 	if stdout.String() != expected {
-		t.Fatalf("expected verbatim output %q, got %q", expected, stdout.String())
+		t.Fatalf("expected pretty-printed output %q, got %q", expected, stdout.String())
 	}
 }
 

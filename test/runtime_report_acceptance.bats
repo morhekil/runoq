@@ -89,9 +89,7 @@ EOF
 
   [ "$shell_status" -eq "$runtime_status" ]
   [ "$shell_status" -eq 0 ]
-  shell_norm="$(printf '%s' "$shell_output" | jq -S -c .)"
-  runtime_norm="$(printf '%s' "$runtime_output" | jq -S -c .)"
-  [ "$shell_norm" = "$runtime_norm" ]
+  [ "$shell_output" = "$runtime_output" ]
   [ "$shell_err" = "$runtime_err" ]
 }
 
