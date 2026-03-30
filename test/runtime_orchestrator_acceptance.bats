@@ -75,6 +75,10 @@ normalize_gh_log() {
   printf '%s' "$1" | sed -E 's#--body-file [^ ]+#--body-file <temp-body>#g'
 }
 
+normalize_json_output() {
+  printf '%s' "$1" | jq -S -c .
+}
+
 @test "acceptance parity: orchestrator init-failure rollback matches shell and runtime" {
   shell_remote="$TEST_TMPDIR/shell-remote.git"
   shell_project="$TEST_TMPDIR/shell-project"
@@ -176,6 +180,78 @@ EOF
   runtime_worktree="$(cd "$runtime_project/.." && pwd)/runoq-wt-42"
   [ ! -e "$shell_worktree" ]
   [ ! -e "$runtime_worktree" ]
+
+  run cat "$shell_log"
+  shell_gh_log="$(normalize_gh_log "$output")"
+  run cat "$runtime_log"
+  runtime_gh_log="$(normalize_gh_log "$output")"
+  [ "$shell_gh_log" = "$runtime_gh_log" ]
+}
+
+@test "acceptance parity: orchestrator run --issue --dry-run matches shell and runtime" {
+  shell_remote="$TEST_TMPDIR/shell-remote.git"
+  shell_project="$TEST_TMPDIR/shell-project"
+  runtime_remote="$TEST_TMPDIR/runtime-remote.git"
+  runtime_project="$TEST_TMPDIR/runtime-project"
+  prepare_orchestrator_repo "$shell_remote" "$shell_project"
+  rm -rf "$TEST_TMPDIR/seed-repo"
+  prepare_orchestrator_repo "$runtime_remote" "$runtime_project"
+  prepare_runtime_bin
+
+  config_path="$TEST_TMPDIR/runoq.json"
+  write_runtime_orchestrator_config "$config_path"
+
+  issue_body="$(happy_issue_body)"
+  ready_queue="$(jq -n --arg body "$issue_body" '[
+    {number: 42, title: "Implement queue", body: $body, labels: [{name:"runoq:ready"}], url: "https://example.test/issues/42"}
+  ]')"
+
+  shell_scenario="$TEST_TMPDIR/shell-dry-run-scenario.json"
+  runtime_scenario="$TEST_TMPDIR/runtime-dry-run-scenario.json"
+  write_fake_gh_scenario "$shell_scenario" <<EOF
+[
+  {
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:in-progress"],
+    "stdout": "[]"
+  },
+  {
+    "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "title"],
+    "stdout": "{\"title\":\"Implement queue\"}"
+  },
+  {
+    "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
+    "stdout": $(jq -Rn --arg body "$issue_body" '{"number":42,"title":"Implement queue","body":$body,"labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/42"}')
+  },
+  {
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:ready"],
+    "stdout": $(printf '%s' "$ready_queue")
+  },
+  {
+    "contains": ["issue", "view", "42", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
+    "stdout": $(jq -Rn --arg body "$issue_body" '{"number":42,"title":"Implement queue","body":$body,"labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/42"}')
+  },
+  {
+    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "runoq/42-implement-queue"],
+    "stdout": "[]"
+  }
+]
+EOF
+  cp "$shell_scenario" "$runtime_scenario"
+
+  shell_log="$TEST_TMPDIR/shell-dry-run-gh.log"
+  runtime_log="$TEST_TMPDIR/runtime-dry-run-gh.log"
+
+  run bash -lc 'cd "'"$shell_project"'" && TARGET_ROOT="'"$shell_project"'" RUNOQ_REPO="owner/repo" REPO="owner/repo" RUNOQ_CONFIG="'"$config_path"'" RUNOQ_ORCHESTRATOR_IMPLEMENTATION=shell FAKE_GH_SCENARIO="'"$shell_scenario"'" FAKE_GH_STATE="'"$TEST_TMPDIR"'/shell-dry-run-gh.state" FAKE_GH_LOG="'"$shell_log"'" GH_BIN="'"$RUNOQ_ROOT"'/test/helpers/gh" "'"$RUNOQ_ROOT"'/scripts/orchestrator.sh" run owner/repo --issue 42 --dry-run'
+  shell_status="$status"
+  shell_stdout="$output"
+
+  run bash -lc 'cd "'"$runtime_project"'" && TARGET_ROOT="'"$runtime_project"'" RUNOQ_REPO="owner/repo" REPO="owner/repo" RUNOQ_CONFIG="'"$config_path"'" RUNOQ_RUNTIME_BIN="'"$RUNOQ_RUNTIME_BIN"'" RUNOQ_ORCHESTRATOR_IMPLEMENTATION=runtime FAKE_GH_SCENARIO="'"$runtime_scenario"'" FAKE_GH_STATE="'"$TEST_TMPDIR"'/runtime-dry-run-gh.state" FAKE_GH_LOG="'"$runtime_log"'" GH_BIN="'"$RUNOQ_ROOT"'/test/helpers/gh" "'"$RUNOQ_ROOT"'/scripts/orchestrator.sh" run owner/repo --issue 42 --dry-run'
+  runtime_status="$status"
+  runtime_stdout="$output"
+
+  [ "$shell_status" -eq "$runtime_status" ]
+  [ "$shell_status" -eq 0 ]
+  [ "$(normalize_json_output "$shell_stdout")" = "$(normalize_json_output "$runtime_stdout")" ]
 
   run cat "$shell_log"
   shell_gh_log="$(normalize_gh_log "$output")"
