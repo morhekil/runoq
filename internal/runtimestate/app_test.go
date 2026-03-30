@@ -156,6 +156,37 @@ func TestValidatePayloadSynthesizesWhenMissingJSON(t *testing.T) {
 	}
 }
 
+func TestValidatePayloadSynthesizesWhenSourceFileMissing(t *testing.T) {
+	t.Parallel()
+
+	repoDir, baseSHA := setupPayloadRepo(t)
+	missingSource := filepath.Join(repoDir, "does-not-exist.txt")
+
+	if err := os.WriteFile(filepath.Join(repoDir, "src", "app.ts"), []byte("console.log('updated')\n"), 0o644); err != nil {
+		t.Fatalf("write updated source: %v", err)
+	}
+	mustRun(t, repoDir, "git", "add", "src/app.ts")
+	mustRun(t, repoDir, "git", "commit", "-m", "Update app")
+
+	code, stdout, stderr := runApp(
+		t,
+		[]string{"validate-payload", repoDir, baseSHA, missingSource},
+		nil,
+		repoDir,
+		"",
+		nil,
+	)
+	if code != 0 {
+		t.Fatalf("validate-payload code=%d stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stdout, `"payload_source": "synthetic"`) {
+		t.Fatalf("expected synthetic payload: %q", stdout)
+	}
+	if !strings.Contains(stdout, "Codex did not return a structured payload") {
+		t.Fatalf("missing synthetic blocker message: %q", stdout)
+	}
+}
+
 func runApp(
 	t *testing.T,
 	args []string,

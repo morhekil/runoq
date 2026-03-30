@@ -347,10 +347,7 @@ func (a *App) runValidatePayload(ctx context.Context, args []string) int {
 	}
 
 	block, err := extractPayloadBlock(source)
-	if err != nil {
-		return a.failf("Failed to read payload file: %v", err)
-	}
-	if block == "" {
+	if err != nil || block == "" {
 		return writeJSON(a.stdout, a.stderr, synthesizePayload(truth))
 	}
 

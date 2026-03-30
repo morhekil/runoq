@@ -133,6 +133,7 @@ Fields commonly written by `run.sh` and `orchestrator.sh`:
 - `REVIEW -> FAILED`
 - `DECIDE -> DEVELOP`
 - `DECIDE -> FINALIZE`
+- `DECIDE -> INTEGRATE`
 - `DECIDE -> FAILED`
 - `FINALIZE -> DONE`
 - `FINALIZE -> FAILED`

@@ -56,6 +56,22 @@ wrap_payload_fixture() {
   [[ "$output" == *'Codex did not return a structured payload'* ]]
 }
 
+@test "validate-payload synthesizes a failed payload when source file is missing" {
+  base_repo="$TEST_TMPDIR/repo"
+  base_sha="$(setup_payload_repo "$base_repo")"
+  echo "console.log('updated')" >>"$base_repo/src/app.ts"
+  git -C "$base_repo" add src/app.ts
+  git -C "$base_repo" commit -m "Update app" >/dev/null
+
+  missing_source="$TEST_TMPDIR/does-not-exist.txt"
+  run "$RUNOQ_ROOT/scripts/state.sh" validate-payload "$base_repo" "$base_sha" "$missing_source"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"status": "failed"'* ]]
+  [[ "$output" == *'"payload_source": "synthetic"'* ]]
+  [[ "$output" == *'Codex did not return a structured payload'* ]]
+}
+
 @test "validate-payload synthesizes from malformed JSON" {
   base_repo="$TEST_TMPDIR/repo"
   base_sha="$(setup_payload_repo "$base_repo")"
