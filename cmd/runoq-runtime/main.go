@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/saruman/runoq/internal/runtimecli"
+	"github.com/saruman/runoq/internal/runtimestate"
 )
 
 func main() {
@@ -18,13 +19,26 @@ func main() {
 		executablePath = ""
 	}
 
-	app := runtimecli.New(
-		os.Args[1:],
+	args := os.Args[1:]
+	if len(args) > 0 && args[0] == "__state" {
+		stateApp := runtimestate.New(
+			args[1:],
+			os.Environ(),
+			cwd,
+			os.Stdin,
+			os.Stdout,
+			os.Stderr,
+		)
+		os.Exit(stateApp.Run(context.Background()))
+	}
+
+	cliApp := runtimecli.New(
+		args,
 		os.Environ(),
 		cwd,
 		os.Stdout,
 		os.Stderr,
 		executablePath,
 	)
-	os.Exit(app.Run(context.Background()))
+	os.Exit(cliApp.Run(context.Background()))
 }

@@ -31,6 +31,10 @@ Current files of interest:
 
 All writes are intended to be atomic via temp file plus rename.
 
+Implementation note:
+
+- `scripts/state.sh` remains the stable boundary; in runtime mode it dispatches to `internal/runtimestate` while preserving the same command contracts and file semantics.
+
 ## Issue State Files: `.runoq/state/<issue>.json`
 
 ### Purpose

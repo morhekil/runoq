@@ -7,8 +7,9 @@ In progress. The M1/M2 foundation slice is now implemented in-repo:
 - Go runtime skeleton (`cmd/runoq-runtime`, `internal/runtimecli`)
 - explicit shell/runtime selection at `bin/runoq` (shell remains default)
 - first acceptance parity scenarios for `run --dry-run` and `plan --dry-run`
+- runtime-backed `state.sh` implementation (`internal/runtimestate`) with shell/runtime parity tests
 
-Remaining milestones (M3+) are still pending.
+Remaining milestones are still pending for the rest of M3+ (capture/logging substrate and other command families).
 
 ## Purpose
 

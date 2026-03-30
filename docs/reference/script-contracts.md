@@ -154,11 +154,15 @@ Allowed phase transitions:
 - `CRITERIA -> DEVELOP | FAILED`
 - `DEVELOP -> REVIEW | FAILED`
 - `REVIEW -> DECIDE | FAILED`
-- `DECIDE -> DEVELOP | FINALIZE | FAILED`
+- `DECIDE -> DEVELOP | FINALIZE | INTEGRATE | FAILED`
 - `FINALIZE -> DONE | FAILED`
 - `INTEGRATE -> DONE | FAILED`
 
 Terminal phases `DONE` and `FAILED` reject further transitions.
+
+Notes:
+
+- `state.sh` remains the stable shell entrypoint; when `RUNOQ_STATE_IMPLEMENTATION=runtime` (or global `RUNOQ_IMPLEMENTATION=runtime`) it dispatches to the Go runtime state engine while preserving the same subcommand contract.
 
 ## `verify.sh`
 
