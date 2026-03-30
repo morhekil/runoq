@@ -24,7 +24,8 @@ In this mode, file ownership is not an implementation detail. It is the safety b
 
 Default model split for this workflow:
 
-- implementation workers: `gpt-5.4`
+- implementation workers: `gpt-5.3-codex`
+- read-only explorer workers: `gpt-5.4-mini`
 - verification workers: `gpt-5.4-mini`
 
 Use the smaller/faster verification model by default because verification tasks should be read-only, tightly scoped, and prompt-constrained.
@@ -95,7 +96,7 @@ Use constraints like these in the worker prompt:
 - Work only in `<worktree-path>` on branch `<branch>`.
 - Do not edit the main checkout.
 - Do NOT spawn subagents.
-- Use model `<model>` for this role (`gpt-5.4` for implementation, `gpt-5.4-mini` for read-only verification unless explicitly escalated).
+- Use model `<model>` for this role (`gpt-5.3-codex` for implementation, `gpt-5.4-mini` for read-only explorer/verification unless explicitly escalated for verification).
 - Assigned files: `<list>`
 - Forbidden files: `<list>` or "all other files are out of bounds"
 - Run only these tests: `<list>`
