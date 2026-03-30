@@ -4,8 +4,10 @@ run:
   timeout: 5m
 
 linters:
-  default: none
+  default: standard
   enable:
+    # Deliberate tradeoff: keep the standard baseline and add only a small
+    # correctness-focused set while the Go runtime footprint is still small.
     - errcheck
     - govet
     - ineffassign
