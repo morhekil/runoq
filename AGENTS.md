@@ -27,6 +27,14 @@ This repository implements the deterministic runtime layer for GitHub-backed age
 - Use live smoke lanes for real GitHub and real LLM validation, but keep them opt-in and credential-gated.
 - Validate both happy paths and recovery or failure paths.
 
+## Go code
+
+When writing, reviewing, or setting up Go code, use the skills in `.agents/skills/`:
+
+- **use-modern-go** — detect the project's Go version and use modern idioms up to that version.
+- **golang-linter** — configure golangci-lint, interpret output, and apply lint fixes.
+- **golang-data-structures** — choose and optimize slices, maps, containers, generics, and pointer types.
+
 ## Documentation
 
 - Update docs when changing operator-visible behavior, contracts, or architecture.
