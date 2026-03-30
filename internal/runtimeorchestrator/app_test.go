@@ -11,6 +11,18 @@ import (
 	"testing"
 )
 
+type fakeExitError struct {
+	code int
+}
+
+func (e fakeExitError) Error() string {
+	return "command failed"
+}
+
+func (e fakeExitError) ExitCode() int {
+	return e.code
+}
+
 func TestMetadataFromIssueViewFallsBackToBodyBlock(t *testing.T) {
 	meta := metadataFromIssueView(issueView{
 		Number: 42,
@@ -189,13 +201,132 @@ func TestRunStopsAfterInitSuccessWithNotImplemented(t *testing.T) {
 	}
 }
 
+func TestMentionTriageReturnsEmptyStdoutWhenPollMentionsIsEmpty(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+	writeRuntimeConfig(t, root)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	var calls []string
+
+	app := New([]string{"mention-triage", "owner/repo", "87"}, []string{
+		"RUNOQ_ROOT=" + root,
+		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
+	}, root, &stdout, &stderr)
+	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+		calls = append(calls, commandLine(req))
+		switch {
+		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
+			_, _ = io.WriteString(req.Stdout, "fail\n")
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") && strings.Join(req.Args, " ") == "poll-mentions owner/repo runoq":
+			_, _ = io.WriteString(req.Stdout, "[]\n")
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s", commandLine(req))
+			return nil
+		}
+	})
+
+	code := app.Run(ctx)
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d", code)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected no stdout when no mentions are found, got %q", stdout.String())
+	}
+	if !containsCall(calls, "gh-pr-lifecycle.sh poll-mentions owner/repo runoq") {
+		t.Fatalf("expected poll-mentions call, got %v", calls)
+	}
+	if !strings.Contains(stderr.String(), "Token mint failed or skipped") {
+		t.Fatalf("expected auth log on stderr, got %q", stderr.String())
+	}
+}
+
+func TestMentionTriageReturnsNotImplementedWhenMentionsExist(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+	writeRuntimeConfig(t, root)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	app := New([]string{"mention-triage", "owner/repo", "87"}, []string{
+		"RUNOQ_ROOT=" + root,
+		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
+	}, root, &stdout, &stderr)
+	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+		switch {
+		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
+			_, _ = io.WriteString(req.Stdout, "fail\n")
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") && strings.Join(req.Args, " ") == "poll-mentions owner/repo runoq":
+			_, _ = io.WriteString(req.Stdout, "[{\"comment_id\":3001}]\n")
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s", commandLine(req))
+			return nil
+		}
+	})
+
+	code := app.Run(ctx)
+	if code != 1 {
+		t.Fatalf("expected exit code 1, got %d", code)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected no stdout when mentions exist, got %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "mention-triage with mentions not implemented") {
+		t.Fatalf("expected not-implemented error, got %q", stderr.String())
+	}
+}
+
+func TestMentionTriagePropagatesScriptExitCodeAndStderr(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+	writeRuntimeConfig(t, root)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	app := New([]string{"mention-triage", "owner/repo", "87"}, []string{
+		"RUNOQ_ROOT=" + root,
+		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
+	}, root, &stdout, &stderr)
+	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+		switch {
+		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
+			_, _ = io.WriteString(req.Stdout, "fail\n")
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") && strings.Join(req.Args, " ") == "poll-mentions owner/repo runoq":
+			_, _ = io.WriteString(req.Stderr, "poll failed\n")
+			return fakeExitError{code: 23}
+		default:
+			t.Fatalf("unexpected command: %s", commandLine(req))
+			return nil
+		}
+	})
+
+	code := app.Run(ctx)
+	if code != 23 {
+		t.Fatalf("expected exit code 23, got %d", code)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected no stdout on error, got %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "poll failed") {
+		t.Fatalf("expected script stderr, got %q", stderr.String())
+	}
+}
+
 func writeRuntimeConfig(t *testing.T, root string) {
 	t.Helper()
 	configDir := filepath.Join(root, "config")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatalf("mkdir config: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(configDir, "runoq.json"), []byte(`{"labels":{"ready":"runoq:ready"}}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(configDir, "runoq.json"), []byte(`{"labels":{"ready":"runoq:ready"},"identity":{"handle":"runoq"}}`), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 }

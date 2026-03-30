@@ -61,6 +61,9 @@ type queueConfig struct {
 	Labels struct {
 		Ready string `json:"ready"`
 	} `json:"labels"`
+	Identity struct {
+		Handle string `json:"handle"`
+	} `json:"identity"`
 }
 
 type eligibilityResult struct {
@@ -118,7 +121,7 @@ func (a *App) Run(ctx context.Context) int {
 	case "run":
 		return a.runCommandEntry(ctx, root, env, a.args[1:])
 	case "mention-triage":
-		return a.fail("mention-triage is not implemented in the runtime orchestrator yet")
+		return a.mentionTriageEntry(ctx, root, env, a.args[1:])
 	case "-h", "--help", "help":
 		a.printUsage(a.stdout)
 		return 0
@@ -126,6 +129,34 @@ func (a *App) Run(ctx context.Context) int {
 		a.printUsage(a.stderr)
 		return 1
 	}
+}
+
+func (a *App) mentionTriageEntry(ctx context.Context, root string, env []string, args []string) int {
+	if len(args) != 2 {
+		a.printUsage(a.stderr)
+		return 1
+	}
+
+	repo := args[0]
+	cfg, err := a.loadConfig(root, env)
+	if err != nil {
+		return a.fail(err.Error())
+	}
+
+	var stdout bytes.Buffer
+	if err := a.runScript(ctx, root, env, "gh-pr-lifecycle.sh", []string{"poll-mentions", repo, cfg.Identity.Handle}, nil, &stdout, a.stderr); err != nil {
+		return commandExitCode(err)
+	}
+
+	var mentions []json.RawMessage
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &mentions); err != nil {
+		return a.failf("poll-mentions returned invalid JSON: %v", err)
+	}
+	if len(mentions) == 0 {
+		return 0
+	}
+
+	return a.fail("mention-triage with mentions not implemented")
 }
 
 func (a *App) runCommandEntry(ctx context.Context, root string, env []string, args []string) int {
@@ -741,6 +772,22 @@ func stderrOrUnknown(stderr string) string {
 		return "unknown error"
 	}
 	return stderr
+}
+
+func commandExitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+
+	type exitCoder interface {
+		ExitCode() int
+	}
+
+	var exitErr exitCoder
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode()
+	}
+	return 1
 }
 
 func envLookup(env []string, key string) (string, bool) {

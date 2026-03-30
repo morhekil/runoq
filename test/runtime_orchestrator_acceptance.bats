@@ -183,3 +183,59 @@ EOF
   runtime_gh_log="$(normalize_gh_log "$output")"
   [ "$shell_gh_log" = "$runtime_gh_log" ]
 }
+
+@test "acceptance parity: mention-triage matches poll contract for zero-mention scenario" {
+  shell_remote="$TEST_TMPDIR/shell-remote.git"
+  shell_project="$TEST_TMPDIR/shell-project"
+  runtime_remote="$TEST_TMPDIR/runtime-remote.git"
+  runtime_project="$TEST_TMPDIR/runtime-project"
+  prepare_orchestrator_repo "$shell_remote" "$shell_project"
+  rm -rf "$TEST_TMPDIR/seed-repo"
+  prepare_orchestrator_repo "$runtime_remote" "$runtime_project"
+  prepare_runtime_bin
+
+  config_path="$TEST_TMPDIR/runoq.json"
+  write_runtime_orchestrator_config "$config_path"
+
+  shell_scenario="$TEST_TMPDIR/shell-scenario.json"
+  runtime_scenario="$TEST_TMPDIR/runtime-scenario.json"
+  write_fake_gh_scenario "$shell_scenario" <<EOF
+[
+  {
+    "contains": ["api", "repos/owner/repo/issues?state=open&per_page=100"],
+    "stdout_file": "$(fixture_path "comments/open-items.json")"
+  },
+  {
+    "contains": ["api", "repos/owner/repo/issues/87/comments"],
+    "stdout": "[]"
+  },
+  {
+    "contains": ["api", "repos/owner/repo/issues/90/comments"],
+    "stdout": "[]"
+  }
+]
+EOF
+  cp "$shell_scenario" "$runtime_scenario"
+
+  shell_log="$TEST_TMPDIR/shell-gh.log"
+  runtime_log="$TEST_TMPDIR/runtime-gh.log"
+
+  run bash -lc 'cd "'"$shell_project"'" && TARGET_ROOT="'"$shell_project"'" RUNOQ_REPO="owner/repo" REPO="owner/repo" RUNOQ_CONFIG="'"$config_path"'" RUNOQ_ORCHESTRATOR_IMPLEMENTATION=shell FAKE_GH_SCENARIO="'"$shell_scenario"'" FAKE_GH_STATE="'"$TEST_TMPDIR"'/shell-gh.state" FAKE_GH_LOG="'"$shell_log"'" GH_BIN="'"$RUNOQ_ROOT"'/test/helpers/gh" "'"$RUNOQ_ROOT"'/scripts/orchestrator.sh" mention-triage owner/repo 87 2>"'"$TEST_TMPDIR"'/shell-mention-triage.err"'
+  shell_status="$status"
+  shell_stdout="$output"
+
+  run bash -lc 'cd "'"$runtime_project"'" && TARGET_ROOT="'"$runtime_project"'" RUNOQ_REPO="owner/repo" REPO="owner/repo" RUNOQ_CONFIG="'"$config_path"'" RUNOQ_RUNTIME_BIN="'"$RUNOQ_RUNTIME_BIN"'" RUNOQ_ORCHESTRATOR_IMPLEMENTATION=runtime FAKE_GH_SCENARIO="'"$runtime_scenario"'" FAKE_GH_STATE="'"$TEST_TMPDIR"'/runtime-gh.state" FAKE_GH_LOG="'"$runtime_log"'" GH_BIN="'"$RUNOQ_ROOT"'/test/helpers/gh" "'"$RUNOQ_ROOT"'/scripts/orchestrator.sh" mention-triage owner/repo 87 2>"'"$TEST_TMPDIR"'/runtime-mention-triage.err"'
+  runtime_status="$status"
+  runtime_stdout="$output"
+
+  [ "$shell_status" -eq "$runtime_status" ]
+  [ "$shell_status" -eq 0 ]
+  [ "$shell_stdout" = "$runtime_stdout" ]
+  [ -z "$shell_stdout" ]
+
+  run cat "$shell_log"
+  shell_gh_log="$(normalize_gh_log "$output")"
+  run cat "$runtime_log"
+  runtime_gh_log="$(normalize_gh_log "$output")"
+  [ "$shell_gh_log" = "$runtime_gh_log" ]
+}
