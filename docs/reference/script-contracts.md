@@ -245,6 +245,7 @@ Notes:
 
 - `summary` and `cost` return zeroed JSON when no state files exist.
 - `issue` exits non-zero if the requested file does not exist.
+- `scripts/report.sh` remains the stable shell entrypoint; when `RUNOQ_IMPLEMENTATION=runtime` is used through `bin/runoq report ...`, runtime dispatch uses the Go report engine while preserving this contract.
 
 ## `mentions.sh`
 

@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/saruman/runoq/internal/runtimereport"
 )
 
 const usageText = `Usage:
@@ -109,7 +111,8 @@ func (a *App) Run(ctx context.Context) int {
 		if code != 0 {
 			return code
 		}
-		return a.runScript(ctx, targetEnv, runoqRoot, "report.sh", args)
+		reportApp := runtimereport.New(args, targetEnv, a.cwd, a.stdout, a.stderr)
+		return reportApp.Run()
 	case "maintenance":
 		targetEnv, code := a.prepareTargetContext(ctx, runoqRoot, env)
 		if code != 0 {

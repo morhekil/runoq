@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -191,6 +193,51 @@ func TestRunConfigEmptyFallsBackToDefault(t *testing.T) {
 	runCall := executor.calls[3]
 	if value, ok := envLookup(runCall.Env, "RUNOQ_CONFIG"); !ok || value != "/runoq/config/runoq.json" {
 		t.Fatalf("RUNOQ_CONFIG mismatch: %q", value)
+	}
+}
+
+func TestReportSubcommandUsesRuntimeImplementation(t *testing.T) {
+	t.Parallel()
+
+	targetRoot := t.TempDir()
+	stateDir := filepath.Join(targetRoot, ".runoq", "state")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatalf("mkdir state dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "42.json"), []byte(`{
+  "phase": "DONE",
+  "outcome": { "verdict": "PASS" },
+  "tokens_used": 100
+}`), 0o644); err != nil {
+		t.Fatalf("write state file: %v", err)
+	}
+
+	executor := &scriptedExecutor{
+		t:        t,
+		matchers: []callMatcher{},
+	}
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	app := New(
+		[]string{"report", "summary"},
+		[]string{"RUNOQ_ROOT=/runoq", "TARGET_ROOT=" + targetRoot, "RUNOQ_REPO=owner/repo"},
+		targetRoot,
+		&stdout,
+		&stderr,
+		"",
+	)
+	app.SetCommandExecutor(executor.run)
+
+	code := app.Run(context.Background())
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d (stderr=%q)", code, stderr.String())
+	}
+	if len(executor.calls) != 0 {
+		t.Fatalf("expected no shell command calls for runtime report, got %d", len(executor.calls))
+	}
+	if !strings.Contains(stdout.String(), `"issues": 1`) {
+		t.Fatalf("expected runtime report output, got %q", stdout.String())
 	}
 }
 

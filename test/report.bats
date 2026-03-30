@@ -2,7 +2,14 @@
 
 load test_helper
 
+ensure_modern_bash() {
+  if [[ -x "/opt/homebrew/bin/bash" ]]; then
+    export PATH="/opt/homebrew/bin:$PATH"
+  fi
+}
+
 @test "report summary aggregates completed state files" {
+  ensure_modern_bash
   export TARGET_ROOT="$TEST_TMPDIR/project"
   export RUNOQ_STATE_DIR="$TARGET_ROOT/.runoq/state"
   mkdir -p "$RUNOQ_STATE_DIR"
@@ -37,6 +44,7 @@ EOF
 }
 
 @test "report issue returns the stored state for a specific issue" {
+  ensure_modern_bash
   export TARGET_ROOT="$TEST_TMPDIR/project"
   export RUNOQ_STATE_DIR="$TARGET_ROOT/.runoq/state"
   mkdir -p "$RUNOQ_STATE_DIR"
@@ -55,6 +63,7 @@ EOF
 }
 
 @test "report cost uses config-driven rates" {
+  ensure_modern_bash
   export TARGET_ROOT="$TEST_TMPDIR/project"
   export RUNOQ_STATE_DIR="$TARGET_ROOT/.runoq/state"
   mkdir -p "$RUNOQ_STATE_DIR"
@@ -121,6 +130,7 @@ EOF
 }
 
 @test "report summary handles an empty state directory" {
+  ensure_modern_bash
   export TARGET_ROOT="$TEST_TMPDIR/project"
   export RUNOQ_STATE_DIR="$TARGET_ROOT/.runoq/state"
   mkdir -p "$RUNOQ_STATE_DIR"
@@ -132,6 +142,7 @@ EOF
 }
 
 @test "report summary aggregates lifecycle state files with status/result schema" {
+  ensure_modern_bash
   export TARGET_ROOT="$TEST_TMPDIR/project"
   export RUNOQ_STATE_DIR="$TARGET_ROOT/.runoq/state"
   mkdir -p "$RUNOQ_STATE_DIR"
@@ -162,6 +173,7 @@ EOF
 }
 
 @test "report summary aggregates lifecycle state files with top-level verdict schema" {
+  ensure_modern_bash
   export TARGET_ROOT="$TEST_TMPDIR/project"
   export RUNOQ_STATE_DIR="$TARGET_ROOT/.runoq/state"
   mkdir -p "$RUNOQ_STATE_DIR"
