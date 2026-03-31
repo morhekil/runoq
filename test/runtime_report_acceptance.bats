@@ -59,7 +59,7 @@ write_report_config() {
 EOF
 }
 
-@test "acceptance parity: report summary matches shell and runtime output contract" {
+@test "acceptance contract: report summary matches default and explicit runtime output" {
   project_dir="$TEST_TMPDIR/project"
   setup_acceptance_project "$project_dir"
   mkdir -p "$project_dir/.runoq/state"
@@ -74,50 +74,50 @@ EOF
 }
 EOF
 
-  run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION=shell "'"$RUNOQ_ROOT"'/bin/runoq" report summary 2>"'"$TEST_TMPDIR"'/shell-summary.err"'
-  shell_status="$status"
-  shell_output="$output"
+  run bash -lc 'cd "'"$project_dir"'" && "'"$RUNOQ_ROOT"'/bin/runoq" report summary 2>"'"$TEST_TMPDIR"'/default-summary.err"'
+  default_status="$status"
+  default_output="$output"
 
   run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION=runtime "'"$RUNOQ_ROOT"'/bin/runoq" report summary 2>"'"$TEST_TMPDIR"'/runtime-summary.err"'
   runtime_status="$status"
   runtime_output="$output"
 
-  run cat "$TEST_TMPDIR/shell-summary.err"
-  shell_err="$output"
+  run cat "$TEST_TMPDIR/default-summary.err"
+  default_err="$output"
   run cat "$TEST_TMPDIR/runtime-summary.err"
   runtime_err="$output"
 
-  [ "$shell_status" -eq "$runtime_status" ]
-  [ "$shell_status" -eq 0 ]
-  [ "$shell_output" = "$runtime_output" ]
-  [ "$shell_err" = "$runtime_err" ]
+  [ "$default_status" -eq "$runtime_status" ]
+  [ "$default_status" -eq 0 ]
+  [ "$default_output" = "$runtime_output" ]
+  [ "$default_err" = "$runtime_err" ]
 }
 
-@test "acceptance parity: report issue missing file matches shell and runtime" {
+@test "acceptance contract: report issue missing file matches default and explicit runtime" {
   project_dir="$TEST_TMPDIR/project"
   setup_acceptance_project "$project_dir"
   mkdir -p "$project_dir/.runoq/state"
 
-  run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION=shell "'"$RUNOQ_ROOT"'/bin/runoq" report issue 999 2>"'"$TEST_TMPDIR"'/shell-issue.err"'
-  shell_status="$status"
-  shell_output="$output"
+  run bash -lc 'cd "'"$project_dir"'" && "'"$RUNOQ_ROOT"'/bin/runoq" report issue 999 2>"'"$TEST_TMPDIR"'/default-issue.err"'
+  default_status="$status"
+  default_output="$output"
 
   run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION=runtime "'"$RUNOQ_ROOT"'/bin/runoq" report issue 999 2>"'"$TEST_TMPDIR"'/runtime-issue.err"'
   runtime_status="$status"
   runtime_output="$output"
 
-  run cat "$TEST_TMPDIR/shell-issue.err"
-  shell_err="$output"
+  run cat "$TEST_TMPDIR/default-issue.err"
+  default_err="$output"
   run cat "$TEST_TMPDIR/runtime-issue.err"
   runtime_err="$output"
 
-  [ "$shell_status" -eq "$runtime_status" ]
-  [ "$shell_status" -ne 0 ]
-  [ "$shell_output" = "$runtime_output" ]
-  [ "$shell_err" = "$runtime_err" ]
+  [ "$default_status" -eq "$runtime_status" ]
+  [ "$default_status" -ne 0 ]
+  [ "$default_output" = "$runtime_output" ]
+  [ "$default_err" = "$runtime_err" ]
 }
 
-@test "acceptance parity: report issue success matches shell and runtime contract" {
+@test "acceptance contract: report issue success matches default and explicit runtime output" {
   project_dir="$TEST_TMPDIR/project"
   setup_acceptance_project "$project_dir"
   mkdir -p "$project_dir/.runoq/state"
@@ -129,26 +129,26 @@ EOF
 }
 EOF
 
-  run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION=shell "'"$RUNOQ_ROOT"'/bin/runoq" report issue 42 2>"'"$TEST_TMPDIR"'/shell-issue-success.err"'
-  shell_status="$status"
-  shell_output="$output"
+  run bash -lc 'cd "'"$project_dir"'" && "'"$RUNOQ_ROOT"'/bin/runoq" report issue 42 2>"'"$TEST_TMPDIR"'/default-issue-success.err"'
+  default_status="$status"
+  default_output="$output"
 
   run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION=runtime "'"$RUNOQ_ROOT"'/bin/runoq" report issue 42 2>"'"$TEST_TMPDIR"'/runtime-issue-success.err"'
   runtime_status="$status"
   runtime_output="$output"
 
-  run cat "$TEST_TMPDIR/shell-issue-success.err"
-  shell_err="$output"
+  run cat "$TEST_TMPDIR/default-issue-success.err"
+  default_err="$output"
   run cat "$TEST_TMPDIR/runtime-issue-success.err"
   runtime_err="$output"
 
-  [ "$shell_status" -eq "$runtime_status" ]
-  [ "$shell_status" -eq 0 ]
-  [ "$shell_output" = "$runtime_output" ]
-  [ "$shell_err" = "$runtime_err" ]
+  [ "$default_status" -eq "$runtime_status" ]
+  [ "$default_status" -eq 0 ]
+  [ "$default_output" = "$runtime_output" ]
+  [ "$default_err" = "$runtime_err" ]
 }
 
-@test "acceptance parity: report cost matches shell and runtime output contract" {
+@test "acceptance contract: report cost matches default and explicit runtime output" {
   project_dir="$TEST_TMPDIR/project"
   setup_acceptance_project "$project_dir"
   mkdir -p "$project_dir/.runoq/state"
@@ -165,23 +165,23 @@ EOF
 }
 EOF
 
-  run bash -lc 'cd "'"$project_dir"'" && RUNOQ_CONFIG="'"$config_path"'" RUNOQ_IMPLEMENTATION=shell "'"$RUNOQ_ROOT"'/bin/runoq" report cost 2>"'"$TEST_TMPDIR"'/shell-cost.err"'
-  shell_status="$status"
-  shell_output="$output"
+  run bash -lc 'cd "'"$project_dir"'" && RUNOQ_CONFIG="'"$config_path"'" "'"$RUNOQ_ROOT"'/bin/runoq" report cost 2>"'"$TEST_TMPDIR"'/default-cost.err"'
+  default_status="$status"
+  default_output="$output"
 
   run bash -lc 'cd "'"$project_dir"'" && RUNOQ_CONFIG="'"$config_path"'" RUNOQ_IMPLEMENTATION=runtime "'"$RUNOQ_ROOT"'/bin/runoq" report cost 2>"'"$TEST_TMPDIR"'/runtime-cost.err"'
   runtime_status="$status"
   runtime_output="$output"
 
-  run cat "$TEST_TMPDIR/shell-cost.err"
-  shell_err="$output"
+  run cat "$TEST_TMPDIR/default-cost.err"
+  default_err="$output"
   run cat "$TEST_TMPDIR/runtime-cost.err"
   runtime_err="$output"
 
-  [ "$shell_status" -eq "$runtime_status" ]
-  [ "$shell_status" -eq 0 ]
-  shell_norm="$(printf '%s' "$shell_output" | jq -S -c .)"
+  [ "$default_status" -eq "$runtime_status" ]
+  [ "$default_status" -eq 0 ]
+  shell_norm="$(printf '%s' "$default_output" | jq -S -c .)"
   runtime_norm="$(printf '%s' "$runtime_output" | jq -S -c .)"
   [ "$shell_norm" = "$runtime_norm" ]
-  [ "$shell_err" = "$runtime_err" ]
+  [ "$default_err" = "$runtime_err" ]
 }

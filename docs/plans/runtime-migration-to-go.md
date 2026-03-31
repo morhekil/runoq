@@ -6,7 +6,7 @@ Migration status: code/runtime migration is complete through the last known bloc
 
 Current landed fact set:
 
-- foundation slices already in-repo: Go runtime skeleton (`cmd/runoq-runtime`, `internal/runtimecli`), explicit shell/runtime selection at `bin/runoq` with runtime now default and explicit shell fallback preserved, and first acceptance parity scenarios for `run --dry-run` plus `plan --dry-run`
+- foundation slices already in-repo: Go runtime skeleton (`cmd/runoq-runtime`, `internal/runtimecli`), runtime-default top-level CLI routing at `bin/runoq`, and first acceptance parity scenarios for `run --dry-run` plus `plan --dry-run`
 - runtime-backed `state.sh` (`internal/runtimestate`), `report` (`internal/runtimereport`), and `verify.sh` (`internal/runtimeverify`) with shell/runtime parity coverage
 - `0913f00` (`runtime: migrate gh-issue-queue behind runtime wrapper`): runtime-backed `gh-issue-queue.sh` list/next/set-status coverage behind the stable shell wrapper
 - `136dea5` (`runtimeorchestrator: support queue dry-run`): runtime orchestrator queue dry-run slice with preserved selection, skipped-reason logging, and explicit `INIT` dry-run output
@@ -22,7 +22,7 @@ Current landed fact set:
 - current slice: helper wrappers used by the runtime run path (`scripts/state.sh`, `scripts/verify.sh`, `scripts/gh-issue-queue.sh`) are now thin runtime wrappers with unconditional runtime dispatch and no active `..._IMPLEMENTATION=shell` branch
 - current slice: remaining runtime-proven run-path wrappers (`scripts/dispatch-safety.sh`, `scripts/worktree.sh`) are now thin runtime wrappers with unconditional runtime dispatch and no active `..._IMPLEMENTATION=shell` branch
 - current slice: runtime orchestrator no longer forces `RUNOQ_DISPATCH_SAFETY_IMPLEMENTATION=shell` or `RUNOQ_ISSUE_QUEUE_IMPLEMENTATION=shell` for migrated helper calls, so wrapper defaults (runtime unless explicitly overridden) now flow through orchestrator-managed run paths while shell-owned components remain unchanged
-- current slice: the top-level CLI wrapper `bin/runoq` now defaults to runtime when no implementation env override is set, while preserving explicit `RUNOQ_IMPLEMENTATION=shell` fallback behavior with deterministic acceptance coverage at the CLI boundary
+- current slice: the top-level CLI wrapper `bin/runoq` is now runtime-only (`RUNOQ_IMPLEMENTATION` unset or `runtime`), with migration-era `RUNOQ_IMPLEMENTATION=shell` fallback retired and acceptance coverage aligned to runtime-default/runtime-explicit behavior
 - current slice: standalone `scripts/issue-runner.sh` remains shell-owned; `RUNOQ_ISSUE_RUNNER_IMPLEMENTATION` defaults to `shell` (with `runtime` kept as a compatibility alias), and `cmd/runoq-runtime` no longer exposes a `__issue_runner` shim route
 - current slice: runtime-default wrapper `go run` fallbacks now execute from `RUNOQ_ROOT` (not caller cwd) across CLI and migrated wrappers, with deterministic external-cwd regression coverage to preserve runtime-default behavior in smoke-managed target repos when `RUNOQ_RUNTIME_BIN` is unset
 - current slice: `issue-runner.sh` now runs codex with split event/message artifacts (`--json` plus `-o`), persists round `thread_id`, performs bounded same-thread schema retries via `codex exec resume <thread_id> ...` on payload-schema failures, and `state.sh validate-payload` / `internal/runtimestate` now emit deterministic `payload_schema_valid` + `payload_schema_errors` metadata (with optional `thread_id`) to distinguish schema failures from ordinary normalization or verification mismatches
@@ -30,7 +30,7 @@ Current landed fact set:
 - current slice: `issue-runner.sh` now resolves codex `-o` last-message targets to absolute paths (initial + schema-retry) before `runoq::captured_exec` changes into the sibling worktree, and passes those absolute last-message paths to `state.sh validate-payload`, preserving repo-root log artifact writes and preventing malformed-payload retry loops caused by misplaced last-message files or misresolved runtime validation inputs
 - current slice: sandbox smoke marker commits now force-stage `.runoq/smoke/<run_id>.md` so smoke runs remain stable when target repositories ignore `.runoq/`, with deterministic live-smoke regression coverage for ignored-path staging
 
-Still pending: smoke-gated rollout completion and cleanup (confidence-cycle smoke lanes, fallback retirement timing, and final simplification steps in later milestones).
+Still pending: smoke-gated rollout completion and cleanup (confidence-cycle smoke lanes and final simplification steps in later milestones).
 
 ## Purpose
 

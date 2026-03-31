@@ -5,6 +5,7 @@ load test_helper
 setup_cli_project() {
   local dir="$1"
   make_git_repo "$dir" "git@github.com:owner/repo.git"
+  prepare_runtime_bin
 }
 
 @test "runoq run passes through issue and dry-run flags and exports context" {
@@ -210,6 +211,7 @@ EOF
 @test "runoq fails outside a git repository" {
   outside="$TEST_TMPDIR/outside"
   mkdir -p "$outside"
+  prepare_runtime_bin
 
   run bash -lc 'cd "'"$outside"'" && "'"$RUNOQ_ROOT"'/bin/runoq" run'
 

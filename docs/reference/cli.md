@@ -20,14 +20,15 @@ The CLI must be run from inside the target git repository. It resolves:
 
 ## Implementation Selection
 
-`bin/runoq` supports explicit implementation routing during the migration.
+`bin/runoq` is a runtime-only top-level entrypoint.
 
-- Default behavior remains shell-backed (`RUNOQ_IMPLEMENTATION` unset or `shell`).
-- Set `RUNOQ_IMPLEMENTATION=runtime` to route through the Go runtime shim.
+- Default behavior routes to the Go runtime shim (`RUNOQ_IMPLEMENTATION` unset).
+- `RUNOQ_IMPLEMENTATION=runtime` is accepted as an explicit no-op compatibility setting.
+- `RUNOQ_IMPLEMENTATION=shell` is no longer supported at the top-level CLI boundary.
 - Optional test/operator override: `RUNOQ_RUNTIME_BIN=/abs/path/to/runoq-runtime` to use a prebuilt runtime binary instead of `go run`.
 - Optional toolchain override when using `go run`: `RUNOQ_GO_BIN`.
 
-The public CLI contract is unchanged; this routing is an internal migration switch used for parity testing and staged cutovers.
+The public CLI contract is unchanged; these env vars only control runtime dispatch mechanics.
 
 ## Mutation Summary
 

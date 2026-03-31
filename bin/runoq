@@ -14,102 +14,21 @@ export RUNOQ_ROOT
 export RUNOQ_CONFIG="${RUNOQ_CONFIG:-$RUNOQ_ROOT/config/runoq.json}"
 
 implementation="${RUNOQ_IMPLEMENTATION:-runtime}"
-case "$implementation" in
-  shell|"")
-    ;;
-  runtime)
-    runtime_bin="${RUNOQ_RUNTIME_BIN:-}"
-    if [[ -n "$runtime_bin" ]]; then
-      exec "$runtime_bin" "$@"
-    fi
-    go_bin="${RUNOQ_GO_BIN:-go}"
-    command -v "$go_bin" >/dev/null 2>&1 || {
-      echo "runoq: Go toolchain not found: $go_bin" >&2
-      exit 1
-    }
-    cd "$RUNOQ_ROOT"
-    exec "$go_bin" run "$RUNOQ_ROOT/cmd/runoq-runtime" "$@"
-    ;;
-  *)
-    echo "runoq: Unknown RUNOQ_IMPLEMENTATION: $implementation (expected shell or runtime)" >&2
-    exit 1
-    ;;
-esac
+if [[ -n "$implementation" && "$implementation" != "runtime" ]]; then
+  echo "runoq: Unknown RUNOQ_IMPLEMENTATION: $implementation (expected runtime)" >&2
+  exit 1
+fi
 
-source "$RUNOQ_ROOT/scripts/lib/common.sh"
+runtime_bin="${RUNOQ_RUNTIME_BIN:-}"
+if [[ -n "$runtime_bin" ]]; then
+  exec "$runtime_bin" "$@"
+fi
 
-usage() {
-  cat <<'EOF'
-Usage:
-  runoq init
-  runoq plan <file>
-  runoq run [--issue N] [--dry-run]
-  runoq report <summary|issue|cost> [...]
-  runoq maintenance
-EOF
+go_bin="${RUNOQ_GO_BIN:-go}"
+command -v "$go_bin" >/dev/null 2>&1 || {
+  echo "runoq: Go toolchain not found: $go_bin" >&2
+  exit 1
 }
 
-prepare_target_context() {
-  export TARGET_ROOT
-  export REPO
-  TARGET_ROOT="$(runoq::target_root)"
-  REPO="$(runoq::repo)"
-  export PATH="$RUNOQ_ROOT/scripts:$PATH"
-}
-
-prepare_auth() {
-  eval "$("$RUNOQ_ROOT/scripts/gh-auth.sh" export-token)"
-}
-
-claude_exec() {
-  local claude_bin="${RUNOQ_CLAUDE_BIN:-claude}"
-  runoq::captured_exec claude "$TARGET_ROOT" "$claude_bin" "$@"
-}
-
-run_subcommand() {
-  prepare_target_context
-  prepare_auth
-  "$RUNOQ_ROOT/scripts/run.sh" "$@"
-}
-
-plan_subcommand() {
-  [[ $# -ge 1 ]] || runoq::die "Usage: runoq plan <file> [--auto-confirm] [--dry-run]"
-  prepare_target_context
-  "$RUNOQ_ROOT/scripts/plan.sh" "$REPO" "$@"
-}
-
-maintenance_subcommand() {
-  prepare_target_context
-  prepare_auth
-  claude_exec --agent maintenance-reviewer --add-dir "$RUNOQ_ROOT"
-}
-
-subcommand="${1:-}"
-shift || true
-
-case "$subcommand" in
-  init)
-    prepare_target_context
-    "$RUNOQ_ROOT/scripts/setup.sh" "$@"
-    ;;
-  plan)
-    plan_subcommand "$@"
-    ;;
-  run)
-    run_subcommand "$@"
-    ;;
-  report)
-    prepare_target_context
-    "$RUNOQ_ROOT/scripts/report.sh" "$@"
-    ;;
-  maintenance)
-    maintenance_subcommand "$@"
-    ;;
-  ""|-h|--help|help)
-    usage
-    ;;
-  *)
-    usage >&2
-    exit 1
-    ;;
-esac
+cd "$RUNOQ_ROOT"
+exec "$go_bin" run "$RUNOQ_ROOT/cmd/runoq-runtime" "$@"
