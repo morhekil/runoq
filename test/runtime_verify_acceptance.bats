@@ -81,6 +81,17 @@ EOF
   chmod +x "$path"
 }
 
+write_fake_go_bin() {
+  local path="$1"
+  cat >"$path" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'FAKE_GO_CWD:%s\n' "$PWD"
+printf 'FAKE_GO_ARGS:%s\n' "$*"
+EOF
+  chmod +x "$path"
+}
+
 @test "verify wrapper defaults to runtime and preserves explicit shell override" {
   local_dir="$TEST_TMPDIR/default-wrapper-local"
   make_git_repo "$local_dir"
@@ -97,6 +108,19 @@ EOF
   [[ "$output" != *"FAKE_RUNTIME:"* ]]
   [[ "$output" == *"Usage:"* ]]
   [[ "$output" == *"verify.sh round"* ]]
+}
+
+@test "verify wrapper go fallback runs from RUNOQ_ROOT when runtime bin is unset" {
+  local_dir="$TEST_TMPDIR/default-wrapper-go-cwd-local"
+  make_git_repo "$local_dir"
+
+  fake_go_bin="$TEST_TMPDIR/fake-go-verify"
+  write_fake_go_bin "$fake_go_bin"
+
+  run bash -lc 'cd "'"$local_dir"'" && RUNOQ_IMPLEMENTATION="" RUNOQ_VERIFY_IMPLEMENTATION="" RUNOQ_RUNTIME_BIN="" RUNOQ_GO_BIN="'"$fake_go_bin"'" "'"$RUNOQ_ROOT"'/scripts/verify.sh" round one two three four'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"FAKE_GO_CWD:$RUNOQ_ROOT"* ]]
+  [[ "$output" == *"FAKE_GO_ARGS:run $RUNOQ_ROOT/cmd/runoq-runtime __verify round one two three four"* ]]
 }
 
 @test "acceptance parity: verify round success matches shell and runtime contract" {

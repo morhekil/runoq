@@ -68,6 +68,17 @@ EOF
   chmod +x "$path"
 }
 
+write_fake_go_bin() {
+  local path="$1"
+  cat >"$path" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'FAKE_GO_CWD:%s\n' "$PWD"
+printf 'FAKE_GO_ARGS:%s\n' "$*"
+EOF
+  chmod +x "$path"
+}
+
 happy_issue_body() {
   cat <<'EOF'
 <!-- runoq:meta
@@ -328,6 +339,22 @@ assert_capture_contains() {
   [[ "$output" != *"FAKE_RUNTIME:"* ]]
   [[ "$output" == *"Usage:"* ]]
   [[ "$output" == *"issue-runner.sh run"* ]]
+}
+
+@test "issue-runner wrapper go fallback runs from RUNOQ_ROOT when runtime bin is unset" {
+  local_dir="$TEST_TMPDIR/default-wrapper-go-cwd-local"
+  make_git_repo "$local_dir"
+
+  fake_go_bin="$TEST_TMPDIR/fake-go-issue-runner"
+  write_fake_go_bin "$fake_go_bin"
+
+  payload_file="$TEST_TMPDIR/go-payload.json"
+  printf '%s\n' '{}' >"$payload_file"
+
+  run bash -lc 'cd "'"$local_dir"'" && RUNOQ_IMPLEMENTATION="" RUNOQ_ISSUE_RUNNER_IMPLEMENTATION="" RUNOQ_RUNTIME_BIN="" RUNOQ_GO_BIN="'"$fake_go_bin"'" "'"$RUNOQ_ROOT"'/scripts/issue-runner.sh" run "'"$payload_file"'"'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"FAKE_GO_CWD:$RUNOQ_ROOT"* ]]
+  [[ "$output" == *"FAKE_GO_ARGS:run $RUNOQ_ROOT/cmd/runoq-runtime __issue_runner run $payload_file"* ]]
 }
 
 @test "acceptance parity: run --issue no-commit escalation matches shell and runtime" {

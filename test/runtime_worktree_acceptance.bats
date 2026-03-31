@@ -35,6 +35,17 @@ EOF
   chmod +x "$path"
 }
 
+write_fake_go_bin() {
+  local path="$1"
+  cat >"$path" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'FAKE_GO_CWD:%s\n' "$PWD"
+printf 'FAKE_GO_ARGS:%s\n' "$*"
+EOF
+  chmod +x "$path"
+}
+
 @test "worktree wrapper defaults to runtime and preserves explicit shell override" {
   project_dir="$TEST_TMPDIR/default-wrapper-project"
   make_git_repo "$project_dir"
@@ -51,6 +62,19 @@ EOF
   [[ "$output" != *"FAKE_RUNTIME:"* ]]
   [[ "$output" == *"Usage:"* ]]
   [[ "$output" == *"worktree.sh create"* ]]
+}
+
+@test "worktree wrapper go fallback runs from RUNOQ_ROOT when runtime bin is unset" {
+  project_dir="$TEST_TMPDIR/default-wrapper-go-cwd-project"
+  make_git_repo "$project_dir"
+
+  fake_go_bin="$TEST_TMPDIR/fake-go-worktree"
+  write_fake_go_bin "$fake_go_bin"
+
+  run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION="" RUNOQ_WORKTREE_IMPLEMENTATION="" RUNOQ_RUNTIME_BIN="" RUNOQ_GO_BIN="'"$fake_go_bin"'" "'"$RUNOQ_ROOT"'/scripts/worktree.sh" inspect 42'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"FAKE_GO_CWD:$RUNOQ_ROOT"* ]]
+  [[ "$output" == *"FAKE_GO_ARGS:run $RUNOQ_ROOT/cmd/runoq-runtime __worktree inspect 42"* ]]
 }
 
 @test "acceptance parity: worktree create/remove/inspect matches shell and runtime contracts" {

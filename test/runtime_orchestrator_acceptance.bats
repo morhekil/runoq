@@ -142,6 +142,17 @@ EOF
   chmod +x "$path"
 }
 
+write_fake_go_bin() {
+  local path="$1"
+  cat >"$path" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'FAKE_GO_CWD:%s\n' "$PWD"
+printf 'FAKE_GO_ARGS:%s\n' "$*"
+EOF
+  chmod +x "$path"
+}
+
 happy_issue_body() {
   cat <<'EOF'
 <!-- runoq:meta
@@ -207,6 +218,20 @@ normalize_orchestrator_stderr() {
   [[ "$output" != *"FAKE_RUNTIME:"* ]]
   [[ "$output" == *"Usage:"* ]]
   [[ "$output" == *"orchestrator.sh run"* ]]
+}
+
+@test "orchestrator wrapper go fallback runs from RUNOQ_ROOT when runtime bin is unset" {
+  project_dir="$TEST_TMPDIR/default-wrapper-go-cwd-project"
+  remote_dir="$TEST_TMPDIR/default-wrapper-go-cwd-remote.git"
+  prepare_orchestrator_repo "$remote_dir" "$project_dir"
+
+  fake_go_bin="$TEST_TMPDIR/fake-go-orchestrator"
+  write_fake_go_bin "$fake_go_bin"
+
+  run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION="" RUNOQ_ORCHESTRATOR_IMPLEMENTATION="" RUNOQ_RUNTIME_BIN="" RUNOQ_GO_BIN="'"$fake_go_bin"'" "'"$RUNOQ_ROOT"'/scripts/orchestrator.sh" --help'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"FAKE_GO_CWD:$RUNOQ_ROOT"* ]]
+  [[ "$output" == *"FAKE_GO_ARGS:run $RUNOQ_ROOT/cmd/runoq-runtime __orchestrator --help"* ]]
 }
 
 @test "acceptance parity: orchestrator init-failure rollback matches shell and runtime" {

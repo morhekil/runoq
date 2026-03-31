@@ -20,6 +20,7 @@ In progress. The current landed fact set is:
 - current slice: remaining runtime-proven run-path wrappers now default to runtime when no implementation env override is set (`scripts/dispatch-safety.sh`, `scripts/worktree.sh`), while preserving explicit `..._IMPLEMENTATION=shell` fallback behavior with deterministic acceptance coverage for default-routing plus shell-override paths
 - current slice: the top-level CLI wrapper `bin/runoq` now defaults to runtime when no implementation env override is set, while preserving explicit `RUNOQ_IMPLEMENTATION=shell` fallback behavior with deterministic acceptance coverage at the CLI boundary
 - current slice: standalone `scripts/issue-runner.sh` now routes through the runtime wrapper path by default (with explicit `RUNOQ_ISSUE_RUNNER_IMPLEMENTATION=shell` fallback preserved), and `cmd/runoq-runtime` now dispatches `__issue_runner` for wrapper-boundary parity coverage
+- current slice: runtime-default wrapper `go run` fallbacks now execute from `RUNOQ_ROOT` (not caller cwd) across CLI and migrated wrappers, with deterministic external-cwd regression coverage to preserve runtime-default behavior in smoke-managed target repos when `RUNOQ_RUNTIME_BIN` is unset
 
 Still pending: smoke-gated rollout completion and cleanup remain (confidence-cycle smoke lanes, fallback retirement timing, and final simplification steps in later milestones).
 

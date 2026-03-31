@@ -20,6 +20,7 @@ case "$dispatch_safety_implementation" in
       echo "runoq: Go toolchain not found: $go_bin" >&2
       exit 1
     }
+    cd "$RUNOQ_ROOT"
     exec "$go_bin" run "$RUNOQ_ROOT/cmd/runoq-runtime" "__dispatch_safety" "$@"
     ;;
   *)
