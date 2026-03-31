@@ -122,6 +122,28 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+@test "live smoke force-adds marker commit when target repo ignores .runoq" {
+  repo_dir="$TEST_TMPDIR/repo"
+  make_git_repo "$repo_dir"
+  printf '.runoq/\n' >"$repo_dir/.gitignore"
+  git -C "$repo_dir" add .gitignore
+  git -C "$repo_dir" commit -m "Ignore runoq artifacts" >/dev/null
+
+  run bash -lc '
+    set -euo pipefail
+    export RUNOQ_ROOT="'"$RUNOQ_ROOT"'"
+    export RUNOQ_CONFIG="'"$RUNOQ_CONFIG"'"
+    source "'"$RUNOQ_ROOT"'/scripts/lib/smoke-common.sh"
+    commit_smoke_marker "'"$repo_dir"'" run-id-123
+  '
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"/.runoq/smoke/run-id-123.md" ]]
+  run git -C "$repo_dir" show --name-only --pretty=format: HEAD
+  [ "$status" -eq 0 ]
+  [[ "$output" == *".runoq/smoke/run-id-123.md"* ]]
+}
+
 @test "live smoke normalizes trailing newlines when matching comment attribution" {
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<'EOF'

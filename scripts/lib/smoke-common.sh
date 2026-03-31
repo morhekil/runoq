@@ -634,6 +634,20 @@ ensure_default_branch_commit() {
   fi
 }
 
+commit_smoke_marker() {
+  local clone_dir="$1"
+  local run_id="$2"
+  local smoke_file relative_path
+
+  mkdir -p "$clone_dir/.runoq/smoke"
+  smoke_file="$clone_dir/.runoq/smoke/${run_id}.md"
+  relative_path=".runoq/smoke/${run_id}.md"
+  printf 'runoq live smoke %s\n' "$run_id" >"$smoke_file"
+  git -C "$clone_dir" add -f "$relative_path"
+  git -C "$clone_dir" commit -m "runoq live smoke ${run_id}" >/dev/null
+  printf '%s\n' "$smoke_file"
+}
+
 copy_fixture_tree() {
   local source_dir="$1"
   local destination_dir="$2"
@@ -1090,11 +1104,7 @@ run_smoke() {
     git -C "$clone_dir" config user.name "runoq[bot]"
     git -C "$clone_dir" config user.email "runoq-smoke@example.com"
   }
-  mkdir -p "$clone_dir/.runoq/smoke"
-  smoke_file="$clone_dir/.runoq/smoke/${run_id}.md"
-  printf 'runoq live smoke %s\n' "$run_id" >"$smoke_file"
-  git -C "$clone_dir" add ".runoq/smoke/${run_id}.md"
-  git -C "$clone_dir" commit -m "runoq live smoke ${run_id}" >/dev/null
+  smoke_file="$(commit_smoke_marker "$clone_dir" "$run_id")"
   smoke_log "committed smoke marker ${smoke_file}"
   smoke_log "pushing branch ${branch}"
   run_quiet_command "Failed to push sandbox branch ${branch}" \
