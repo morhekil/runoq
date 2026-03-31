@@ -9,10 +9,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"github.com/saruman/runoq/internal/common"
 )
 
 const usageText = `Usage:
@@ -20,25 +20,13 @@ const usageText = `Usage:
   orchestrator.sh mention-triage <repo> <pr-number>
 `
 
-type commandRequest struct {
-	Name   string
-	Args   []string
-	Dir    string
-	Env    []string
-	Stdin  io.Reader
-	Stdout io.Writer
-	Stderr io.Writer
-}
-
-type commandExecutor func(context.Context, commandRequest) error
-
 type App struct {
 	args        []string
 	env         []string
 	cwd         string
 	stdout      io.Writer
 	stderr      io.Writer
-	execCommand commandExecutor
+	execCommand common.CommandExecutor
 }
 
 type issueMetadata struct {
@@ -141,13 +129,13 @@ func New(args []string, env []string, cwd string, stdout io.Writer, stderr io.Wr
 		cwd:         cwd,
 		stdout:      stdout,
 		stderr:      stderr,
-		execCommand: runCommand,
+		execCommand: common.RunCommand,
 	}
 }
 
-func (a *App) SetCommandExecutor(execFn commandExecutor) {
+func (a *App) SetCommandExecutor(execFn common.CommandExecutor) {
 	if execFn == nil {
-		a.execCommand = runCommand
+		a.execCommand = common.RunCommand
 		return
 	}
 	a.execCommand = execFn
@@ -161,7 +149,7 @@ func (a *App) Run(ctx context.Context) int {
 
 	root := a.runoqRoot()
 	if root == "" {
-		return a.fail("Unable to resolve RUNOQ_ROOT for runtime orchestrator.")
+		return common.Fail(a.stderr, "Unable to resolve RUNOQ_ROOT for runtime orchestrator.")
 	}
 
 	env := append([]string(nil), a.env...)
@@ -192,7 +180,7 @@ func (a *App) mentionTriageEntry(ctx context.Context, root string, env []string,
 	repo := args[0]
 	cfg, err := a.loadConfig(root, env)
 	if err != nil {
-		return a.fail(err.Error())
+		return common.Fail(a.stderr, err.Error())
 	}
 
 	var stdout bytes.Buffer
@@ -202,13 +190,13 @@ func (a *App) mentionTriageEntry(ctx context.Context, root string, env []string,
 
 	var mentions []json.RawMessage
 	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &mentions); err != nil {
-		return a.failf("poll-mentions returned invalid JSON: %v", err)
+		return common.Failf(a.stderr, "poll-mentions returned invalid JSON: %v", err)
 	}
 	if len(mentions) == 0 {
 		return 0
 	}
 
-	return a.fail("mention-triage with mentions not implemented")
+	return common.Fail(a.stderr, "mention-triage with mentions not implemented")
 }
 
 func (a *App) runCommandEntry(ctx context.Context, root string, env []string, args []string) int {
@@ -226,7 +214,7 @@ func (a *App) runCommandEntry(ctx context.Context, root string, env []string, ar
 		switch rest[i] {
 		case "--issue":
 			if i+1 >= len(rest) {
-				return a.fail("--issue requires a value")
+				return common.Fail(a.stderr, "--issue requires a value")
 			}
 			issueNumber = rest[i+1]
 			i++
@@ -240,13 +228,13 @@ func (a *App) runCommandEntry(ctx context.Context, root string, env []string, ar
 
 	if issueNumber != "" {
 		if _, err := strconv.Atoi(issueNumber); err != nil {
-			return a.fail("--issue requires a numeric value")
+			return common.Fail(a.stderr, "--issue requires a numeric value")
 		}
 	}
 
 	targetRoot, err := a.targetRoot(ctx, env)
 	if err != nil {
-		return a.fail(err.Error())
+		return common.Fail(a.stderr, err.Error())
 	}
 
 	a.logInfo("Configuring bot identity for target root: %s", targetRoot)
@@ -264,7 +252,7 @@ func (a *App) runCommandEntry(ctx context.Context, root string, env []string, ar
 
 	a.logInfo("Running reconciliation")
 	reconcileEnv := append([]string(nil), env...)
-	reconcileEnv = envSet(reconcileEnv, "RUNOQ_NO_AUTO_TOKEN", "1")
+	reconcileEnv = common.EnvSet(reconcileEnv, "RUNOQ_NO_AUTO_TOKEN", "1")
 	_ = a.runScript(ctx, root, reconcileEnv, "dispatch-safety.sh", []string{"reconcile", repo}, nil, io.Discard, io.Discard)
 
 	if issueNumber == "" {
@@ -277,7 +265,7 @@ func (a *App) runCommandEntry(ctx context.Context, root string, env []string, ar
 	issue, _ := strconv.Atoi(issueNumber)
 	title, err := a.issueTitle(ctx, env, repo, issue)
 	if err != nil {
-		return a.failf("failed to load issue title: %v", err)
+		return common.Failf(a.stderr, "failed to load issue title: %v", err)
 	}
 
 	stateJSON, err := a.runSingleIssue(ctx, root, env, repo, issue, dryRun, title)
@@ -298,12 +286,12 @@ func (a *App) runCommandEntry(ctx context.Context, root string, env []string, ar
 func (a *App) runQueue(ctx context.Context, root string, env []string, repo string) int {
 	cfg, err := a.loadConfig(root, env)
 	if err != nil {
-		return a.fail(err.Error())
+		return common.Fail(a.stderr, err.Error())
 	}
 
 	queueEnv := append([]string(nil), env...)
-	queueEnv = envSet(queueEnv, "RUNOQ_LOG", "1")
-	queueEnv = envSet(queueEnv, "RUNOQ_NO_AUTO_TOKEN", "1")
+	queueEnv = common.EnvSet(queueEnv, "RUNOQ_LOG", "1")
+	queueEnv = common.EnvSet(queueEnv, "RUNOQ_NO_AUTO_TOKEN", "1")
 
 	for {
 		queueOut, queueStderr, err := a.scriptOutputWithStderr(ctx, root, queueEnv, "gh-issue-queue.sh", []string{"next", repo, cfg.Labels.Ready}, nil)
@@ -316,7 +304,7 @@ func (a *App) runQueue(ctx context.Context, root string, env []string, repo stri
 
 		var selection queueSelectionResult
 		if err := json.Unmarshal([]byte(queueOut), &selection); err != nil {
-			return a.failf("gh-issue-queue.sh next returned invalid JSON: %v", err)
+			return common.Failf(a.stderr, "gh-issue-queue.sh next returned invalid JSON: %v", err)
 		}
 
 		totalSkipped := len(selection.Skipped)
@@ -357,7 +345,7 @@ func (a *App) runQueue(ctx context.Context, root string, env []string, repo stri
 	}
 
 	if err := a.runEpicSweep(ctx, root, queueEnv, repo, cfg.Labels.Ready); err != nil {
-		return a.fail(err.Error())
+		return common.Fail(a.stderr, err.Error())
 	}
 	return 0
 }
@@ -365,12 +353,12 @@ func (a *App) runQueue(ctx context.Context, root string, env []string, repo stri
 func (a *App) runQueueDryRun(ctx context.Context, root string, env []string, repo string) int {
 	cfg, err := a.loadConfig(root, env)
 	if err != nil {
-		return a.fail(err.Error())
+		return common.Fail(a.stderr, err.Error())
 	}
 
 	queueEnv := append([]string(nil), env...)
-	queueEnv = envSet(queueEnv, "RUNOQ_LOG", "1")
-	queueEnv = envSet(queueEnv, "RUNOQ_NO_AUTO_TOKEN", "1")
+	queueEnv = common.EnvSet(queueEnv, "RUNOQ_LOG", "1")
+	queueEnv = common.EnvSet(queueEnv, "RUNOQ_NO_AUTO_TOKEN", "1")
 	queueOut, queueStderr, err := a.scriptOutputWithStderr(ctx, root, queueEnv, "gh-issue-queue.sh", []string{"next", repo, cfg.Labels.Ready}, nil)
 	if strings.TrimSpace(queueStderr) != "" {
 		_, _ = fmt.Fprintln(a.stderr, queueStderr)
@@ -381,7 +369,7 @@ func (a *App) runQueueDryRun(ctx context.Context, root string, env []string, rep
 
 	var selection queueSelectionResult
 	if err := json.Unmarshal([]byte(queueOut), &selection); err != nil {
-		return a.failf("gh-issue-queue.sh next returned invalid JSON: %v", err)
+		return common.Failf(a.stderr, "gh-issue-queue.sh next returned invalid JSON: %v", err)
 	}
 
 	totalSkipped := len(selection.Skipped)
@@ -736,7 +724,7 @@ func (a *App) phaseInit(ctx context.Context, root string, env []string, repo str
 	a.logInfo("INIT: issue #%d", issueNumber)
 
 	dispatchEnv := append([]string(nil), env...)
-	dispatchEnv = envSet(dispatchEnv, "RUNOQ_NO_AUTO_TOKEN", "1")
+	dispatchEnv = common.EnvSet(dispatchEnv, "RUNOQ_NO_AUTO_TOKEN", "1")
 	eligibilityOut, eligibilityErr := a.scriptOutput(ctx, root, dispatchEnv, "dispatch-safety.sh", []string{"eligibility", repo, strconv.Itoa(issueNumber)}, nil)
 	if eligibilityErr != nil {
 		return "", eligibilityErr
@@ -1027,7 +1015,7 @@ func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo 
 		return "", issueRunnerResult{}, err
 	}
 
-	runnerEnv := envSet(env, "RUNOQ_ISSUE_RUNNER_IMPLEMENTATION", "shell")
+	runnerEnv := common.EnvSet(env, "RUNOQ_ISSUE_RUNNER_IMPLEMENTATION", "shell")
 	runnerOut, runnerStderr, err := a.scriptOutputWithStderr(ctx, root, runnerEnv, "issue-runner.sh", []string{"run", payloadFile.Name()}, nil)
 	if strings.TrimSpace(runnerStderr) != "" {
 		a.logInfo("DEVELOP: issue-runner stderr: %s", runnerStderr)
@@ -1151,7 +1139,7 @@ func (a *App) phaseReview(ctx context.Context, root string, env []string, repo s
 	if reviewLogAbs != "" && !filepath.IsAbs(reviewLogAbs) {
 		reviewLogAbs = filepath.Join(state.Worktree, reviewLogAbs)
 	}
-	reviewLogExists := fileExists(reviewLogAbs)
+	reviewLogExists := common.FileExists(reviewLogAbs)
 	a.logInfo("REVIEW: review_log_path=%s review_log_abs=%s exists=%s", state.ReviewLogPath, reviewLogAbs, yesNo(reviewLogExists))
 
 	verdictResult := reviewVerdictResult{}
@@ -1501,7 +1489,7 @@ func (a *App) issueTitle(ctx context.Context, env []string, repo string, issueNu
 }
 
 func (a *App) loadConfig(root string, env []string) (queueConfig, error) {
-	configPath, ok := envLookup(env, "RUNOQ_CONFIG")
+	configPath, ok := common.EnvLookup(env, "RUNOQ_CONFIG")
 	if !ok || strings.TrimSpace(configPath) == "" {
 		configPath = filepath.Join(root, "config", "runoq.json")
 	}
@@ -1718,9 +1706,9 @@ func parseReviewVerdict(path string) (reviewVerdictResult, error) {
 }
 
 func (a *App) prepareAuth(ctx context.Context, root string, env []string) []string {
-	authEnv := envSet(env, "RUNOQ_FORCE_REFRESH_TOKEN", "1")
+	authEnv := common.EnvSet(env, "RUNOQ_FORCE_REFRESH_TOKEN", "1")
 	var stdout bytes.Buffer
-	err := a.execCommand(ctx, commandRequest{
+	err := a.execCommand(ctx, common.CommandRequest{
 		Name: "bash",
 		Args: []string{
 			"-lc",
@@ -1746,16 +1734,16 @@ func (a *App) prepareAuth(ctx context.Context, root string, env []string) []stri
 		a.logInfo("Token mint failed or skipped (will use ambient credentials)")
 	}
 	if strings.TrimSpace(token) != "" {
-		authEnv = envSet(authEnv, "GH_TOKEN", strings.TrimSpace(token))
+		authEnv = common.EnvSet(authEnv, "GH_TOKEN", strings.TrimSpace(token))
 	}
 	return authEnv
 }
 
 func (a *App) targetRoot(ctx context.Context, env []string) (string, error) {
-	if value, ok := envLookup(env, "TARGET_ROOT"); ok && strings.TrimSpace(value) != "" {
+	if value, ok := common.EnvLookup(env, "TARGET_ROOT"); ok && strings.TrimSpace(value) != "" {
 		return value, nil
 	}
-	out, err := a.commandOutput(ctx, commandRequest{
+	out, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
 		Name: "git",
 		Args: []string{"rev-parse", "--show-toplevel"},
 		Dir:  a.cwd,
@@ -1809,7 +1797,7 @@ func (a *App) postAuditComment(ctx context.Context, root string, env []string, r
 }
 
 func (a *App) ghOutput(ctx context.Context, env []string, args ...string) (string, error) {
-	return a.commandOutput(ctx, commandRequest{
+	return common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
 		Name: envOrDefault(env, "GH_BIN", "gh"),
 		Args: args,
 		Dir:  a.cwd,
@@ -1835,7 +1823,7 @@ func (a *App) runScript(ctx context.Context, root string, env []string, script s
 }
 
 func (a *App) runProgram(ctx context.Context, env []string, name string, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
-	return a.execCommand(ctx, commandRequest{
+	return a.execCommand(ctx, common.CommandRequest{
 		Name:   name,
 		Args:   append([]string(nil), args...),
 		Dir:    a.cwd,
@@ -1846,20 +1834,11 @@ func (a *App) runProgram(ctx context.Context, env []string, name string, args []
 	})
 }
 
-func (a *App) commandOutput(ctx context.Context, req commandRequest) (string, error) {
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	req.Stdout = &stdout
-	req.Stderr = &stderr
-	err := a.execCommand(ctx, req)
-	return strings.TrimSpace(stdout.String()), err
-}
-
 func (a *App) runoqRoot() string {
-	if root, ok := envLookup(a.env, "RUNOQ_ROOT"); ok && strings.TrimSpace(root) != "" {
+	if root, ok := common.EnvLookup(a.env, "RUNOQ_ROOT"); ok && strings.TrimSpace(root) != "" {
 		return root
 	}
-	if a.cwd != "" && fileExists(filepath.Join(a.cwd, "scripts", "lib", "common.sh")) {
+	if a.cwd != "" && common.FileExists(filepath.Join(a.cwd, "scripts", "lib", "common.sh")) {
 		return a.cwd
 	}
 	return ""
@@ -1867,15 +1846,6 @@ func (a *App) runoqRoot() string {
 
 func (a *App) printUsage(w io.Writer) {
 	_, _ = io.WriteString(w, usageText)
-}
-
-func (a *App) fail(message string) int {
-	_, _ = fmt.Fprintf(a.stderr, "runoq: %s\n", message)
-	return 1
-}
-
-func (a *App) failf(format string, args ...any) int {
-	return a.fail(fmt.Sprintf(format, args...))
 }
 
 func (a *App) logInfo(format string, args ...any) {
@@ -2021,54 +1991,10 @@ func updateStateJSON(stateJSON string, update func(map[string]any)) (string, err
 	return marshalJSON(state)
 }
 
-func envLookup(env []string, key string) (string, bool) {
-	prefix := key + "="
-	for i := len(env) - 1; i >= 0; i-- {
-		if strings.HasPrefix(env[i], prefix) {
-			return strings.TrimPrefix(env[i], prefix), true
-		}
-	}
-	return "", false
-}
-
 func envOrDefault(env []string, key string, fallback string) string {
-	if value, ok := envLookup(env, key); ok && value != "" {
+	if value, ok := common.EnvLookup(env, key); ok && value != "" {
 		return value
 	}
 	return fallback
 }
 
-func envSet(env []string, key string, value string) []string {
-	prefix := key + "="
-	next := make([]string, 0, len(env)+1)
-	replaced := false
-	for _, entry := range env {
-		if strings.HasPrefix(entry, prefix) {
-			if !replaced {
-				next = append(next, prefix+value)
-				replaced = true
-			}
-			continue
-		}
-		next = append(next, entry)
-	}
-	if !replaced {
-		next = append(next, prefix+value)
-	}
-	return next
-}
-
-func fileExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && !info.IsDir()
-}
-
-func runCommand(ctx context.Context, req commandRequest) error {
-	cmd := exec.CommandContext(ctx, req.Name, req.Args...)
-	cmd.Dir = req.Dir
-	cmd.Env = req.Env
-	cmd.Stdin = req.Stdin
-	cmd.Stdout = req.Stdout
-	cmd.Stderr = req.Stderr
-	return cmd.Run()
-}
