@@ -120,15 +120,16 @@ func TestPhaseInitPRCreateFailureWritesRollbackStateAndCleansUp(t *testing.T) {
 	}
 }
 
-func TestRunStopsAfterInitSuccessWithNotImplemented(t *testing.T) {
+func TestRunLowComplexityDevelopFailureCompletesNeedsReviewHandoff(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
 	writeRuntimeConfig(t, root)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	var savedState string
+	var savedStates []string
 	var calls []string
+	var runnerPayload string
 
 	app := New([]string{"run", "owner/repo", "--issue", "42"}, []string{
 		"RUNOQ_ROOT=" + root,
@@ -144,6 +145,15 @@ func TestRunStopsAfterInitSuccessWithNotImplemented(t *testing.T) {
 		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "configure_git_bot_identity"):
 			return nil
 		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "configure_git_bot_remote"):
+			return nil
+		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "runoq::claude_stream"):
+			if len(req.Args) < 7 {
+				t.Fatalf("expected claude invocation args, got %v", req.Args)
+			}
+			reviewOutputPath := req.Args[4]
+			if err := os.WriteFile(reviewOutputPath, []byte("REVIEW-TYPE: diff-review\nVERDICT: PASS\nSCORE: 42\nCHECKLIST:\n- Acceptance criteria satisfied.\n"), 0o644); err != nil {
+				t.Fatalf("write review output: %v", err)
+			}
 			return nil
 		case strings.HasSuffix(req.Name, "/dispatch-safety.sh") && strings.Join(req.Args, " ") == "reconcile owner/repo":
 			return nil
@@ -173,9 +183,28 @@ func TestRunStopsAfterInitSuccessWithNotImplemented(t *testing.T) {
 			return nil
 		case strings.HasSuffix(req.Name, "/state.sh") && strings.Join(req.Args, " ") == "save 42":
 			payload, _ := io.ReadAll(req.Stdin)
-			savedState = string(payload)
+			savedStates = append(savedStates, string(payload))
 			return nil
 		case strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") && strings.HasPrefix(strings.Join(req.Args, " "), "comment owner/repo 87 "):
+			return nil
+		case req.Name == "gh" && strings.Join(req.Args, " ") == "issue view 42 --repo owner/repo --json body":
+			_, _ = io.WriteString(req.Stdout, `{"body":"## Acceptance Criteria\n\n- [ ] Works."}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/issue-runner.sh") && strings.HasPrefix(strings.Join(req.Args, " "), "run "):
+			if value, ok := envLookup(req.Env, "RUNOQ_ISSUE_RUNNER_IMPLEMENTATION"); !ok || value != "runtime" {
+				t.Fatalf("expected runtime issue-runner env, got %q", req.Env)
+			}
+			payloadFile := req.Args[1]
+			payloadBody, err := os.ReadFile(payloadFile)
+			if err != nil {
+				t.Fatalf("read payload: %v", err)
+			}
+			runnerPayload = string(payloadBody)
+			_, _ = io.WriteString(req.Stdout, `{"status":"fail","logDir":"log/issue-42","baselineHash":"base","headHash":"head","commitRange":"base..head","reviewLogPath":"log/issue-42/round-1-diff-review.md","specRequirements":"## Acceptance Criteria","changedFiles":[],"relatedFiles":[],"cumulativeTokens":0,"verificationPassed":false,"verificationFailures":["no new commits were created"],"caveats":["verification failed"],"summary":"Verification failed after round 1"}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") && strings.Join(req.Args, " ") == "finalize owner/repo 87 needs-review --reviewer username":
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "set-status owner/repo 42 needs-review":
 			return nil
 		default:
 			t.Fatalf("unexpected command: %s", commandLine(req))
@@ -184,20 +213,469 @@ func TestRunStopsAfterInitSuccessWithNotImplemented(t *testing.T) {
 	})
 
 	code := app.Run(ctx)
-	if code != 1 {
-		t.Fatalf("expected exit code 1, got %d", code)
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d", code)
 	}
-	if stdout.Len() != 0 {
-		t.Fatalf("expected no stdout on partial runtime stop, got %q", stdout.String())
+	if strings.TrimSpace(stdout.String()) == "" {
+		t.Fatal("expected final state on stdout")
 	}
-	if !strings.Contains(stderr.String(), "CRITERIA phase is not implemented in the runtime orchestrator yet") {
-		t.Fatalf("expected not-implemented error, got %q", stderr.String())
+	if !strings.Contains(stdout.String(), `"phase":"DONE"`) {
+		t.Fatalf("expected DONE state on stdout, got %q", stdout.String())
 	}
-	if !strings.Contains(savedState, `"phase":"INIT"`) {
-		t.Fatalf("expected INIT state save, got %s", savedState)
+	if !strings.Contains(stdout.String(), `"finalize_verdict":"needs-review"`) {
+		t.Fatalf("expected needs-review finalize verdict, got %q", stdout.String())
 	}
-	if !containsCall(calls, "gh-pr-lifecycle.sh comment owner/repo 87") {
-		t.Fatalf("expected audit comment call, got %v", calls)
+	if !strings.Contains(runnerPayload, `"issueNumber":42`) || !strings.Contains(runnerPayload, `"prNumber":87`) {
+		t.Fatalf("unexpected issue-runner payload: %s", runnerPayload)
+	}
+	for _, phase := range []string{`"phase":"INIT"`, `"phase":"CRITERIA"`, `"phase":"DEVELOP"`, `"phase":"REVIEW"`, `"phase":"DECIDE"`, `"phase":"FINALIZE"`, `"phase":"DONE"`} {
+		if !containsAny(savedStates, phase) {
+			t.Fatalf("expected saved state containing %s, got %v", phase, savedStates)
+		}
+	}
+	if !containsCall(calls, "gh-pr-lifecycle.sh finalize owner/repo 87 needs-review --reviewer username") {
+		t.Fatalf("expected needs-review finalize call, got %v", calls)
+	}
+	if !containsCall(calls, "gh-issue-queue.sh set-status owner/repo 42 needs-review") {
+		t.Fatalf("expected needs-review status update, got %v", calls)
+	}
+	if !strings.Contains(stderr.String(), "DEVELOP: issue #42 requires deterministic needs-review handoff") {
+		t.Fatalf("expected develop handoff log, got %q", stderr.String())
+	}
+}
+
+func TestRunLowComplexityReviewReadyAutoMergesAndCleansUp(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+	writeRuntimeConfig(t, root)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	var savedStates []string
+	var calls []string
+
+	app := New([]string{"run", "owner/repo", "--issue", "42"}, []string{
+		"RUNOQ_ROOT=" + root,
+		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
+		"TARGET_ROOT=" + root,
+	}, root, &stdout, &stderr)
+	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+		calls = append(calls, commandLine(req))
+		switch {
+		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
+			_, _ = io.WriteString(req.Stdout, "fail\n")
+			return nil
+		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "configure_git_bot_identity"):
+			return nil
+		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "configure_git_bot_remote"):
+			return nil
+		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "runoq::claude_stream"):
+			if len(req.Args) < 7 {
+				t.Fatalf("expected claude invocation args, got %v", req.Args)
+			}
+			reviewOutputPath := req.Args[4]
+			if err := os.WriteFile(reviewOutputPath, []byte("REVIEW-TYPE: diff-review\nVERDICT: PASS\nSCORE: 42\nCHECKLIST:\n- Acceptance criteria satisfied.\n"), 0o644); err != nil {
+				t.Fatalf("write review output: %v", err)
+			}
+			return nil
+		case strings.HasSuffix(req.Name, "/dispatch-safety.sh") && strings.Join(req.Args, " ") == "reconcile owner/repo":
+			return nil
+		case req.Name == "gh" && strings.Join(req.Args, " ") == "issue view 42 --repo owner/repo --json title":
+			_, _ = io.WriteString(req.Stdout, `{"title":"Implement queue"}`)
+			return nil
+		case req.Name == "gh" && strings.Join(req.Args, " ") == "issue view 42 --repo owner/repo --json number,title,body,labels,url":
+			_, _ = io.WriteString(req.Stdout, `{"number":42,"title":"Implement queue","body":"<!-- runoq:meta\nestimated_complexity: low\ntype: task\n-->\n\n## Acceptance Criteria\n\n- [ ] Works.","labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/42"}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "list owner/repo runoq:ready":
+			_, _ = io.WriteString(req.Stdout, `[{"number":42,"title":"Implement queue","body":"body","url":"https://example.test/issues/42","estimated_complexity":"low","type":"task"}]`)
+			return nil
+		case strings.HasSuffix(req.Name, "/dispatch-safety.sh") && strings.Join(req.Args, " ") == "eligibility owner/repo 42":
+			_, _ = io.WriteString(req.Stdout, `{"allowed":true,"issue":42,"branch":"runoq/42-implement-queue","reasons":[]}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "set-status owner/repo 42 in-progress":
+			return nil
+		case strings.HasSuffix(req.Name, "/worktree.sh") && strings.Join(req.Args, " ") == "create 42 Implement queue":
+			_, _ = io.WriteString(req.Stdout, `{"branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42"}`)
+			return nil
+		case req.Name == "git" && strings.Join(req.Args, " ") == "-C /tmp/runoq-wt-42 commit --allow-empty -m runoq: begin work on #42":
+			return nil
+		case req.Name == "git" && strings.Join(req.Args, " ") == "-C /tmp/runoq-wt-42 push -u origin runoq/42-implement-queue":
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") && strings.Join(req.Args, " ") == "create owner/repo runoq/42-implement-queue 42 Implement queue":
+			_, _ = io.WriteString(req.Stdout, `{"url":"https://example.test/pull/87","number":87}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/state.sh") && strings.Join(req.Args, " ") == "save 42":
+			payload, _ := io.ReadAll(req.Stdin)
+			savedStates = append(savedStates, string(payload))
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") && strings.HasPrefix(strings.Join(req.Args, " "), "comment owner/repo 87 "):
+			return nil
+		case req.Name == "gh" && strings.Join(req.Args, " ") == "issue view 42 --repo owner/repo --json body":
+			_, _ = io.WriteString(req.Stdout, `{"body":"## Acceptance Criteria\n\n- [ ] Works."}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/issue-runner.sh") && strings.HasPrefix(strings.Join(req.Args, " "), "run "):
+			_, _ = io.WriteString(req.Stdout, `{"status":"review_ready","logDir":"log/issue-42","baselineHash":"base","headHash":"head","commitRange":"base..head","reviewLogPath":"log/issue-42/round-1-diff-review.md","specRequirements":"## Acceptance Criteria","changedFiles":["src/queue.ts"],"relatedFiles":["src/queue.ts"],"cumulativeTokens":12,"verificationPassed":true,"verificationFailures":[],"caveats":[],"summary":"Verification passed on round 1; ready for review"}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") && strings.Join(req.Args, " ") == "finalize owner/repo 87 auto-merge":
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "set-status owner/repo 42 done":
+			return nil
+		case strings.HasSuffix(req.Name, "/worktree.sh") && strings.Join(req.Args, " ") == "remove 42":
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s", commandLine(req))
+			return nil
+		}
+	})
+
+	code := app.Run(ctx)
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d", code)
+	}
+	if strings.TrimSpace(stdout.String()) == "" {
+		t.Fatal("expected final state on stdout")
+	}
+	if !strings.Contains(stdout.String(), `"phase":"DONE"`) {
+		t.Fatalf("expected DONE state on stdout, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"status":"review_ready"`) {
+		t.Fatalf("expected review_ready status on stdout, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"finalize_verdict":"auto-merge"`) {
+		t.Fatalf("expected auto-merge finalize verdict, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"issue_status":"done"`) {
+		t.Fatalf("expected done issue status, got %q", stdout.String())
+	}
+	for _, phase := range []string{`"phase":"DEVELOP"`, `"phase":"REVIEW"`, `"phase":"DECIDE"`, `"phase":"FINALIZE"`, `"phase":"DONE"`} {
+		if !containsAny(savedStates, phase) {
+			t.Fatalf("expected saved state containing %s, got %v", phase, savedStates)
+		}
+	}
+	if !containsCall(calls, "gh-pr-lifecycle.sh finalize owner/repo 87 auto-merge") {
+		t.Fatalf("expected auto-merge finalize call, got %v", calls)
+	}
+	if !containsCall(calls, "gh-issue-queue.sh set-status owner/repo 42 done") {
+		t.Fatalf("expected done status update, got %v", calls)
+	}
+	if !containsCall(calls, "worktree.sh remove 42") {
+		t.Fatalf("expected worktree removal call, got %v", calls)
+	}
+	if !strings.Contains(stderr.String(), "REVIEW: verdict=PASS score=42") {
+		t.Fatalf("expected parsed review verdict log, got %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "FINALIZE: removing worktree for issue #42 (auto-merged)") {
+		t.Fatalf("expected finalize cleanup log, got %q", stderr.String())
+	}
+}
+
+func TestRunLowComplexityIterateReentersDevelopWithChecklist(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+	writeRuntimeConfig(t, root)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	var savedStates []string
+	var calls []string
+	var runnerPayloads []string
+	reviewCalls := 0
+
+	app := New([]string{"run", "owner/repo", "--issue", "42"}, []string{
+		"RUNOQ_ROOT=" + root,
+		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
+		"TARGET_ROOT=" + root,
+	}, root, &stdout, &stderr)
+	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+		calls = append(calls, commandLine(req))
+		switch {
+		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
+			_, _ = io.WriteString(req.Stdout, "fail\n")
+			return nil
+		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "configure_git_bot_identity"):
+			return nil
+		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "configure_git_bot_remote"):
+			return nil
+		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "runoq::claude_stream"):
+			if len(req.Args) < 5 {
+				t.Fatalf("expected claude invocation args, got %v", req.Args)
+			}
+			reviewCalls++
+			reviewOutputPath := req.Args[4]
+			body := "REVIEW-TYPE: diff-review\nVERDICT: PASS\nSCORE: 42\nCHECKLIST:\n- Final checklist item.\n"
+			if reviewCalls == 1 {
+				body = "REVIEW-TYPE: diff-review\nVERDICT: ITERATE\nSCORE: 21\nCHECKLIST:\n- First checklist item.\n"
+			}
+			if err := os.WriteFile(reviewOutputPath, []byte(body), 0o644); err != nil {
+				t.Fatalf("write review output: %v", err)
+			}
+			return nil
+		case strings.HasSuffix(req.Name, "/dispatch-safety.sh") && strings.Join(req.Args, " ") == "reconcile owner/repo":
+			return nil
+		case req.Name == "gh" && strings.Join(req.Args, " ") == "issue view 42 --repo owner/repo --json title":
+			_, _ = io.WriteString(req.Stdout, `{"title":"Implement queue"}`)
+			return nil
+		case req.Name == "gh" && strings.Join(req.Args, " ") == "issue view 42 --repo owner/repo --json number,title,body,labels,url":
+			_, _ = io.WriteString(req.Stdout, `{"number":42,"title":"Implement queue","body":"<!-- runoq:meta\nestimated_complexity: low\ntype: task\n-->\n\n## Acceptance Criteria\n\n- [ ] Works.","labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/42"}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "list owner/repo runoq:ready":
+			_, _ = io.WriteString(req.Stdout, `[{"number":42,"title":"Implement queue","body":"body","url":"https://example.test/issues/42","estimated_complexity":"low","type":"task"}]`)
+			return nil
+		case strings.HasSuffix(req.Name, "/dispatch-safety.sh") && strings.Join(req.Args, " ") == "eligibility owner/repo 42":
+			_, _ = io.WriteString(req.Stdout, `{"allowed":true,"issue":42,"branch":"runoq/42-implement-queue","reasons":[]}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "set-status owner/repo 42 in-progress":
+			return nil
+		case strings.HasSuffix(req.Name, "/worktree.sh") && strings.Join(req.Args, " ") == "create 42 Implement queue":
+			_, _ = io.WriteString(req.Stdout, `{"branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42"}`)
+			return nil
+		case req.Name == "git" && strings.Join(req.Args, " ") == "-C /tmp/runoq-wt-42 commit --allow-empty -m runoq: begin work on #42":
+			return nil
+		case req.Name == "git" && strings.Join(req.Args, " ") == "-C /tmp/runoq-wt-42 push -u origin runoq/42-implement-queue":
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") && strings.Join(req.Args, " ") == "create owner/repo runoq/42-implement-queue 42 Implement queue":
+			_, _ = io.WriteString(req.Stdout, `{"url":"https://example.test/pull/87","number":87}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/state.sh") && strings.Join(req.Args, " ") == "save 42":
+			payload, _ := io.ReadAll(req.Stdin)
+			savedStates = append(savedStates, string(payload))
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") && strings.HasPrefix(strings.Join(req.Args, " "), "comment owner/repo 87 "):
+			return nil
+		case req.Name == "gh" && strings.Join(req.Args, " ") == "issue view 42 --repo owner/repo --json body":
+			_, _ = io.WriteString(req.Stdout, `{"body":"## Acceptance Criteria\n\n- [ ] Works."}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/issue-runner.sh") && strings.HasPrefix(strings.Join(req.Args, " "), "run "):
+			payloadFile := req.Args[1]
+			payloadBody, err := os.ReadFile(payloadFile)
+			if err != nil {
+				t.Fatalf("read payload: %v", err)
+			}
+			runnerPayloads = append(runnerPayloads, string(payloadBody))
+			if len(runnerPayloads) == 1 {
+				_, _ = io.WriteString(req.Stdout, `{"status":"review_ready","logDir":"log/issue-42","baselineHash":"base-1","headHash":"head-1","commitRange":"base-1..head-1","reviewLogPath":"log/issue-42/round-1-diff-review.md","specRequirements":"## Acceptance Criteria","changedFiles":["src/queue.ts"],"relatedFiles":["src/queue.ts"],"cumulativeTokens":12,"verificationPassed":true,"verificationFailures":[],"caveats":[],"summary":"Round 1 ready for review"}`)
+				return nil
+			}
+			_, _ = io.WriteString(req.Stdout, `{"status":"review_ready","logDir":"log/issue-42","baselineHash":"base-2","headHash":"head-2","commitRange":"base-2..head-2","reviewLogPath":"log/issue-42/round-2-diff-review.md","specRequirements":"## Acceptance Criteria","changedFiles":["src/queue.ts"],"relatedFiles":["src/queue.ts"],"cumulativeTokens":24,"verificationPassed":true,"verificationFailures":[],"caveats":[],"summary":"Round 2 ready for review"}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") && strings.Join(req.Args, " ") == "finalize owner/repo 87 auto-merge":
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "set-status owner/repo 42 done":
+			return nil
+		case strings.HasSuffix(req.Name, "/worktree.sh") && strings.Join(req.Args, " ") == "remove 42":
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s", commandLine(req))
+			return nil
+		}
+	})
+
+	code := app.Run(ctx)
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d", code)
+	}
+	if len(runnerPayloads) != 2 {
+		t.Fatalf("expected two issue-runner rounds, got %d payloads", len(runnerPayloads))
+	}
+	if strings.Contains(runnerPayloads[0], `"previousChecklist"`) {
+		t.Fatalf("did not expect previousChecklist in first round payload: %s", runnerPayloads[0])
+	}
+	if !strings.Contains(runnerPayloads[1], `"previousChecklist":"- First checklist item."`) {
+		t.Fatalf("expected checklist carry-over in second round payload, got %s", runnerPayloads[1])
+	}
+	if !strings.Contains(stdout.String(), `"phase":"DONE"`) {
+		t.Fatalf("expected DONE state on stdout, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"round":2`) {
+		t.Fatalf("expected final round 2 on stdout, got %q", stdout.String())
+	}
+	if !containsAny(savedStates, `"decision":"iterate"`) || !containsAny(savedStates, `"next_phase":"DEVELOP"`) {
+		t.Fatalf("expected iterate decision state, got %v", savedStates)
+	}
+	if !containsAny(savedStates, `"previous_checklist":"- First checklist item."`) {
+		t.Fatalf("expected saved previous_checklist state, got %v", savedStates)
+	}
+	if !containsCall(calls, "gh-pr-lifecycle.sh finalize owner/repo 87 auto-merge") {
+		t.Fatalf("expected auto-merge finalize call, got %v", calls)
+	}
+	if !containsCall(calls, "gh-issue-queue.sh set-status owner/repo 42 done") {
+		t.Fatalf("expected done status update, got %v", calls)
+	}
+	if !strings.Contains(stderr.String(), "DECIDE: verdict=ITERATE round=1/5") {
+		t.Fatalf("expected iterate decide log, got %q", stderr.String())
+	}
+}
+
+func TestRunNonLowComplexityCriteriaNeedsReviewHandoffSkipsDevelop(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+	writeRuntimeConfig(t, root)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	var savedStates []string
+	var calls []string
+
+	app := New([]string{"run", "owner/repo", "--issue", "42"}, []string{
+		"RUNOQ_ROOT=" + root,
+		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
+		"TARGET_ROOT=" + root,
+	}, root, &stdout, &stderr)
+	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+		calls = append(calls, commandLine(req))
+		switch {
+		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
+			_, _ = io.WriteString(req.Stdout, "fail\n")
+			return nil
+		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "configure_git_bot_identity"):
+			return nil
+		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "configure_git_bot_remote"):
+			return nil
+		case strings.HasSuffix(req.Name, "/dispatch-safety.sh") && strings.Join(req.Args, " ") == "reconcile owner/repo":
+			return nil
+		case req.Name == "gh" && strings.Join(req.Args, " ") == "issue view 42 --repo owner/repo --json title":
+			_, _ = io.WriteString(req.Stdout, `{"title":"Coordinate migration"}`)
+			return nil
+		case req.Name == "gh" && strings.Join(req.Args, " ") == "issue view 42 --repo owner/repo --json number,title,body,labels,url":
+			_, _ = io.WriteString(req.Stdout, `{"number":42,"title":"Coordinate migration","body":"<!-- runoq:meta\nestimated_complexity: medium\ntype: task\n-->\n\n## Acceptance Criteria\n\n- [ ] Coordinate migration.","labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/42"}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "list owner/repo runoq:ready":
+			_, _ = io.WriteString(req.Stdout, `[{"number":42,"title":"Coordinate migration","body":"body","url":"https://example.test/issues/42","estimated_complexity":"medium","type":"task"}]`)
+			return nil
+		case strings.HasSuffix(req.Name, "/dispatch-safety.sh") && strings.Join(req.Args, " ") == "eligibility owner/repo 42":
+			_, _ = io.WriteString(req.Stdout, `{"allowed":true,"issue":42,"branch":"runoq/42-coordinate-migration","reasons":[]}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "set-status owner/repo 42 in-progress":
+			return nil
+		case strings.HasSuffix(req.Name, "/worktree.sh") && strings.Join(req.Args, " ") == "create 42 Coordinate migration":
+			_, _ = io.WriteString(req.Stdout, `{"branch":"runoq/42-coordinate-migration","worktree":"/tmp/runoq-wt-42"}`)
+			return nil
+		case req.Name == "git" && strings.Join(req.Args, " ") == "-C /tmp/runoq-wt-42 commit --allow-empty -m runoq: begin work on #42":
+			return nil
+		case req.Name == "git" && strings.Join(req.Args, " ") == "-C /tmp/runoq-wt-42 push -u origin runoq/42-coordinate-migration":
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") && strings.Join(req.Args, " ") == "create owner/repo runoq/42-coordinate-migration 42 Coordinate migration":
+			_, _ = io.WriteString(req.Stdout, `{"url":"https://example.test/pull/87","number":87}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/state.sh") && strings.Join(req.Args, " ") == "save 42":
+			payload, _ := io.ReadAll(req.Stdin)
+			savedStates = append(savedStates, string(payload))
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") && strings.HasPrefix(strings.Join(req.Args, " "), "comment owner/repo 87 "):
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") && strings.Join(req.Args, " ") == "finalize owner/repo 87 needs-review --reviewer username":
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "set-status owner/repo 42 needs-review":
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s", commandLine(req))
+			return nil
+		}
+	})
+
+	code := app.Run(ctx)
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d", code)
+	}
+	if strings.TrimSpace(stdout.String()) == "" {
+		t.Fatal("expected final state on stdout")
+	}
+	if !strings.Contains(stdout.String(), `"phase":"DONE"`) {
+		t.Fatalf("expected DONE state on stdout, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"finalize_verdict":"needs-review"`) {
+		t.Fatalf("expected needs-review finalize verdict, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"issue_status":"needs-review"`) {
+		t.Fatalf("expected needs-review issue status, got %q", stdout.String())
+	}
+	for _, phase := range []string{`"phase":"INIT"`, `"phase":"CRITERIA"`, `"phase":"REVIEW"`, `"phase":"DECIDE"`, `"phase":"FINALIZE"`, `"phase":"DONE"`} {
+		if !containsAny(savedStates, phase) {
+			t.Fatalf("expected saved state containing %s, got %v", phase, savedStates)
+		}
+	}
+	if containsAny(savedStates, `"phase":"DEVELOP"`) {
+		t.Fatalf("did not expect DEVELOP state for non-low complexity criteria handoff, got %v", savedStates)
+	}
+	if containsCall(calls, "issue-runner.sh run") {
+		t.Fatalf("did not expect issue-runner invocation, got %v", calls)
+	}
+	if !containsCall(calls, "gh-pr-lifecycle.sh finalize owner/repo 87 needs-review --reviewer username") {
+		t.Fatalf("expected needs-review finalize call, got %v", calls)
+	}
+	if !containsCall(calls, "gh-issue-queue.sh set-status owner/repo 42 needs-review") {
+		t.Fatalf("expected needs-review status update, got %v", calls)
+	}
+	if !strings.Contains(stderr.String(), "CRITERIA: issue #42 criteria for complexity=medium type=task requires human review in the current runtime slice") {
+		t.Fatalf("expected criteria handoff log, got %q", stderr.String())
+	}
+}
+
+func TestRunQueueDryRunSelectsIssueAndLogsSkippedDetails(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+	writeRuntimeConfig(t, root)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	var calls []string
+
+	app := New([]string{"run", "owner/repo", "--dry-run"}, []string{
+		"RUNOQ_ROOT=" + root,
+		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
+		"TARGET_ROOT=" + root,
+	}, root, &stdout, &stderr)
+	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+		calls = append(calls, commandLine(req))
+		switch {
+		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
+			_, _ = io.WriteString(req.Stdout, "fail\n")
+			return nil
+		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "configure_git_bot_identity"):
+			return nil
+		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "configure_git_bot_remote"):
+			return nil
+		case strings.HasSuffix(req.Name, "/dispatch-safety.sh") && strings.Join(req.Args, " ") == "reconcile owner/repo":
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "next owner/repo runoq:ready":
+			_, _ = io.WriteString(req.Stdout, `{"issue":{"number":42,"title":"Implement queue"},"skipped":[{"number":41,"title":"Epic","blocked_reasons":["epic issues are not directly dispatchable"]}]}`)
+			return nil
+		case req.Name == "gh" && strings.Join(req.Args, " ") == "issue view 42 --repo owner/repo --json number,title,body,labels,url":
+			_, _ = io.WriteString(req.Stdout, `{"number":42,"title":"Implement queue","body":"<!-- runoq:meta\nestimated_complexity: low\ntype: task\n-->\n","labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/42"}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "list owner/repo runoq:ready":
+			_, _ = io.WriteString(req.Stdout, `[{"number":42,"title":"Implement queue","body":"body","url":"https://example.test/issues/42","estimated_complexity":"low","type":"task"}]`)
+			return nil
+		case strings.HasSuffix(req.Name, "/dispatch-safety.sh") && strings.Join(req.Args, " ") == "eligibility owner/repo 42":
+			_, _ = io.WriteString(req.Stdout, `{"allowed":true,"issue":42,"branch":"runoq/42-implement-queue","reasons":[]}`)
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s", commandLine(req))
+			return nil
+		}
+	})
+
+	code := app.Run(ctx)
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d", code)
+	}
+	if strings.TrimSpace(stdout.String()) != `{"branch":"runoq/42-implement-queue","dry_run":true,"issue":42,"phase":"INIT"}` {
+		t.Fatalf("unexpected stdout: %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "Queue result: 1 actionable issue found, 1 skipped") {
+		t.Fatalf("expected queue summary, got %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "Skipped details: #41 — epic issues are not directly dispatchable") {
+		t.Fatalf("expected skipped details, got %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "Processing issue #42: Implement queue") {
+		t.Fatalf("expected processing log, got %q", stderr.String())
+	}
+	if !containsCall(calls, "gh-issue-queue.sh next owner/repo runoq:ready") {
+		t.Fatalf("expected queue selection call, got %v", calls)
+	}
+	if !containsCall(calls, "dispatch-safety.sh eligibility owner/repo 42") {
+		t.Fatalf("expected init dry-run eligibility call, got %v", calls)
 	}
 }
 
@@ -326,7 +804,7 @@ func writeRuntimeConfig(t *testing.T, root string) {
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatalf("mkdir config: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(configDir, "runoq.json"), []byte(`{"labels":{"ready":"runoq:ready"},"identity":{"handle":"runoq"}}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(configDir, "runoq.json"), []byte(`{"labels":{"ready":"runoq:ready"},"identity":{"handle":"runoq"},"autoMerge":{"enabled":true,"maxComplexity":"low"},"reviewers":["username"],"maxRounds":5,"maxTokenBudget":500000}`), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 }
@@ -338,6 +816,15 @@ func commandLine(req commandRequest) string {
 func containsCall(calls []string, needle string) bool {
 	for _, call := range calls {
 		if strings.Contains(call, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsAny(values []string, needle string) bool {
+	for _, value := range values {
+		if strings.Contains(value, needle) {
 			return true
 		}
 	}

@@ -13,8 +13,9 @@ In progress. The current landed fact set is:
 - current slice: runtime orchestrator low-complexity `run --issue` composition now progresses past `INIT` through `CRITERIA`, `DEVELOP`, and the bounded success path `REVIEW -> DECIDE -> FINALIZE`, using the runtime `issue-runner.sh run <payload-json-file>` boundary for develop, preserving the existing deterministic `needs-review` handoff for non-`review_ready` outcomes, and applying the current low-complexity auto-merge decision table plus done-status/worktree cleanup on successful finalize
 - current slice: runtime orchestrator non-low-complexity `CRITERIA` handling now progresses past the former not-implemented boundary by recording deterministic `CRITERIA` state and taking an explicit bounded handoff directly to `REVIEW -> DECIDE -> FINALIZE` with `needs-review`, without porting the broader iterative `DECIDE -> DEVELOP` loop or epic `INTEGRATE`
 - current slice: runtime orchestrator `REVIEW` after `review_ready` now follows the real diff-review boundary instead of inferred success, by invoking `diff-reviewer` via `runoq::claude_stream`, parsing verdict data from `review_log_path` with claude-output fallback, persisting deterministic `REVIEW` state, and then continuing through bounded `DECIDE -> FINALIZE`
+- current slice: runtime orchestrator low-complexity `DECIDE -> DEVELOP` iterative loop is now bounded and runtime-backed: `DECIDE` emits `iterate` when verdict is `ITERATE` and rounds remain, the orchestrator re-enters `DEVELOP` with persisted checklist context (`review_checklist` carried into `previous_checklist`), and the loop remains bounded by `maxRounds` before deterministic `FINALIZE` handoff
 
-Still pending: the runtime orchestrator does not yet own the broader iterative `DECIDE -> DEVELOP` loop or epic `INTEGRATE` flow. Those remain part of the remaining M5/M6 work.
+Still pending: the runtime orchestrator does not yet own epic `INTEGRATE` flow parity. That remains part of the remaining M5/M6 work.
 
 ## Purpose
 
