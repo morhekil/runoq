@@ -679,6 +679,238 @@ func TestRunQueueDryRunSelectsIssueAndLogsSkippedDetails(t *testing.T) {
 	}
 }
 
+func TestPhaseIntegratePendingPersistsIntegratePendingDecision(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+	writeRuntimeConfig(t, root)
+
+	var savedStates []string
+	var calls []string
+
+	app := New(nil, []string{
+		"RUNOQ_ROOT=" + root,
+		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
+	}, root, io.Discard, io.Discard)
+	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+		calls = append(calls, commandLine(req))
+		switch {
+		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "epic-status owner/repo 41":
+			_, _ = io.WriteString(req.Stdout, `{"all_done":false,"children":[42],"pending":[42]}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/state.sh") && strings.Join(req.Args, " ") == "save 41":
+			payload, _ := io.ReadAll(req.Stdin)
+			savedStates = append(savedStates, string(payload))
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s", commandLine(req))
+			return nil
+		}
+	})
+
+	stateJSON, err := app.phaseIntegrate(ctx, root, app.env, "owner/repo", 41, `{"phase":"DECIDE","next_phase":"INTEGRATE"}`, "Coordinate migration")
+	if err != nil {
+		t.Fatalf("phaseIntegrate returned error: %v", err)
+	}
+	if !strings.Contains(stateJSON, `"phase":"DECIDE"`) {
+		t.Fatalf("expected DECIDE phase, got %s", stateJSON)
+	}
+	if !strings.Contains(stateJSON, `"decision":"integrate-pending"`) {
+		t.Fatalf("expected integrate-pending decision, got %s", stateJSON)
+	}
+	if !containsAny(savedStates, `"decision":"integrate-pending"`) {
+		t.Fatalf("expected integrate-pending saved state, got %v", savedStates)
+	}
+	if containsCall(calls, "set-status owner/repo 41") {
+		t.Fatalf("did not expect set-status mutation for pending integrate, got %v", calls)
+	}
+}
+
+func TestPhaseIntegrateSuccessWithCriteriaCommitMarksDone(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+	writeRuntimeConfig(t, root)
+
+	var savedStates []string
+	var calls []string
+
+	app := New(nil, []string{
+		"RUNOQ_ROOT=" + root,
+		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
+	}, root, io.Discard, io.Discard)
+	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+		calls = append(calls, commandLine(req))
+		switch {
+		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "epic-status owner/repo 41":
+			_, _ = io.WriteString(req.Stdout, `{"all_done":true,"children":[42],"pending":[]}`)
+			return nil
+		case req.Name == "gh" && strings.Join(req.Args, " ") == "issue view 41 --repo owner/repo --json title":
+			_, _ = io.WriteString(req.Stdout, `{"title":"Coordinate migration"}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/worktree.sh") && strings.Join(req.Args, " ") == "create 41 Coordinate migration-integrate":
+			_, _ = io.WriteString(req.Stdout, `{"branch":"runoq/41-coordinate-migration-integrate","worktree":"/tmp/runoq-wt-41-integrate"}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/verify.sh") && strings.Join(req.Args, " ") == "integrate /tmp/runoq-wt-41-integrate criteria-abc":
+			_, _ = io.WriteString(req.Stdout, `{"ok":true}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "set-status owner/repo 41 done":
+			return nil
+		case strings.HasSuffix(req.Name, "/state.sh") && strings.Join(req.Args, " ") == "save 41":
+			payload, _ := io.ReadAll(req.Stdin)
+			savedStates = append(savedStates, string(payload))
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s", commandLine(req))
+			return nil
+		}
+	})
+
+	stateJSON, err := app.phaseIntegrate(ctx, root, app.env, "owner/repo", 41, `{"phase":"DECIDE","next_phase":"INTEGRATE","criteria_commit":"criteria-abc"}`, "Coordinate migration")
+	if err != nil {
+		t.Fatalf("phaseIntegrate returned error: %v", err)
+	}
+	if !strings.Contains(stateJSON, `"phase":"DONE"`) {
+		t.Fatalf("expected DONE phase, got %s", stateJSON)
+	}
+	if !containsCall(calls, "verify.sh integrate /tmp/runoq-wt-41-integrate criteria-abc") {
+		t.Fatalf("expected verify integrate call, got %v", calls)
+	}
+	if !containsCall(calls, "gh-issue-queue.sh set-status owner/repo 41 done") {
+		t.Fatalf("expected done status update, got %v", calls)
+	}
+	if !containsAny(savedStates, `"phase":"INTEGRATE"`) || !containsAny(savedStates, `"phase":"DONE"`) {
+		t.Fatalf("expected INTEGRATE and DONE states, got %v", savedStates)
+	}
+}
+
+func TestPhaseIntegrateFailureMarksNeedsReviewAndFailed(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+	writeRuntimeConfig(t, root)
+
+	var savedStates []string
+	var calls []string
+
+	app := New(nil, []string{
+		"RUNOQ_ROOT=" + root,
+		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
+	}, root, io.Discard, io.Discard)
+	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+		calls = append(calls, commandLine(req))
+		switch {
+		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "epic-status owner/repo 41":
+			_, _ = io.WriteString(req.Stdout, `{"all_done":true,"children":[42],"pending":[]}`)
+			return nil
+		case req.Name == "gh" && strings.Join(req.Args, " ") == "issue view 41 --repo owner/repo --json title":
+			_, _ = io.WriteString(req.Stdout, `{"title":"Coordinate migration"}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/worktree.sh") && strings.Join(req.Args, " ") == "create 41 Coordinate migration-integrate":
+			_, _ = io.WriteString(req.Stdout, `{"branch":"runoq/41-coordinate-migration-integrate","worktree":"/tmp/runoq-wt-41-integrate"}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/verify.sh") && strings.Join(req.Args, " ") == "integrate /tmp/runoq-wt-41-integrate criteria-abc":
+			_, _ = io.WriteString(req.Stdout, `{"ok":false,"failures":["criteria drift","tests failed"]}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "set-status owner/repo 41 needs-review":
+			return nil
+		case strings.HasSuffix(req.Name, "/state.sh") && strings.Join(req.Args, " ") == "save 41":
+			payload, _ := io.ReadAll(req.Stdin)
+			savedStates = append(savedStates, string(payload))
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s", commandLine(req))
+			return nil
+		}
+	})
+
+	stateJSON, err := app.phaseIntegrate(ctx, root, app.env, "owner/repo", 41, `{"phase":"DECIDE","next_phase":"INTEGRATE","criteria_commit":"criteria-abc"}`, "Coordinate migration")
+	if err != nil {
+		t.Fatalf("phaseIntegrate returned error: %v", err)
+	}
+	if !strings.Contains(stateJSON, `"phase":"FAILED"`) {
+		t.Fatalf("expected FAILED phase, got %s", stateJSON)
+	}
+	if !containsCall(calls, "gh-issue-queue.sh set-status owner/repo 41 needs-review") {
+		t.Fatalf("expected needs-review status update, got %v", calls)
+	}
+	if !containsAny(savedStates, `"integrate_failures":"criteria drift, tests failed"`) {
+		t.Fatalf("expected integrate failures in saved state, got %v", savedStates)
+	}
+}
+
+func TestRunQueueInvokesEpicSweepIntegrateForEligibleEpic(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+	writeRuntimeConfig(t, root)
+
+	var stderr bytes.Buffer
+	var savedStates []string
+	var calls []string
+	epicStatusCalls := 0
+
+	app := New([]string{"run", "owner/repo"}, []string{
+		"RUNOQ_ROOT=" + root,
+		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
+		"TARGET_ROOT=" + root,
+	}, root, io.Discard, &stderr)
+	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+		calls = append(calls, commandLine(req))
+		switch {
+		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
+			_, _ = io.WriteString(req.Stdout, "fail\n")
+			return nil
+		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "configure_git_bot_identity"):
+			return nil
+		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "configure_git_bot_remote"):
+			return nil
+		case strings.HasSuffix(req.Name, "/dispatch-safety.sh") && strings.Join(req.Args, " ") == "reconcile owner/repo":
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "next owner/repo runoq:ready":
+			_, _ = io.WriteString(req.Stdout, `{"issue":null,"skipped":[{"number":41,"title":"Coordinate migration","blocked_reasons":["epic issues are not directly dispatchable"]}]}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "list owner/repo runoq:ready":
+			_, _ = io.WriteString(req.Stdout, `[{"number":41,"title":"Coordinate migration","type":"epic"}]`)
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "epic-status owner/repo 41":
+			epicStatusCalls++
+			_, _ = io.WriteString(req.Stdout, `{"all_done":true,"children":[42],"pending":[]}`)
+			return nil
+		case req.Name == "gh" && strings.Join(req.Args, " ") == "issue view 41 --repo owner/repo --json title":
+			_, _ = io.WriteString(req.Stdout, `{"title":"Coordinate migration"}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/state.sh") && strings.Join(req.Args, " ") == "load 41":
+			return fakeExitError{code: 1}
+		case strings.HasSuffix(req.Name, "/worktree.sh") && strings.Join(req.Args, " ") == "create 41 Coordinate migration-integrate":
+			_, _ = io.WriteString(req.Stdout, `{"branch":"runoq/41-coordinate-migration-integrate","worktree":"/tmp/runoq-wt-41-integrate"}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "set-status owner/repo 41 done":
+			return nil
+		case strings.HasSuffix(req.Name, "/state.sh") && strings.Join(req.Args, " ") == "save 41":
+			payload, _ := io.ReadAll(req.Stdin)
+			savedStates = append(savedStates, string(payload))
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s", commandLine(req))
+			return nil
+		}
+	})
+
+	code := app.Run(ctx)
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d", code)
+	}
+	if epicStatusCalls != 2 {
+		t.Fatalf("expected two epic-status calls (sweep + integrate), got %d", epicStatusCalls)
+	}
+	if !containsCall(calls, "gh-issue-queue.sh set-status owner/repo 41 done") {
+		t.Fatalf("expected done status update for epic, got %v", calls)
+	}
+	if !containsAny(savedStates, `"phase":"INTEGRATE"`) || !containsAny(savedStates, `"phase":"DONE"`) {
+		t.Fatalf("expected INTEGRATE and DONE states for epic sweep, got %v", savedStates)
+	}
+	if !strings.Contains(stderr.String(), "Epic sweep: found 1 epic(s) to evaluate") {
+		t.Fatalf("expected epic sweep log, got %q", stderr.String())
+	}
+}
+
 func TestMentionTriageReturnsEmptyStdoutWhenPollMentionsIsEmpty(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()

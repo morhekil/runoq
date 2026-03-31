@@ -886,6 +886,88 @@ EOF
   [ "$shell_gh_log" = "$runtime_gh_log" ]
 }
 
+@test "acceptance parity: orchestrator run queue performs epic integrate sweep when children are done" {
+  shell_remote="$TEST_TMPDIR/shell-remote.git"
+  shell_project="$TEST_TMPDIR/shell-project"
+  runtime_remote="$TEST_TMPDIR/runtime-remote.git"
+  runtime_project="$TEST_TMPDIR/runtime-project"
+  prepare_orchestrator_repo "$shell_remote" "$shell_project"
+  rm -rf "$TEST_TMPDIR/seed-repo"
+  prepare_orchestrator_repo "$runtime_remote" "$runtime_project"
+  prepare_runtime_bin
+
+  config_path="$TEST_TMPDIR/runoq.json"
+  write_runtime_orchestrator_config "$config_path"
+
+  epic_body="$(epic_issue_body)"
+  ready_epic_queue="$(jq -n --arg epic_body "$epic_body" '[
+    {number: 41, title: "Coordinate migration", body: $epic_body, labels: [{name:"runoq:ready"}], url: "https://example.test/issues/41"}
+  ]')"
+
+  shell_scenario="$TEST_TMPDIR/shell-queue-epic-integrate-scenario.json"
+  runtime_scenario="$TEST_TMPDIR/runtime-queue-epic-integrate-scenario.json"
+  write_fake_gh_scenario "$shell_scenario" <<EOF
+[
+  {
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:in-progress"],
+    "stdout": "[]"
+  },
+  {
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:ready"],
+    "stdout": $(printf '%s' "$ready_epic_queue")
+  },
+  {
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:ready"],
+    "stdout": $(printf '%s' "$ready_epic_queue")
+  },
+  {
+    "contains": ["api", "repos/owner/repo/issues/41/sub_issues", "--paginate"],
+    "stdout": "[]"
+  },
+  {
+    "contains": ["api", "repos/owner/repo/issues/41/sub_issues", "--paginate"],
+    "stdout": "[]"
+  },
+  {
+    "contains": ["issue", "view", "41", "--repo", "owner/repo", "--json", "title"],
+    "stdout": "{\"title\":\"Coordinate migration\"}"
+  },
+  {
+    "contains": ["issue", "view", "41", "--repo", "owner/repo", "--json", "labels"],
+    "stdout": "{\"labels\":[{\"name\":\"runoq:ready\"}]}"
+  },
+  {
+    "contains": ["issue", "edit", "41", "--repo", "owner/repo", "--remove-label", "runoq:ready", "--add-label", "runoq:done"],
+    "stdout": ""
+  }
+]
+EOF
+  cp "$shell_scenario" "$runtime_scenario"
+
+  shell_log="$TEST_TMPDIR/shell-queue-epic-integrate-gh.log"
+  runtime_log="$TEST_TMPDIR/runtime-queue-epic-integrate-gh.log"
+
+  run bash -lc 'cd "'"$shell_project"'" && TARGET_ROOT="'"$shell_project"'" RUNOQ_REPO="owner/repo" REPO="owner/repo" RUNOQ_CONFIG="'"$config_path"'" RUNOQ_ORCHESTRATOR_IMPLEMENTATION=shell FAKE_GH_SCENARIO="'"$shell_scenario"'" FAKE_GH_STATE="'"$TEST_TMPDIR"'/shell-queue-epic-integrate-gh.state" FAKE_GH_LOG="'"$shell_log"'" GH_BIN="'"$RUNOQ_ROOT"'/test/helpers/gh" "'"$RUNOQ_ROOT"'/scripts/orchestrator.sh" run owner/repo 2>"'"$TEST_TMPDIR"'/shell-queue-epic-integrate.err"'
+  shell_status="$status"
+  shell_stdout="$output"
+
+  run bash -lc 'cd "'"$runtime_project"'" && TARGET_ROOT="'"$runtime_project"'" RUNOQ_REPO="owner/repo" REPO="owner/repo" RUNOQ_CONFIG="'"$config_path"'" RUNOQ_RUNTIME_BIN="'"$RUNOQ_RUNTIME_BIN"'" RUNOQ_ORCHESTRATOR_IMPLEMENTATION=runtime FAKE_GH_SCENARIO="'"$runtime_scenario"'" FAKE_GH_STATE="'"$TEST_TMPDIR"'/runtime-queue-epic-integrate-gh.state" FAKE_GH_LOG="'"$runtime_log"'" GH_BIN="'"$RUNOQ_ROOT"'/test/helpers/gh" "'"$RUNOQ_ROOT"'/scripts/orchestrator.sh" run owner/repo 2>"'"$TEST_TMPDIR"'/runtime-queue-epic-integrate.err"'
+  runtime_status="$status"
+  runtime_stdout="$output"
+
+  [ "$shell_status" -eq 0 ]
+  [ "$runtime_status" -eq 0 ]
+  [ "$(normalize_json_output "$shell_stdout")" = "$(normalize_json_output "$runtime_stdout")" ]
+
+  run cat "$shell_log"
+  shell_gh_log="$(normalize_gh_log "$output")"
+  run cat "$runtime_log"
+  runtime_gh_log="$(normalize_gh_log "$output")"
+  [ "$shell_gh_log" = "$runtime_gh_log" ]
+  [[ "$runtime_gh_log" == *"api repos/owner/repo/issues/41/sub_issues --paginate"* ]]
+  [[ "$runtime_gh_log" == *"issue edit 41 --repo owner/repo --remove-label runoq:ready --add-label runoq:done"* ]]
+}
+
 @test "acceptance parity: mention-triage matches poll contract for zero-mention scenario" {
   shell_remote="$TEST_TMPDIR/shell-remote.git"
   shell_project="$TEST_TMPDIR/shell-project"

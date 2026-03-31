@@ -101,6 +101,22 @@ type queueSelectionIssue struct {
 	BlockedReasons []string `json:"blocked_reasons"`
 }
 
+type queueListedIssue struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	Type   string `json:"type"`
+}
+
+type epicStatusResult struct {
+	AllDone bool  `json:"all_done"`
+	Pending []int `json:"pending"`
+}
+
+type verifyIntegrateResult struct {
+	OK       bool     `json:"ok"`
+	Failures []string `json:"failures"`
+}
+
 type issueRunnerResult struct {
 	Status               string   `json:"status"`
 	LogDir               string   `json:"logDir"`
@@ -222,12 +238,6 @@ func (a *App) runCommandEntry(ctx context.Context, root string, env []string, ar
 		}
 	}
 
-	if issueNumber == "" {
-		if !dryRun {
-			return a.fail("queue mode is not implemented in the runtime orchestrator yet")
-		}
-	}
-
 	if issueNumber != "" {
 		if _, err := strconv.Atoi(issueNumber); err != nil {
 			return a.fail("--issue requires a numeric value")
@@ -253,10 +263,15 @@ func (a *App) runCommandEntry(ctx context.Context, root string, env []string, ar
 	}
 
 	a.logInfo("Running reconciliation")
-	_ = a.runScript(ctx, root, env, "dispatch-safety.sh", []string{"reconcile", repo}, nil, io.Discard, io.Discard)
+	reconcileEnv := envSet(env, "RUNOQ_DISPATCH_SAFETY_IMPLEMENTATION", "shell")
+	reconcileEnv = envSet(reconcileEnv, "RUNOQ_NO_AUTO_TOKEN", "1")
+	_ = a.runScript(ctx, root, reconcileEnv, "dispatch-safety.sh", []string{"reconcile", repo}, nil, io.Discard, io.Discard)
 
 	if issueNumber == "" {
-		return a.runQueueDryRun(ctx, root, env, repo)
+		if dryRun {
+			return a.runQueueDryRun(ctx, root, env, repo)
+		}
+		return a.runQueue(ctx, root, env, repo)
 	}
 
 	issue, _ := strconv.Atoi(issueNumber)
@@ -280,6 +295,73 @@ func (a *App) runCommandEntry(ctx context.Context, root string, env []string, ar
 	return 0
 }
 
+func (a *App) runQueue(ctx context.Context, root string, env []string, repo string) int {
+	cfg, err := a.loadConfig(root, env)
+	if err != nil {
+		return a.fail(err.Error())
+	}
+
+	queueEnv := envSet(env, "RUNOQ_ISSUE_QUEUE_IMPLEMENTATION", "shell")
+	queueEnv = envSet(queueEnv, "RUNOQ_LOG", "1")
+	queueEnv = envSet(queueEnv, "RUNOQ_NO_AUTO_TOKEN", "1")
+
+	for {
+		queueOut, queueStderr, err := a.scriptOutputWithStderr(ctx, root, queueEnv, "gh-issue-queue.sh", []string{"next", repo, cfg.Labels.Ready}, nil)
+		if strings.TrimSpace(queueStderr) != "" {
+			_, _ = fmt.Fprintln(a.stderr, queueStderr)
+		}
+		if err != nil {
+			return commandExitCode(err)
+		}
+
+		var selection queueSelectionResult
+		if err := json.Unmarshal([]byte(queueOut), &selection); err != nil {
+			return a.failf("gh-issue-queue.sh next returned invalid JSON: %v", err)
+		}
+
+		totalSkipped := len(selection.Skipped)
+		skippedSummary := formatSkippedSummary(selection.Skipped)
+		if selection.Issue == nil {
+			a.logInfo("Queue result: 0 actionable issues, %d skipped", totalSkipped)
+			if totalSkipped > 0 {
+				a.logInfo("Skipped details: %s", skippedSummary)
+			}
+			break
+		}
+
+		a.logInfo("Queue result: 1 actionable issue found, %d skipped", totalSkipped)
+		if totalSkipped > 0 {
+			a.logInfo("Skipped details: %s", skippedSummary)
+		}
+
+		title := strings.TrimSpace(selection.Issue.Title)
+		if title == "" {
+			title = "untitled"
+		}
+		a.logInfo("Processing issue #%d: %s", selection.Issue.Number, title)
+
+		stateJSON, err := a.runSingleIssue(ctx, root, queueEnv, repo, selection.Issue.Number, false, title)
+		if err != nil {
+			a.logError("Issue #%d failed: %v", selection.Issue.Number, err)
+			return 1
+		}
+
+		phase := "unknown"
+		var state map[string]any
+		if err := json.Unmarshal([]byte(stateJSON), &state); err == nil {
+			if value, ok := state["phase"].(string); ok && strings.TrimSpace(value) != "" {
+				phase = value
+			}
+		}
+		a.logInfo("Issue #%d succeeded — terminal phase: %s", selection.Issue.Number, phase)
+	}
+
+	if err := a.runEpicSweep(ctx, root, queueEnv, repo, cfg.Labels.Ready); err != nil {
+		return a.fail(err.Error())
+	}
+	return 0
+}
+
 func (a *App) runQueueDryRun(ctx context.Context, root string, env []string, repo string) int {
 	cfg, err := a.loadConfig(root, env)
 	if err != nil {
@@ -288,6 +370,7 @@ func (a *App) runQueueDryRun(ctx context.Context, root string, env []string, rep
 
 	queueEnv := envSet(env, "RUNOQ_ISSUE_QUEUE_IMPLEMENTATION", "shell")
 	queueEnv = envSet(queueEnv, "RUNOQ_LOG", "1")
+	queueEnv = envSet(queueEnv, "RUNOQ_NO_AUTO_TOKEN", "1")
 	queueOut, queueStderr, err := a.scriptOutputWithStderr(ctx, root, queueEnv, "gh-issue-queue.sh", []string{"next", repo, cfg.Labels.Ready}, nil)
 	if strings.TrimSpace(queueStderr) != "" {
 		_, _ = fmt.Fprintln(a.stderr, queueStderr)
@@ -403,6 +486,223 @@ func (a *App) runSingleIssue(ctx context.Context, root string, env []string, rep
 	}
 }
 
+func (a *App) runEpicSweep(ctx context.Context, root string, env []string, repo string, readyLabel string) error {
+	issuesOut, err := a.scriptOutput(ctx, root, env, "gh-issue-queue.sh", []string{"list", repo, readyLabel}, nil)
+	if err != nil {
+		return err
+	}
+
+	var issues []queueListedIssue
+	if strings.TrimSpace(issuesOut) != "" {
+		if err := json.Unmarshal([]byte(issuesOut), &issues); err != nil {
+			return fmt.Errorf("gh-issue-queue.sh list returned invalid JSON: %v", err)
+		}
+	}
+
+	epics := make([]queueListedIssue, 0, len(issues))
+	for _, issue := range issues {
+		if strings.TrimSpace(issue.Type) == "epic" {
+			epics = append(epics, issue)
+		}
+	}
+	if len(epics) == 0 {
+		return nil
+	}
+
+	a.logInfo("Epic sweep: found %d epic(s) to evaluate", len(epics))
+	for _, epic := range epics {
+		epicStatusOut, err := a.scriptOutput(ctx, root, env, "gh-issue-queue.sh", []string{"epic-status", repo, strconv.Itoa(epic.Number)}, nil)
+		if err != nil {
+			a.logError("Epic sweep: failed epic-status for epic #%d", epic.Number)
+			continue
+		}
+
+		var epicStatus epicStatusResult
+		if err := json.Unmarshal([]byte(epicStatusOut), &epicStatus); err != nil {
+			a.logError("Epic sweep: invalid epic-status payload for epic #%d", epic.Number)
+			continue
+		}
+
+		epicTitle := strings.TrimSpace(epic.Title)
+		if epicTitle == "" {
+			epicTitle = "untitled"
+		}
+		if !epicStatus.AllDone {
+			pending := make([]string, 0, len(epicStatus.Pending))
+			for _, number := range epicStatus.Pending {
+				pending = append(pending, "#"+strconv.Itoa(number))
+			}
+			a.logInfo("Epic sweep: epic #%d (%s) — children pending: %s", epic.Number, epicTitle, strings.Join(pending, ", "))
+			continue
+		}
+
+		a.logInfo("Epic sweep: all children done for epic #%d (%s) — running integration", epic.Number, epicTitle)
+
+		epicState, err := a.scriptOutput(ctx, root, env, "state.sh", []string{"load", strconv.Itoa(epic.Number)}, nil)
+		if err != nil || strings.TrimSpace(epicState) == "" {
+			epicState, err = marshalJSON(map[string]any{
+				"issue_number": epic.Number,
+				"phase":        "DECIDE",
+				"next_phase":   "INTEGRATE",
+			})
+			if err != nil {
+				return err
+			}
+		}
+
+		epicState, err = a.phaseIntegrate(ctx, root, env, repo, epic.Number, epicState, epicTitle)
+		if err != nil {
+			a.logError("Epic sweep: epic #%d integration failed", epic.Number)
+			continue
+		}
+
+		phase := "unknown"
+		var state map[string]any
+		if err := json.Unmarshal([]byte(epicState), &state); err == nil {
+			if value, ok := state["phase"].(string); ok && strings.TrimSpace(value) != "" {
+				phase = value
+			}
+		}
+		a.logInfo("Epic sweep: epic #%d integration complete — phase: %s", epic.Number, phase)
+		_, _ = fmt.Fprintln(a.stdout, epicState)
+	}
+	return nil
+}
+
+func (a *App) phaseIntegrate(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, title string) (string, error) {
+	a.logInfo("INTEGRATE: checking epic #%d", issueNumber)
+
+	epicStatusOut, err := a.scriptOutput(ctx, root, env, "gh-issue-queue.sh", []string{"epic-status", repo, strconv.Itoa(issueNumber)}, nil)
+	if err != nil {
+		return "", err
+	}
+
+	var epicStatus epicStatusResult
+	if err := json.Unmarshal([]byte(epicStatusOut), &epicStatus); err != nil {
+		return "", fmt.Errorf("failed to parse epic-status payload: %v", err)
+	}
+	if !epicStatus.AllDone {
+		a.logInfo("INTEGRATE: not all children done for epic #%d", issueNumber)
+		nextState, err := updateStateJSON(stateJSON, func(state map[string]any) {
+			state["phase"] = "DECIDE"
+			state["decision"] = "integrate-pending"
+			state["next_phase"] = "INTEGRATE"
+		})
+		if err != nil {
+			return "", err
+		}
+		if err := a.saveState(ctx, root, env, issueNumber, nextState); err != nil {
+			return "", err
+		}
+		return nextState, nil
+	}
+
+	var state struct {
+		Worktree       string `json:"worktree"`
+		CriteriaCommit string `json:"criteria_commit"`
+	}
+	if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
+		return "", fmt.Errorf("failed to parse state for integrate: %v", err)
+	}
+
+	resolvedTitle, titleErr := a.issueTitle(ctx, env, repo, issueNumber)
+	if titleErr == nil && strings.TrimSpace(resolvedTitle) != "" {
+		title = resolvedTitle
+	}
+
+	integrateTitle := strings.TrimSpace(title)
+	if integrateTitle == "" {
+		integrateTitle = "untitled"
+	}
+	worktreeOut, _, worktreeErr := a.scriptOutputWithStderr(ctx, root, env, "worktree.sh", []string{"create", strconv.Itoa(issueNumber), integrateTitle + "-integrate"}, nil)
+	integrateWorktree := ""
+	if worktreeErr == nil {
+		var worktreeInfo worktreeCreateResult
+		if err := json.Unmarshal([]byte(worktreeOut), &worktreeInfo); err == nil {
+			integrateWorktree = strings.TrimSpace(worktreeInfo.Worktree)
+		}
+	}
+	if integrateWorktree == "" {
+		integrateWorktree = strings.TrimSpace(state.Worktree)
+	}
+
+	if strings.TrimSpace(state.CriteriaCommit) != "" {
+		verifyOut, verifyErr := a.scriptOutput(ctx, root, env, "verify.sh", []string{"integrate", integrateWorktree, strings.TrimSpace(state.CriteriaCommit)}, nil)
+		verifyResult := verifyIntegrateResult{OK: false}
+		if verifyErr == nil && strings.TrimSpace(verifyOut) != "" {
+			_ = json.Unmarshal([]byte(verifyOut), &verifyResult)
+		}
+
+		if verifyResult.OK {
+			_ = a.runScript(ctx, root, env, "gh-issue-queue.sh", []string{"set-status", repo, strconv.Itoa(issueNumber), "done"}, nil, io.Discard, io.Discard)
+			integrateState, err := updateStateJSON(stateJSON, func(state map[string]any) {
+				state["phase"] = "INTEGRATE"
+			})
+			if err != nil {
+				return "", err
+			}
+			if err := a.saveState(ctx, root, env, issueNumber, integrateState); err != nil {
+				return "", err
+			}
+			doneState, err := updateStateJSON(integrateState, func(state map[string]any) {
+				state["phase"] = "DONE"
+			})
+			if err != nil {
+				return "", err
+			}
+			if err := a.saveState(ctx, root, env, issueNumber, doneState); err != nil {
+				return "", err
+			}
+			return doneState, nil
+		}
+
+		failures := strings.Join(verifyResult.Failures, ", ")
+		a.logError("INTEGRATE: verification failed for epic #%d: %s", issueNumber, failures)
+		_ = a.runScript(ctx, root, env, "gh-issue-queue.sh", []string{"set-status", repo, strconv.Itoa(issueNumber), "needs-review"}, nil, io.Discard, io.Discard)
+		integrateState, err := updateStateJSON(stateJSON, func(state map[string]any) {
+			state["phase"] = "INTEGRATE"
+			state["integrate_failures"] = failures
+		})
+		if err != nil {
+			return "", err
+		}
+		if err := a.saveState(ctx, root, env, issueNumber, integrateState); err != nil {
+			return "", err
+		}
+		failedState, err := updateStateJSON(integrateState, func(state map[string]any) {
+			state["phase"] = "FAILED"
+		})
+		if err != nil {
+			return "", err
+		}
+		if err := a.saveState(ctx, root, env, issueNumber, failedState); err != nil {
+			return "", err
+		}
+		return failedState, nil
+	}
+
+	_ = a.runScript(ctx, root, env, "gh-issue-queue.sh", []string{"set-status", repo, strconv.Itoa(issueNumber), "done"}, nil, io.Discard, io.Discard)
+	integrateState, err := updateStateJSON(stateJSON, func(state map[string]any) {
+		state["phase"] = "INTEGRATE"
+	})
+	if err != nil {
+		return "", err
+	}
+	if err := a.saveState(ctx, root, env, issueNumber, integrateState); err != nil {
+		return "", err
+	}
+	doneState, err := updateStateJSON(integrateState, func(state map[string]any) {
+		state["phase"] = "DONE"
+	})
+	if err != nil {
+		return "", err
+	}
+	if err := a.saveState(ctx, root, env, issueNumber, doneState); err != nil {
+		return "", err
+	}
+	return doneState, nil
+}
+
 func (a *App) getIssueMetadata(ctx context.Context, root string, env []string, repo string, issueNumber int) (issueMetadata, error) {
 	issueOut, err := a.ghOutput(ctx, env, "issue", "view", strconv.Itoa(issueNumber), "--repo", repo, "--json", "number,title,body,labels,url")
 	if err != nil {
@@ -435,7 +735,9 @@ func (a *App) getIssueMetadata(ctx context.Context, root string, env []string, r
 func (a *App) phaseInit(ctx context.Context, root string, env []string, repo string, issueNumber int, dryRun bool, title string) (string, error) {
 	a.logInfo("INIT: issue #%d", issueNumber)
 
-	eligibilityOut, eligibilityErr := a.scriptOutput(ctx, root, env, "dispatch-safety.sh", []string{"eligibility", repo, strconv.Itoa(issueNumber)}, nil)
+	dispatchEnv := envSet(env, "RUNOQ_DISPATCH_SAFETY_IMPLEMENTATION", "shell")
+	dispatchEnv = envSet(dispatchEnv, "RUNOQ_NO_AUTO_TOKEN", "1")
+	eligibilityOut, eligibilityErr := a.scriptOutput(ctx, root, dispatchEnv, "dispatch-safety.sh", []string{"eligibility", repo, strconv.Itoa(issueNumber)}, nil)
 	if eligibilityErr != nil {
 		return "", eligibilityErr
 	}

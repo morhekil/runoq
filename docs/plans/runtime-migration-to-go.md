@@ -14,8 +14,9 @@ In progress. The current landed fact set is:
 - current slice: runtime orchestrator non-low-complexity `CRITERIA` handling now progresses past the former not-implemented boundary by recording deterministic `CRITERIA` state and taking an explicit bounded handoff directly to `REVIEW -> DECIDE -> FINALIZE` with `needs-review`, without porting the broader iterative `DECIDE -> DEVELOP` loop or epic `INTEGRATE`
 - current slice: runtime orchestrator `REVIEW` after `review_ready` now follows the real diff-review boundary instead of inferred success, by invoking `diff-reviewer` via `runoq::claude_stream`, parsing verdict data from `review_log_path` with claude-output fallback, persisting deterministic `REVIEW` state, and then continuing through bounded `DECIDE -> FINALIZE`
 - current slice: runtime orchestrator low-complexity `DECIDE -> DEVELOP` iterative loop is now bounded and runtime-backed: `DECIDE` emits `iterate` when verdict is `ITERATE` and rounds remain, the orchestrator re-enters `DEVELOP` with persisted checklist context (`review_checklist` carried into `previous_checklist`), and the loop remains bounded by `maxRounds` before deterministic `FINALIZE` handoff
+- current slice: runtime orchestrator now owns epic `INTEGRATE` flow parity for queue-mode sweeps, including deterministic `integrate-pending` when children are incomplete, integration worktree create-or-reuse, `verify.sh integrate <worktree> <criteria_commit>` success and failure handling (`done` versus `needs-review` with `integrate_failures`), and runtime/shell acceptance parity for post-drain epic integration
 
-Still pending: the runtime orchestrator does not yet own epic `INTEGRATE` flow parity. That remains part of the remaining M5/M6 work.
+Still pending: broader migration gates outside this orchestrator/issue-runner cutover (default-switch sequencing, fallback deletion, and repeated smoke confidence cycles listed in later milestones) remain tracked in the milestone table below.
 
 ## Purpose
 
