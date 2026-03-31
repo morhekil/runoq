@@ -129,6 +129,10 @@ If the run goes wrong:
 - remove temporary worktrees if resetting from scratch
 - restart with a smaller scope, not a broader prompt
 
+**If a worker stalls (output file stops growing), kill it and respawn a new worker.** Do not attempt to complete the worker's unfinished edits yourself — mixing orchestrator edits with worker edits breaks the isolation boundary. Two recovery options:
+1. **Continue in place:** Spawn a new worker pointing at the same worktree. The new worker inherits the partial state and picks up where the stalled one left off. Preferred when the stalled worker made substantial correct progress.
+2. **Clean restart:** Discard changes, recreate worktree from clean state, respawn with a tighter prompt. Preferred when the stalled worker's edits are unreliable or scope-violating.
+
 Before concluding that the control loop is broken, distinguish between:
 
 - normal early exploration: reading contracts, tracing entrypoints, comparing shell behavior, planning the first edits
@@ -137,3 +141,18 @@ Before concluding that the control loop is broken, distinguish between:
 Early `wait_agent` timeouts or an empty `git diff --stat` are not enough on their own to classify the run as broken.
 
 Do not pile more delegation on top of a broken control loop.
+
+## Worktree Creation
+
+**Always create worktrees from the main checkout directory**, never from inside another worktree. Running `git worktree add` from within a worktree creates a nested worktree inside the first one, which confuses worker path resolution. The correct pattern:
+
+```bash
+# From main checkout (e.g. /repo):
+git worktree add /repo/.claude/worktrees/my-worker my-branch
+
+# WRONG — creates nested worktree:
+cd /repo/.claude/worktrees/other-worker
+git worktree add .claude/worktrees/my-worker my-branch
+```
+
+When a worker needs commits from a prior slice's branch, create the worktree from the main checkout and then merge the dependency branch into it.
