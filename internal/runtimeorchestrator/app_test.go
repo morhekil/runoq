@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/saruman/runoq/internal/common"
 )
 
 type fakeExitError struct {
@@ -61,7 +63,7 @@ func TestRunIssueDryRunDoesNotForceShellForMigratedHelpers(t *testing.T) {
 		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 		"TARGET_ROOT=" + root,
 	}, root, &stdout, io.Discard)
-	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+	app.SetCommandExecutor(func(_ context.Context, req common.CommandRequest) error {
 		switch {
 		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
 			_, _ = io.WriteString(req.Stdout, "fail\n")
@@ -114,7 +116,7 @@ func TestPhaseInitPRCreateFailureWritesRollbackStateAndCleansUp(t *testing.T) {
 		"RUNOQ_ROOT=" + root,
 		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 	}, root, io.Discard, io.Discard)
-	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+	app.SetCommandExecutor(func(_ context.Context, req common.CommandRequest) error {
 		calls = append(calls, commandLine(req))
 		switch {
 		case strings.HasSuffix(req.Name, "/dispatch-safety.sh") && strings.Join(req.Args, " ") == "eligibility owner/repo 42":
@@ -188,7 +190,7 @@ func TestRunLowComplexityDevelopFailureCompletesNeedsReviewHandoff(t *testing.T)
 		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 		"TARGET_ROOT=" + root,
 	}, root, &stdout, &stderr)
-	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+	app.SetCommandExecutor(func(_ context.Context, req common.CommandRequest) error {
 		calls = append(calls, commandLine(req))
 		switch {
 		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
@@ -243,7 +245,7 @@ func TestRunLowComplexityDevelopFailureCompletesNeedsReviewHandoff(t *testing.T)
 			_, _ = io.WriteString(req.Stdout, `{"body":"## Acceptance Criteria\n\n- [ ] Works."}`)
 			return nil
 		case strings.HasSuffix(req.Name, "/issue-runner.sh") && strings.HasPrefix(strings.Join(req.Args, " "), "run "):
-			if value, ok := envLookup(req.Env, "RUNOQ_ISSUE_RUNNER_IMPLEMENTATION"); !ok || value != "shell" {
+			if value, ok := common.EnvLookup(req.Env, "RUNOQ_ISSUE_RUNNER_IMPLEMENTATION"); !ok || value != "shell" {
 				t.Fatalf("expected shell issue-runner env, got %q", req.Env)
 			}
 			payloadFile := req.Args[1]
@@ -311,7 +313,7 @@ func TestRunLowComplexityReviewReadyAutoMergesAndCleansUp(t *testing.T) {
 		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 		"TARGET_ROOT=" + root,
 	}, root, &stdout, &stderr)
-	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+	app.SetCommandExecutor(func(_ context.Context, req common.CommandRequest) error {
 		calls = append(calls, commandLine(req))
 		switch {
 		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
@@ -438,7 +440,7 @@ func TestRunLowComplexityIterateReentersDevelopWithChecklist(t *testing.T) {
 		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 		"TARGET_ROOT=" + root,
 	}, root, &stdout, &stderr)
-	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+	app.SetCommandExecutor(func(_ context.Context, req common.CommandRequest) error {
 		calls = append(calls, commandLine(req))
 		switch {
 		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
@@ -573,7 +575,7 @@ func TestRunNonLowComplexityCriteriaNeedsReviewHandoffSkipsDevelop(t *testing.T)
 		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 		"TARGET_ROOT=" + root,
 	}, root, &stdout, &stderr)
-	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+	app.SetCommandExecutor(func(_ context.Context, req common.CommandRequest) error {
 		calls = append(calls, commandLine(req))
 		switch {
 		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
@@ -677,7 +679,7 @@ func TestRunQueueDryRunSelectsIssueAndLogsSkippedDetails(t *testing.T) {
 		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 		"TARGET_ROOT=" + root,
 	}, root, &stdout, &stderr)
-	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+	app.SetCommandExecutor(func(_ context.Context, req common.CommandRequest) error {
 		calls = append(calls, commandLine(req))
 		switch {
 		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
@@ -743,7 +745,7 @@ func TestPhaseIntegratePendingPersistsIntegratePendingDecision(t *testing.T) {
 		"RUNOQ_ROOT=" + root,
 		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 	}, root, io.Discard, io.Discard)
-	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+	app.SetCommandExecutor(func(_ context.Context, req common.CommandRequest) error {
 		calls = append(calls, commandLine(req))
 		switch {
 		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "epic-status owner/repo 41":
@@ -789,7 +791,7 @@ func TestPhaseIntegrateSuccessWithCriteriaCommitMarksDone(t *testing.T) {
 		"RUNOQ_ROOT=" + root,
 		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 	}, root, io.Discard, io.Discard)
-	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+	app.SetCommandExecutor(func(_ context.Context, req common.CommandRequest) error {
 		calls = append(calls, commandLine(req))
 		switch {
 		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "epic-status owner/repo 41":
@@ -846,7 +848,7 @@ func TestPhaseIntegrateFailureMarksNeedsReviewAndFailed(t *testing.T) {
 		"RUNOQ_ROOT=" + root,
 		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 	}, root, io.Discard, io.Discard)
-	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+	app.SetCommandExecutor(func(_ context.Context, req common.CommandRequest) error {
 		calls = append(calls, commandLine(req))
 		switch {
 		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "epic-status owner/repo 41":
@@ -903,7 +905,7 @@ func TestRunQueueInvokesEpicSweepIntegrateForEligibleEpic(t *testing.T) {
 		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 		"TARGET_ROOT=" + root,
 	}, root, io.Discard, &stderr)
-	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+	app.SetCommandExecutor(func(_ context.Context, req common.CommandRequest) error {
 		calls = append(calls, commandLine(req))
 		switch {
 		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
@@ -976,7 +978,7 @@ func TestMentionTriageReturnsEmptyStdoutWhenPollMentionsIsEmpty(t *testing.T) {
 		"RUNOQ_ROOT=" + root,
 		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 	}, root, &stdout, &stderr)
-	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+	app.SetCommandExecutor(func(_ context.Context, req common.CommandRequest) error {
 		calls = append(calls, commandLine(req))
 		switch {
 		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
@@ -1018,7 +1020,7 @@ func TestMentionTriageReturnsNotImplementedWhenMentionsExist(t *testing.T) {
 		"RUNOQ_ROOT=" + root,
 		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 	}, root, &stdout, &stderr)
-	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+	app.SetCommandExecutor(func(_ context.Context, req common.CommandRequest) error {
 		switch {
 		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
 			_, _ = io.WriteString(req.Stdout, "fail\n")
@@ -1056,7 +1058,7 @@ func TestMentionTriagePropagatesScriptExitCodeAndStderr(t *testing.T) {
 		"RUNOQ_ROOT=" + root,
 		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 	}, root, &stdout, &stderr)
-	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+	app.SetCommandExecutor(func(_ context.Context, req common.CommandRequest) error {
 		switch {
 		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
 			_, _ = io.WriteString(req.Stdout, "fail\n")
@@ -1093,7 +1095,7 @@ func writeRuntimeConfig(t *testing.T, root string) {
 	}
 }
 
-func commandLine(req commandRequest) string {
+func commandLine(req common.CommandRequest) string {
 	return req.Name + " " + strings.Join(req.Args, " ")
 }
 
@@ -1117,7 +1119,7 @@ func containsAny(values []string, needle string) bool {
 
 func assertEnvNotValue(t *testing.T, env []string, key string, disallowed string) {
 	t.Helper()
-	if value, ok := envLookup(env, key); ok && value == disallowed {
+	if value, ok := common.EnvLookup(env, key); ok && value == disallowed {
 		t.Fatalf("expected %s to not be %q, got %q", key, disallowed, value)
 	}
 }

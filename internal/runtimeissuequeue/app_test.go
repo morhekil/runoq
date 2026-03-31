@@ -8,13 +8,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/saruman/runoq/internal/common"
 )
 
 func TestListParsesMetadataVariants(t *testing.T) {
 	t.Parallel()
 
 	app := newTestApp(t, []string{"list", "owner/repo", "runoq:ready"})
-	app.SetCommandExecutor(func(ctx context.Context, req commandRequest) error {
+	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
 		t.Helper()
 		if req.Name != "gh" {
 			t.Fatalf("unexpected command: %s %v", req.Name, req.Args)
@@ -72,7 +74,7 @@ func TestNextSkipsBlockedDependencies(t *testing.T) {
 	t.Parallel()
 
 	app := newTestApp(t, []string{"next", "owner/repo", "runoq:ready"})
-	app.SetCommandExecutor(func(ctx context.Context, req commandRequest) error {
+	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
 		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
 		switch {
@@ -113,7 +115,7 @@ func TestSetStatusRemovesExistingRunoqLabels(t *testing.T) {
 
 	app := newTestApp(t, []string{"set-status", "owner/repo", "42", "in-progress"})
 	var commands []string
-	app.SetCommandExecutor(func(ctx context.Context, req commandRequest) error {
+	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
 		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
 		commands = append(commands, command)
@@ -155,7 +157,7 @@ func TestCreateWritesMetadataAndLinksParentEpic(t *testing.T) {
 	})
 	var bodyText string
 	var commands []string
-	app.SetCommandExecutor(func(ctx context.Context, req commandRequest) error {
+	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
 		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
 		commands = append(commands, command)
@@ -200,7 +202,7 @@ func TestEpicStatusTracksPendingChildren(t *testing.T) {
 	t.Parallel()
 
 	app := newTestApp(t, []string{"epic-status", "owner/repo", "77"})
-	app.SetCommandExecutor(func(ctx context.Context, req commandRequest) error {
+	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
 		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
 		if !strings.Contains(command, "api repos/owner/repo/issues/77/sub_issues --paginate") {

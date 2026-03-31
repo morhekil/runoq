@@ -16,13 +16,13 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"github.com/saruman/runoq/internal/common"
 )
 
 const usageText = `Usage:
@@ -33,24 +33,13 @@ const usageText = `Usage:
   gh-issue-queue.sh epic-status <repo> <issue-number>
 `
 
-type commandRequest struct {
-	Name   string
-	Args   []string
-	Dir    string
-	Env    []string
-	Stdout io.Writer
-	Stderr io.Writer
-}
-
-type commandExecutor func(context.Context, commandRequest) error
-
 type App struct {
 	args        []string
 	env         []string
 	cwd         string
 	stdout      io.Writer
 	stderr      io.Writer
-	execCommand commandExecutor
+	execCommand common.CommandExecutor
 	tokenInit   bool
 	httpClient  *http.Client
 }
@@ -181,14 +170,14 @@ func New(args []string, env []string, cwd string, stdout io.Writer, stderr io.Wr
 		cwd:         cwd,
 		stdout:      stdout,
 		stderr:      stderr,
-		execCommand: runCommand,
+		execCommand: common.RunCommand,
 		httpClient:  http.DefaultClient,
 	}
 }
 
-func (a *App) SetCommandExecutor(execFn commandExecutor) {
+func (a *App) SetCommandExecutor(execFn common.CommandExecutor) {
 	if execFn == nil {
-		a.execCommand = runCommand
+		a.execCommand = common.RunCommand
 		return
 	}
 	a.execCommand = execFn
@@ -243,7 +232,7 @@ func (a *App) Run(ctx context.Context) int {
 func (a *App) runList(ctx context.Context, repo string, readyLabel string) int {
 	issues, err := a.listIssues(ctx, repo, readyLabel)
 	if err != nil {
-		return a.failf("%v", err)
+		return common.Failf(a.stderr, "%v", err)
 	}
 	return a.writeJSON(issues)
 }
@@ -251,7 +240,7 @@ func (a *App) runList(ctx context.Context, repo string, readyLabel string) int {
 func (a *App) runNext(ctx context.Context, repo string, readyLabel string) int {
 	issues, err := a.listIssues(ctx, repo, readyLabel)
 	if err != nil {
-		return a.failf("%v", err)
+		return common.Failf(a.stderr, "%v", err)
 	}
 
 	a.log("issue-queue", fmt.Sprintf("next_issue: found %d issues with label=%s", len(issues), readyLabel))
@@ -273,7 +262,7 @@ func (a *App) runNext(ctx context.Context, repo string, readyLabel string) int {
 		for _, dep := range issue.DependsOn {
 			status, err := a.dependencyStatus(ctx, repo, dep)
 			if err != nil {
-				return a.failf("%v", err)
+				return common.Failf(a.stderr, "%v", err)
 			}
 			if !status.Done && status.Reason != nil {
 				blocked = append(blocked, *status.Reason)
@@ -299,17 +288,17 @@ func (a *App) runNext(ctx context.Context, repo string, readyLabel string) int {
 func (a *App) runSetStatus(ctx context.Context, repo string, issueNumber string, status string) int {
 	cfg, err := a.loadConfig()
 	if err != nil {
-		return a.failf("Failed to read config: %v", err)
+		return common.Failf(a.stderr, "Failed to read config: %v", err)
 	}
 
 	newLabel, ok := labelForStatus(cfg, status)
 	if !ok {
-		return a.failf("Unknown status: %s", status)
+		return common.Failf(a.stderr, "Unknown status: %s", status)
 	}
 
 	raw, err := a.ghOutput(ctx, []string{"issue", "view", issueNumber, "--repo", repo, "--json", "labels"})
 	if err != nil {
-		return a.failf("%v", err)
+		return common.Failf(a.stderr, "%v", err)
 	}
 
 	var response struct {
@@ -318,7 +307,7 @@ func (a *App) runSetStatus(ctx context.Context, repo string, issueNumber string,
 		} `json:"labels"`
 	}
 	if err := json.Unmarshal([]byte(raw), &response); err != nil {
-		return a.failf("issue view returned invalid JSON: %v", err)
+		return common.Failf(a.stderr, "issue view returned invalid JSON: %v", err)
 	}
 
 	editArgs := []string{"issue", "edit", issueNumber, "--repo", repo}
@@ -333,12 +322,12 @@ func (a *App) runSetStatus(ctx context.Context, repo string, issueNumber string,
 	a.log("issue-queue", fmt.Sprintf("set-status issue=#%s: removing=[%s] adding=[%s]", issueNumber, strings.Join(removing, ", "), newLabel))
 
 	if err := a.ghRun(ctx, editArgs, io.Discard, io.Discard); err != nil {
-		return a.failf("%v", err)
+		return common.Failf(a.stderr, "%v", err)
 	}
 
 	issueID, err := strconv.Atoi(issueNumber)
 	if err != nil {
-		return a.failf("invalid issue number: %s", issueNumber)
+		return common.Failf(a.stderr, "invalid issue number: %s", issueNumber)
 	}
 	return a.writeJSON(setStatusResult{
 		Issue:  issueID,
@@ -356,12 +345,12 @@ func (a *App) runCreate(ctx context.Context, repo string, title string, body str
 
 	cfg, err := a.loadConfig()
 	if err != nil {
-		return a.failf("Failed to read config: %v", err)
+		return common.Failf(a.stderr, "Failed to read config: %v", err)
 	}
 
 	bodyFile, err := a.writeCreateBody(body, opts)
 	if err != nil {
-		return a.failf("Failed to write issue body: %v", err)
+		return common.Failf(a.stderr, "Failed to write issue body: %v", err)
 	}
 	defer func() {
 		_ = os.Remove(bodyFile)
@@ -369,21 +358,21 @@ func (a *App) runCreate(ctx context.Context, repo string, title string, body str
 
 	url, err := a.ghOutput(ctx, []string{"issue", "create", "--repo", repo, "--title", title, "--body-file", bodyFile, "--label", cfg.Labels.Ready})
 	if err != nil {
-		return a.failf("%v", err)
+		return common.Failf(a.stderr, "%v", err)
 	}
 	a.log("issue-queue", fmt.Sprintf("create: title=%q result_url=%s", title, url))
 
 	if opts.ParentEpic != "" {
 		newIssueNumber := issueURLPattern.FindString(url)
 		if newIssueNumber == "" {
-			return a.failf("failed to parse created issue number from %q", url)
+			return common.Failf(a.stderr, "failed to parse created issue number from %q", url)
 		}
 		childID, err := a.ghOutput(ctx, []string{"api", fmt.Sprintf("repos/%s/issues/%s", repo, newIssueNumber), "--jq", ".id"})
 		if err != nil {
-			return a.failf("%v", err)
+			return common.Failf(a.stderr, "%v", err)
 		}
 		if err := a.ghRun(ctx, []string{"api", fmt.Sprintf("repos/%s/issues/%s/sub_issues", repo, opts.ParentEpic), "--method", "POST", "-F", "sub_issue_id=" + childID}, io.Discard, io.Discard); err != nil {
-			return a.failf("%v", err)
+			return common.Failf(a.stderr, "%v", err)
 		}
 		a.log("issue-queue", fmt.Sprintf("create: linked issue #%s as sub-issue of epic #%s", newIssueNumber, opts.ParentEpic))
 	}
@@ -394,19 +383,19 @@ func (a *App) runCreate(ctx context.Context, repo string, title string, body str
 func (a *App) runEpicStatus(ctx context.Context, repo string, issueNumber string) int {
 	cfg, err := a.loadConfig()
 	if err != nil {
-		return a.failf("Failed to read config: %v", err)
+		return common.Failf(a.stderr, "Failed to read config: %v", err)
 	}
 
 	raw, err := a.ghOutput(ctx, []string{"api", fmt.Sprintf("repos/%s/issues/%s/sub_issues", repo, issueNumber), "--paginate"})
 	if err != nil {
-		return a.failf("%v", err)
+		return common.Failf(a.stderr, "%v", err)
 	}
 
 	var children []epicChild
 	if strings.TrimSpace(raw) == "" {
 		children = []epicChild{}
 	} else if err := json.Unmarshal([]byte(raw), &children); err != nil {
-		return a.failf("sub_issues returned invalid JSON: %v", err)
+		return common.Failf(a.stderr, "sub_issues returned invalid JSON: %v", err)
 	}
 
 	result := epicStatusResult{
@@ -727,7 +716,7 @@ func (a *App) ghRun(ctx context.Context, args []string, stdout io.Writer, stderr
 	if err := a.ensureGHToken(ctx); err != nil {
 		return err
 	}
-	request := commandRequest{
+	request := common.CommandRequest{
 		Name:   a.ghBin(),
 		Args:   args,
 		Dir:    a.cwd,
@@ -742,10 +731,10 @@ func (a *App) ghRun(ctx context.Context, args []string, stdout io.Writer, stderr
 }
 
 func (a *App) ensureGHToken(ctx context.Context) error {
-	if _, ok := envLookup(a.env, "GH_TOKEN"); ok {
+	if _, ok := common.EnvLookup(a.env, "GH_TOKEN"); ok {
 		return nil
 	}
-	if _, ok := envLookup(a.env, "RUNOQ_NO_AUTO_TOKEN"); ok {
+	if _, ok := common.EnvLookup(a.env, "RUNOQ_NO_AUTO_TOKEN"); ok {
 		return nil
 	}
 	if a.tokenInit {
@@ -775,7 +764,7 @@ func (a *App) ensureGHToken(ctx context.Context) error {
 	if err != nil || token == "" {
 		return nil
 	}
-	a.env = envSet(a.env, "GH_TOKEN", token)
+	a.env = common.EnvSet(a.env, "GH_TOKEN", token)
 	return nil
 }
 
@@ -867,21 +856,21 @@ func (a *App) loadConfig() (config, error) {
 }
 
 func (a *App) configPath() (string, error) {
-	if value, ok := envLookup(a.env, "RUNOQ_CONFIG"); ok && strings.TrimSpace(value) != "" {
+	if value, ok := common.EnvLookup(a.env, "RUNOQ_CONFIG"); ok && strings.TrimSpace(value) != "" {
 		return value, nil
 	}
-	if value, ok := envLookup(a.env, "RUNOQ_ROOT"); ok && strings.TrimSpace(value) != "" {
+	if value, ok := common.EnvLookup(a.env, "RUNOQ_ROOT"); ok && strings.TrimSpace(value) != "" {
 		return filepath.Join(value, "config", "runoq.json"), nil
 	}
 	return "", errors.New("RUNOQ_CONFIG is not set")
 }
 
 func (a *App) targetRoot(ctx context.Context) (string, error) {
-	if value, ok := envLookup(a.env, "TARGET_ROOT"); ok && strings.TrimSpace(value) != "" {
+	if value, ok := common.EnvLookup(a.env, "TARGET_ROOT"); ok && strings.TrimSpace(value) != "" {
 		return value, nil
 	}
 	var stdout bytes.Buffer
-	err := a.execCommand(ctx, commandRequest{
+	err := a.execCommand(ctx, common.CommandRequest{
 		Name:   "git",
 		Args:   []string{"rev-parse", "--show-toplevel"},
 		Dir:    a.cwd,
@@ -928,7 +917,7 @@ func cmpIssue(a listedIssue, b listedIssue) int {
 }
 
 func (a *App) ghBin() string {
-	if value, ok := envLookup(a.env, "GH_BIN"); ok && strings.TrimSpace(value) != "" {
+	if value, ok := common.EnvLookup(a.env, "GH_BIN"); ok && strings.TrimSpace(value) != "" {
 		return value
 	}
 	return "gh"
@@ -940,10 +929,10 @@ func (a *App) writeJSON(value any) int {
 	encoder.SetEscapeHTML(false)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(value); err != nil {
-		return a.failf("Failed to encode JSON: %v", err)
+		return common.Failf(a.stderr, "Failed to encode JSON: %v", err)
 	}
 	if _, err := a.stdout.Write(buffer.Bytes()); err != nil {
-		return a.failf("Failed to write output: %v", err)
+		return common.Failf(a.stderr, "Failed to write output: %v", err)
 	}
 	return 0
 }
@@ -968,60 +957,12 @@ func toQueueIssue(issue listedIssue, actionable bool, blocked []string) queueIss
 	}
 }
 
-func (a *App) fail(message string) int {
-	_, _ = fmt.Fprintf(a.stderr, "runoq: %s\n", message)
-	return 1
-}
-
-func (a *App) failf(format string, args ...any) int {
-	return a.fail(fmt.Sprintf(format, args...))
-}
-
 func (a *App) printUsage(w io.Writer) {
 	_, _ = io.WriteString(w, usageText)
 }
 
 func (a *App) log(prefix string, message string) {
-	if value, ok := envLookup(a.env, "RUNOQ_LOG"); ok && value != "" {
+	if value, ok := common.EnvLookup(a.env, "RUNOQ_LOG"); ok && value != "" {
 		_, _ = fmt.Fprintf(a.stderr, "[%s] %s\n", prefix, message)
 	}
-}
-
-func envLookup(env []string, key string) (string, bool) {
-	prefix := key + "="
-	for i := len(env) - 1; i >= 0; i-- {
-		if value, ok := strings.CutPrefix(env[i], prefix); ok {
-			return value, true
-		}
-	}
-	return "", false
-}
-
-func envSet(env []string, key string, value string) []string {
-	prefix := key + "="
-	updated := make([]string, 0, len(env)+1)
-	replaced := false
-	for _, entry := range env {
-		if strings.HasPrefix(entry, prefix) {
-			if !replaced {
-				updated = append(updated, prefix+value)
-				replaced = true
-			}
-			continue
-		}
-		updated = append(updated, entry)
-	}
-	if !replaced {
-		updated = append(updated, prefix+value)
-	}
-	return updated
-}
-
-func runCommand(ctx context.Context, req commandRequest) error {
-	cmd := exec.CommandContext(ctx, req.Name, req.Args...)
-	cmd.Dir = req.Dir
-	cmd.Env = req.Env
-	cmd.Stdout = req.Stdout
-	cmd.Stderr = req.Stderr
-	return cmd.Run()
 }
