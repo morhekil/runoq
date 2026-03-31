@@ -2,35 +2,13 @@
 
 ## Status
 
-Migration status: code/runtime migration is complete through the last known blocker on main (`86713bd` schema-retry hardening and `b947c1f` absolute last-message artifact-path fix). Runtime lifecycle smoke now reaches `REVIEW` and is currently blocked by Claude diff-reviewer `out_of_credits` rather than a runtime code failure. Sandbox smoke remains blocked by inaccessible configured repo access unless otherwise noted by smoke operators. Remaining work is smoke/ops-gated cleanup and confidence-cycle validation, not known migration code gaps.
+Migration status: complete. Runtime migration milestones and post-migration cleanup are fully landed on main, including cleanup slices through `2703894`.
 
-Current landed fact set:
+Final confidence-cycle smoke status under runtime-default/current-main: passed.
 
-- foundation slices already in-repo: Go runtime skeleton (`cmd/runoq-runtime`, `internal/runtimecli`), runtime-default top-level CLI routing at `bin/runoq`, and first acceptance parity scenarios for `run --dry-run` plus `plan --dry-run`
-- runtime-backed `state.sh` (`internal/runtimestate`), `report` (`internal/runtimereport`), and `verify.sh` (`internal/runtimeverify`) with shell/runtime parity coverage
-- `0913f00` (`runtime: migrate gh-issue-queue behind runtime wrapper`): runtime-backed `gh-issue-queue.sh` list/next/set-status coverage behind the stable shell wrapper
-- `136dea5` (`runtimeorchestrator: support queue dry-run`): runtime orchestrator queue dry-run slice with preserved selection, skipped-reason logging, and explicit `INIT` dry-run output
-- `947607b` (`runtime: migrate issue-runner run slice`): issue-runner run-path behavior coverage for budget handling, malformed-payload recovery via `state.sh validate-payload`, single-round `review_ready`, and verification-driven round control within the stable payload-file contract
-- `23c67ac` (`runtime: deepen issue-runner failure-path coverage`): deeper deterministic acceptance/unit coverage for issue-runner verification failure and escalation paths
-- current slice: runtime orchestrator low-complexity `run --issue` composition now progresses past `INIT` through `CRITERIA`, `DEVELOP`, and the bounded success path `REVIEW -> DECIDE -> FINALIZE`, using the shell-owned `issue-runner.sh run <payload-json-file>` boundary for develop, preserving the existing deterministic `needs-review` handoff for non-`review_ready` outcomes, and applying the current low-complexity auto-merge decision table plus done-status/worktree cleanup on successful finalize
-- current slice: runtime orchestrator non-low-complexity `CRITERIA` handling now progresses past the former not-implemented boundary by recording deterministic `CRITERIA` state and taking an explicit bounded handoff directly to `REVIEW -> DECIDE -> FINALIZE` with `needs-review`, without porting the broader iterative `DECIDE -> DEVELOP` loop or epic `INTEGRATE`
-- current slice: state-transition contracts now explicitly allow `CRITERIA -> REVIEW` in both shell and runtime state engines so non-low-complexity deterministic handoff saves do not fail at the first review transition
-- current slice: runtime orchestrator `REVIEW` after `review_ready` now follows the real diff-review boundary instead of inferred success, by invoking `diff-reviewer` via `runoq::claude_stream`, parsing verdict data from `review_log_path` with claude-output fallback, persisting deterministic `REVIEW` state, and then continuing through bounded `DECIDE -> FINALIZE`
-- current slice: runtime orchestrator low-complexity `DECIDE -> DEVELOP` iterative loop is now bounded and runtime-backed: `DECIDE` emits `iterate` when verdict is `ITERATE` and rounds remain, the orchestrator re-enters `DEVELOP` with persisted checklist context (`review_checklist` carried into `previous_checklist`), and the loop remains bounded by `maxRounds` before deterministic `FINALIZE` handoff
-- current slice: runtime orchestrator now owns epic `INTEGRATE` flow parity for queue-mode sweeps, including deterministic `integrate-pending` when children are incomplete, integration worktree create-or-reuse, `verify.sh integrate <worktree> <criteria_commit>` success and failure handling (`done` versus `needs-review` with `integrate_failures`), and runtime/shell acceptance parity for post-drain epic integration
-- current slice: `scripts/orchestrator.sh` is now a thin runtime wrapper with unconditional runtime dispatch (`RUNOQ_RUNTIME_BIN` first, then `go run` fallback from `RUNOQ_ROOT`); explicit per-wrapper shell fallback branches are retired
-- current slice: helper wrappers used by the runtime run path (`scripts/state.sh`, `scripts/verify.sh`, `scripts/gh-issue-queue.sh`) are now thin runtime wrappers with unconditional runtime dispatch and no active `..._IMPLEMENTATION=shell` branch
-- current slice: remaining runtime-proven run-path wrappers (`scripts/dispatch-safety.sh`, `scripts/worktree.sh`) are now thin runtime wrappers with unconditional runtime dispatch and no active `..._IMPLEMENTATION=shell` branch
-- current slice: runtime orchestrator no longer forces `RUNOQ_DISPATCH_SAFETY_IMPLEMENTATION=shell` or `RUNOQ_ISSUE_QUEUE_IMPLEMENTATION=shell` for migrated helper calls, so wrapper defaults (runtime unless explicitly overridden) now flow through orchestrator-managed run paths while shell-owned components remain unchanged
-- current slice: the top-level CLI wrapper `bin/runoq` is now runtime-only (`RUNOQ_IMPLEMENTATION` unset or `runtime`), with migration-era `RUNOQ_IMPLEMENTATION=shell` fallback retired and acceptance coverage aligned to runtime-default/runtime-explicit behavior
-- current slice: standalone `scripts/issue-runner.sh` remains shell-owned; `RUNOQ_ISSUE_RUNNER_IMPLEMENTATION` defaults to `shell` (with `runtime` kept as a compatibility alias), and `cmd/runoq-runtime` no longer exposes a `__issue_runner` shim route
-- current slice: runtime-default wrapper `go run` fallbacks now execute from `RUNOQ_ROOT` (not caller cwd) across CLI and migrated wrappers, with deterministic external-cwd regression coverage to preserve runtime-default behavior in smoke-managed target repos when `RUNOQ_RUNTIME_BIN` is unset
-- current slice: `issue-runner.sh` now runs codex with split event/message artifacts (`--json` plus `-o`), persists round `thread_id`, performs bounded same-thread schema retries via `codex exec resume <thread_id> ...` on payload-schema failures, and `state.sh validate-payload` / `internal/runtimestate` now emit deterministic `payload_schema_valid` + `payload_schema_errors` metadata (with optional `thread_id`) to distinguish schema failures from ordinary normalization or verification mismatches
-- current slice: orchestrator acceptance harness coverage now uses a contract-compatible fake Codex boundary for runtime issue-runner flows (`exec`, optional `resume`, `--json`, `-o`, and `thread.started` event emission), preventing stale harness behavior from masking runtime parity outcomes
-- current slice: `issue-runner.sh` now resolves codex `-o` last-message targets to absolute paths (initial + schema-retry) before `runoq::captured_exec` changes into the sibling worktree, and passes those absolute last-message paths to `state.sh validate-payload`, preserving repo-root log artifact writes and preventing malformed-payload retry loops caused by misplaced last-message files or misresolved runtime validation inputs
-- current slice: sandbox smoke marker commits now force-stage `.runoq/smoke/<run_id>.md` so smoke runs remain stable when target repositories ignore `.runoq/`, with deterministic live-smoke regression coverage for ignored-path staging
-
-Still pending: smoke-gated rollout completion and cleanup (confidence-cycle smoke lanes and final simplification steps in later milestones).
+- planning smoke: `ok` at `/Users/Saruman/Projects/runoq-wt-smoke-planning-v3/.runoq/live-smoke/runs/20260331143911-27567`
+- sandbox smoke: `ok` with run_id `20260331143932`
+- lifecycle smoke: `ok` at `/Users/Saruman/Projects/runoq-wt-smoke-lifecycle-v12/.runoq/live-smoke/runs/20260331144324-4806` (summary status `ok`)
 
 ## Purpose
 
