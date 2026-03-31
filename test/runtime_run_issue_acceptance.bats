@@ -565,6 +565,72 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+@test "issue-runner uses repo-root absolute last-message paths when codex runs in sibling worktree" {
+  remote_dir="$TEST_TMPDIR/direct-runner-abs-paths-remote.git"
+  root_project_dir="$TEST_TMPDIR/direct-runner-abs-paths-root-project"
+  worktree_dir="$TEST_TMPDIR/direct-runner-abs-paths-worktree"
+  prepare_issue_repo "$remote_dir" "$root_project_dir"
+  git -C "$root_project_dir" worktree add -b runoq/42-abs-paths "$worktree_dir" >/dev/null
+
+  config_path="$TEST_TMPDIR/direct-runner-abs-paths-config.json"
+  write_run_config "$config_path"
+
+  fake_codex="$TEST_TMPDIR/fake-codex-abs-paths"
+  write_fake_codex_schema_resume_bin "$fake_codex"
+  export RUNOQ_TEST_FAKE_CODEX_LOG="$TEST_TMPDIR/fake-codex-abs-paths.log"
+  export RUNOQ_TEST_FAKE_CODEX_STATE="$TEST_TMPDIR/fake-codex-abs-paths.state"
+  export RUNOQ_TEST_DEV_COMMAND='mkdir -p src && printf "export const queue = true;\n" > src/queue.ts && git add src/queue.ts && git commit -m "Add queue implementation" >/dev/null && git push -u origin HEAD >/dev/null 2>&1'
+
+  spec_path="$TEST_TMPDIR/direct-runner-abs-paths-spec.md"
+  cat >"$spec_path" <<'EOF'
+## Acceptance Criteria
+- [ ] Add queue implementation
+EOF
+
+  payload_file="$TEST_TMPDIR/direct-runner-abs-paths-payload.json"
+  cat >"$payload_file" <<EOF
+{
+  "issueNumber": 42,
+  "prNumber": 87,
+  "worktree": "$worktree_dir",
+  "branch": "runoq/42-abs-paths",
+  "specPath": "$spec_path",
+  "repo": "owner/repo",
+  "maxRounds": 2,
+  "maxTokenBudget": 500000,
+  "guidelines": []
+}
+EOF
+
+  run bash -lc 'cd "'"$root_project_dir"'" && RUNOQ_IMPLEMENTATION="shell" RUNOQ_ISSUE_RUNNER_IMPLEMENTATION="shell" RUNOQ_CODEX_BIN="'"$fake_codex"'" RUNOQ_CONFIG="'"$config_path"'" "'"$RUNOQ_ROOT"'/scripts/issue-runner.sh" run "'"$payload_file"'"'
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | jq -r '.status')" = "review_ready" ]
+
+  log_dir="$(printf '%s' "$output" | jq -r '.logDir')"
+  round_payload="$root_project_dir/$log_dir/round-1-payload.json"
+  root_message_file="$root_project_dir/$log_dir/round-1-last-message.md"
+  root_retry_message_file="$root_project_dir/$log_dir/round-1-schema-retry-1-last-message.md"
+  worktree_message_file="$worktree_dir/$log_dir/round-1-last-message.md"
+  worktree_retry_message_file="$worktree_dir/$log_dir/round-1-schema-retry-1-last-message.md"
+
+  run test -f "$round_payload"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.payload_schema_valid' "$round_payload")" = "true" ]
+  run test -f "$root_message_file"
+  [ "$status" -eq 0 ]
+  run test -f "$root_retry_message_file"
+  [ "$status" -eq 0 ]
+  run test ! -f "$worktree_message_file"
+  [ "$status" -eq 0 ]
+  run test ! -f "$worktree_retry_message_file"
+  [ "$status" -eq 0 ]
+
+  run rg -F -n -- "exec --dangerously-bypass-approvals-and-sandbox --json -o /" "$RUNOQ_TEST_FAKE_CODEX_LOG"
+  [ "$status" -eq 0 ]
+  run rg -F -n -- "exec resume thread-issue-runner-1 --json -o /" "$RUNOQ_TEST_FAKE_CODEX_LOG"
+  [ "$status" -eq 0 ]
+}
+
 @test "issue-runner enforces bounded schema retry cutoff" {
   remote_dir="$TEST_TMPDIR/direct-runner-cutoff-remote.git"
   project_dir="$TEST_TMPDIR/direct-runner-cutoff-project"

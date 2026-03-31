@@ -431,6 +431,8 @@ ${criteria_files}
     local codex_capture_dir="$logDir/codex-round-${round}"
     local event_log_file="$logDir/round-${round}-codex-events.jsonl"
     local last_message_file="$logDir/round-${round}-last-message.md"
+    local last_message_file_abs
+    last_message_file_abs="$(runoq::absolute_path "$last_message_file")"
     local thread_id_file="$logDir/round-${round}-thread-id.txt"
     local thread_id=""
     local round_tokens=0
@@ -476,7 +478,7 @@ EOF
     fi
 
     RUNOQ_CODEX_CAPTURE_DIR="$codex_capture_dir" \
-      codex_exec exec --dangerously-bypass-approvals-and-sandbox --json -o "$last_message_file" "$codex_prompt" >"$event_log_file" 2>&1
+      codex_exec exec --dangerously-bypass-approvals-and-sandbox --json -o "$last_message_file_abs" "$codex_prompt" >"$event_log_file" 2>&1
 
     thread_id="$(extract_thread_id_from_events "$event_log_file")"
     printf '%s\n' "$thread_id" >"$thread_id_file"
@@ -492,12 +494,14 @@ EOF
       schema_retry_count=$((schema_retry_count + 1))
       local retry_event_log_file="$logDir/round-${round}-schema-retry-${schema_retry_count}-events.jsonl"
       local retry_last_message_file="$logDir/round-${round}-schema-retry-${schema_retry_count}-last-message.md"
+      local retry_last_message_file_abs
+      retry_last_message_file_abs="$(runoq::absolute_path "$retry_last_message_file")"
       local retry_prompt
       retry_prompt="$(build_schema_retry_prompt "$payload_schema_errors_json")"
 
       runoq::log "issue-runner" "round ${round}: schema retry ${schema_retry_count}/${max_schema_retries} on thread ${thread_id}"
       RUNOQ_CODEX_CAPTURE_DIR="$codex_capture_dir/schema-retry-${schema_retry_count}" \
-        codex_exec exec resume "$thread_id" --json -o "$retry_last_message_file" "$retry_prompt" >"$retry_event_log_file" 2>&1
+        codex_exec exec resume "$thread_id" --json -o "$retry_last_message_file_abs" "$retry_prompt" >"$retry_event_log_file" 2>&1
 
       local resumed_thread_id
       resumed_thread_id="$(extract_thread_id_from_events "$retry_event_log_file")"
