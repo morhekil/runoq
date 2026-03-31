@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/saruman/runoq/internal/common"
 )
 
 type callResult struct {
@@ -25,10 +27,10 @@ type callMatcher struct {
 type scriptedExecutor struct {
 	t        *testing.T
 	matchers []callMatcher
-	calls    []commandRequest
+	calls    []common.CommandRequest
 }
 
-func (s *scriptedExecutor) run(_ context.Context, req commandRequest) error {
+func (s *scriptedExecutor) run(_ context.Context, req common.CommandRequest) error {
 	s.calls = append(s.calls, req)
 	if len(s.calls) > len(s.matchers) {
 		s.t.Fatalf("unexpected command %q args=%v", req.Name, req.Args)
@@ -122,19 +124,19 @@ func TestRunRunSubcommandRoutesToRunScript(t *testing.T) {
 	}
 
 	runCall := executor.calls[3]
-	if value, ok := envLookup(runCall.Env, "TARGET_ROOT"); !ok || value != "/tmp/project" {
+	if value, ok := common.EnvLookup(runCall.Env, "TARGET_ROOT"); !ok || value != "/tmp/project" {
 		t.Fatalf("TARGET_ROOT mismatch: %q", value)
 	}
-	if value, ok := envLookup(runCall.Env, "REPO"); !ok || value != "owner/repo" {
+	if value, ok := common.EnvLookup(runCall.Env, "REPO"); !ok || value != "owner/repo" {
 		t.Fatalf("REPO mismatch: %q", value)
 	}
-	if value, ok := envLookup(runCall.Env, "GH_TOKEN"); !ok || value != "runtime-token" {
+	if value, ok := common.EnvLookup(runCall.Env, "GH_TOKEN"); !ok || value != "runtime-token" {
 		t.Fatalf("GH_TOKEN mismatch: %q", value)
 	}
-	if value, ok := envLookup(runCall.Env, "RUNOQ_CONFIG"); !ok || value != "/runoq/config/runoq.json" {
+	if value, ok := common.EnvLookup(runCall.Env, "RUNOQ_CONFIG"); !ok || value != "/runoq/config/runoq.json" {
 		t.Fatalf("RUNOQ_CONFIG mismatch: %q", value)
 	}
-	if value, ok := envLookup(runCall.Env, "PATH"); !ok || !strings.HasPrefix(value, "/runoq/scripts:") {
+	if value, ok := common.EnvLookup(runCall.Env, "PATH"); !ok || !strings.HasPrefix(value, "/runoq/scripts:") {
 		t.Fatalf("PATH does not include scripts prefix: %q", value)
 	}
 }
@@ -191,7 +193,7 @@ func TestRunConfigEmptyFallsBackToDefault(t *testing.T) {
 	}
 
 	runCall := executor.calls[3]
-	if value, ok := envLookup(runCall.Env, "RUNOQ_CONFIG"); !ok || value != "/runoq/config/runoq.json" {
+	if value, ok := common.EnvLookup(runCall.Env, "RUNOQ_CONFIG"); !ok || value != "/runoq/config/runoq.json" {
 		t.Fatalf("RUNOQ_CONFIG mismatch: %q", value)
 	}
 }
@@ -254,7 +256,7 @@ func TestPlanRequiresPath(t *testing.T) {
 		&stderr,
 		"",
 	)
-	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+	app.SetCommandExecutor(func(_ context.Context, req common.CommandRequest) error {
 		return fmt.Errorf("unexpected command: %s %v", req.Name, req.Args)
 	})
 
@@ -280,7 +282,7 @@ func TestUnknownSubcommandPrintsUsage(t *testing.T) {
 		&stderr,
 		"",
 	)
-	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+	app.SetCommandExecutor(func(_ context.Context, req common.CommandRequest) error {
 		return fmt.Errorf("unexpected command: %s %v", req.Name, req.Args)
 	})
 

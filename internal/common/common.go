@@ -19,6 +19,7 @@ type CommandRequest struct {
 	Args   []string
 	Dir    string
 	Env    []string
+	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
 }
@@ -31,6 +32,9 @@ func RunCommand(ctx context.Context, req CommandRequest) error {
 	cmd := exec.CommandContext(ctx, req.Name, req.Args...)
 	cmd.Dir = req.Dir
 	cmd.Env = req.Env
+	if req.Stdin != nil {
+		cmd.Stdin = req.Stdin
+	}
 	if req.Stdout != nil {
 		cmd.Stdout = req.Stdout
 	} else {
