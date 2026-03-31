@@ -71,7 +71,11 @@ Before each developer iteration, record the current baseline in the worktree:
 git -C <worktree> log -1 --format="%H"
 ```
 
-Run codex as a fresh process via Bash. Execute from within the worktree. Use `codex exec --dangerously-bypass-approvals-and-sandbox` so codex can run git commands (commit, push, etc.) without sandbox restrictions. Do NOT combine this with `--full-auto`; `--full-auto` forces Codex back into `workspace-write`. Capture all output to the log file.
+Run codex as a fresh process via Bash. Execute from within the worktree. Use `codex exec --dangerously-bypass-approvals-and-sandbox` so codex can run git commands (commit, push, etc.) without sandbox restrictions. Do NOT combine this with `--full-auto`; `--full-auto` forces Codex back into `workspace-write`.
+
+Run codex with separate artifacts:
+- event stream file: use `--json` and capture stdout JSONL events (contains `thread.started` with `thread_id`)
+- final assistant message file: use `-o <last-message-file>` and pass that file to `state.sh validate-payload`
 
 Codex MUST end each developer round by printing a machine-readable payload block to stdout for `state.sh validate-payload`. Use this exact marker and a fenced JSON block:
 
@@ -104,7 +108,7 @@ Requirements for that payload:
 **First round** (`previousChecklist == "None — first round"`):
 
 ````bash
-cd <worktree> && codex exec --dangerously-bypass-approvals-and-sandbox "Implement the following spec. Read the spec file and all AGENTS.md files for rules and constraints.
+cd <worktree> && codex exec --dangerously-bypass-approvals-and-sandbox --json -o <logDir>/round-<round>-last-message.md "Implement the following spec. Read the spec file and all AGENTS.md files for rules and constraints.
 
 Spec: <specPath>
 
@@ -115,15 +119,28 @@ When done, push your branch: git push origin <branch>
 Then print the required final stdout payload block:
 <!-- runoq:payload:codex-return -->
 ```json
-{ ... }
+{
+  "status": "completed" | "failed" | "stuck",
+  "commits_pushed": ["<sha>", "..."],
+  "commit_range": "<first-sha>..<last-sha>",
+  "files_changed": ["path", "..."],
+  "files_added": ["path", "..."],
+  "files_deleted": ["path", "..."],
+  "tests_run": true | false,
+  "tests_passed": true | false,
+  "test_summary": "<short summary>",
+  "build_passed": true | false,
+  "blockers": ["message", "..."],
+  "notes": "<short note>"
+}
 ```
-" 2>&1 | tee <logDir>/round-<round>-dev.md
+" > <logDir>/round-<round>-codex-events.jsonl 2>&1
 ````
 
 **Subsequent rounds** (`previousChecklist` has content):
 
 ````bash
-cd <worktree> && codex exec --dangerously-bypass-approvals-and-sandbox "Address the following code review or verification feedback. Read the review file at <logDir>/round-<round-1>-diff-review.md for full details if it exists; otherwise use the checklist below as the source of truth.
+cd <worktree> && codex exec --dangerously-bypass-approvals-and-sandbox --json -o <logDir>/round-<round>-last-message.md "Address the following code review or verification feedback. Read the review file at <logDir>/round-<round-1>-diff-review.md for full details if it exists; otherwise use the checklist below as the source of truth.
 
 Checklist:
 <paste previousChecklist>
@@ -138,9 +155,22 @@ When done, push your branch: git push origin <branch>
 Then print the required final stdout payload block:
 <!-- runoq:payload:codex-return -->
 ```json
-{ ... }
+{
+  "status": "completed" | "failed" | "stuck",
+  "commits_pushed": ["<sha>", "..."],
+  "commit_range": "<first-sha>..<last-sha>",
+  "files_changed": ["path", "..."],
+  "files_added": ["path", "..."],
+  "files_deleted": ["path", "..."],
+  "tests_run": true | false,
+  "tests_passed": true | false,
+  "test_summary": "<short summary>",
+  "build_passed": true | false,
+  "blockers": ["message", "..."],
+  "notes": "<short note>"
+}
 ```
-" 2>&1 | tee <logDir>/round-<round>-dev.md
+" > <logDir>/round-<round>-codex-events.jsonl 2>&1
 ````
 
 After codex exits, capture all new commits since the current round baseline:
@@ -151,13 +181,28 @@ git -C <worktree> log --reverse --format="%H %s" <baseline-hash>..HEAD
 
 Store the baseline hash, head hash, commit range, and commit subjects. Do NOT read the dev log file or the diff.
 
-Materialize the normalized developer payload from the captured codex log before verification:
+Extract `thread_id` from the codex JSON event stream (`thread.started`) and persist it in round artifacts.
+
+Materialize the normalized developer payload from the final assistant message before verification:
 
 ```bash
-"$RUNOQ_ROOT/scripts/state.sh" validate-payload <worktree> <baseline-hash> <logDir>/round-<round>-dev.md > <logDir>/round-<round>-payload.json
+"$RUNOQ_ROOT/scripts/state.sh" validate-payload <worktree> <baseline-hash> <logDir>/round-<round>-last-message.md > <logDir>/round-<round>-payload.json
 ```
 
 Use that generated JSON file as the ONLY verification payload. Never hand-write or reconstruct payload JSON yourself inside the prompt.
+
+If `payload_schema_valid != true` and `thread_id` exists, run bounded schema retries in the SAME codex session:
+
+```bash
+codex exec resume <thread_id> --json -o <retry-last-message-file> "<retry prompt>"
+```
+
+The retry prompt MUST:
+- include the exact required payload schema block verbatim
+- list exact `payload_schema_errors` from `validate-payload`
+- ask codex to emit only a corrected final payload block
+
+If schema remains invalid after the bounded retry budget, escalate/fail deterministically for the round (do not continue to verification with an invalid schema payload).
 
 Track token usage from codex output if available and add to `cumulativeTokens`. If `cumulativeTokens >= maxTokenBudget`, stop immediately and return a budget exhaustion payload to `github-orchestrator`.
 
@@ -264,6 +309,12 @@ For `status: budget_exhausted`, include the current verified state and explain w
 
 - Verification is clean and review is allowed.
 - Return `status: review_ready` with the verified diff scope, related files, review log path, and cumulative token usage.
+
+### Scenario: payload schema retry
+
+- `validate-payload` reports `payload_schema_valid: false`.
+- If `thread_id` exists, resume the SAME session with `codex exec resume <thread_id> ...` and include exact schema + `payload_schema_errors`.
+- Retry only up to the deterministic schema retry budget, then fail/escalate deterministically if still invalid.
 
 ### Scenario: stuck
 

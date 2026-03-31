@@ -53,6 +53,8 @@ wrap_payload_fixture() {
   [ "$status" -eq 0 ]
   [[ "$output" == *'"status": "failed"'* ]]
   [[ "$output" == *'"payload_source": "synthetic"'* ]]
+  [[ "$output" == *'"payload_schema_valid": false'* ]]
+  [[ "$output" == *'payload_missing_or_malformed'* ]]
   [[ "$output" == *'Codex did not return a structured payload'* ]]
 }
 
@@ -69,6 +71,8 @@ wrap_payload_fixture() {
   [ "$status" -eq 0 ]
   [[ "$output" == *'"status": "failed"'* ]]
   [[ "$output" == *'"payload_source": "synthetic"'* ]]
+  [[ "$output" == *'"payload_schema_valid": false'* ]]
+  [[ "$output" == *'payload_missing_or_malformed'* ]]
   [[ "$output" == *'Codex did not return a structured payload'* ]]
 }
 
@@ -83,6 +87,8 @@ wrap_payload_fixture() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *'"payload_source": "synthetic"'* ]]
+  [[ "$output" == *'"payload_schema_valid": false'* ]]
+  [[ "$output" == *'payload_missing_or_malformed'* ]]
   [[ "$output" == *'"commits_pushed"'* ]]
 }
 
@@ -99,6 +105,8 @@ wrap_payload_fixture() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *'"payload_source": "patched"'* ]]
+  [[ "$output" == *'"payload_schema_valid": false'* ]]
+  [[ "$output" == *'commits_pushed_missing_or_non_string_array'* ]]
   [[ "$output" == *'"files_changed": ['* ]]
   [[ "$output" == *'"patched_fields": ['* ]]
 }
@@ -113,6 +121,8 @@ wrap_payload_fixture() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *'"status": "failed"'* ]]
+  [[ "$output" == *'"payload_schema_valid": false'* ]]
+  [[ "$output" == *'status_missing_or_invalid'* ]]
   [[ "$output" == *'"patched_fields": ['* ]]
 }
 
@@ -126,6 +136,8 @@ wrap_payload_fixture() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *'"status": "failed"'* ]]
+  [[ "$output" == *'"payload_schema_valid": false'* ]]
+  [[ "$output" == *'tests_run_missing_or_non_boolean'* ]]
   [[ "$output" != *'unknown_field'* ]]
   [[ "$output" == *'"tests_run": false'* ]]
 }
@@ -164,6 +176,8 @@ EOF
   [[ "$output" == *'"files_changed": []'* ]]
   [[ "$output" == *'"files_added": ['* ]]
   [[ "$output" == *'"src/cli.ts"'* ]]
+  [[ "$output" == *'"payload_schema_valid": true'* ]]
+  [[ "$output" == *'"payload_schema_errors": []'* ]]
   [[ "$output" == *'"patched_fields": ['* ]]
   [[ "$output" == *'"files_changed"'* ]]
   [[ "$output" == *'"commits_pushed"'* ]]

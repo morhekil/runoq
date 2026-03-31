@@ -99,12 +99,15 @@ Primary callers: `orchestrator.sh`, tests.
 
 | Subcommand | Arguments | JSON/stdout contract | Side effects |
 | --- | --- | --- | --- |
-| `run` | `<payload-json-file>` | JSON object with `status` (`review_ready`, `fail`, `budget_exhausted`), `issueNumber`, `prNumber`, `round`, `verificationPassed`, `verificationFailures`, `changedFiles`, `relatedFiles`, `cumulativeTokens`, `summary`, `caveats` | invokes codex in worktree, validates payload via `state.sh`, calls `verify.sh round` (including criteria tamper check when `criteria_commit` is present in payload), iterates on failure up to `maxRounds`, posts verification failure comments to PR |
+| `run` | `<payload-json-file>` | JSON object with `status` (`review_ready`, `fail`, `budget_exhausted`), `issueNumber`, `prNumber`, `round`, `verificationPassed`, `verificationFailures`, `changedFiles`, `relatedFiles`, `cumulativeTokens`, `summary`, `caveats` | invokes codex in worktree, captures codex JSON events plus final assistant message separately, persists per-round `thread_id`, validates payload via `state.sh`, performs bounded same-thread schema retries via `codex exec resume <thread_id> ...` when payload schema is invalid, calls `verify.sh round` (including criteria tamper check when `criteria_commit` is present in payload), iterates on failure up to `maxRounds`, posts verification failure comments to PR |
 
 The payload JSON file must include: `issueNumber`, `prNumber`, `worktree`, `branch`, `specPath`, `repo`, `maxRounds`, `maxTokenBudget`. Optional fields: `round`, `logDir`, `previousChecklist`, `cumulativeTokens`, `guidelines`, `criteria_commit`.
 
 Notes:
 
+- Invokes codex with `--json -o <last-message-file>` and keeps separate event/message artifacts.
+- Persists round `thread_id` from `thread.started` events and includes it in normalized payload artifacts.
+- Performs bounded schema retries in the same codex session (`codex exec resume <thread_id> ...`) when `payload_schema_valid` is false.
 - Injects `criteria_commit` into the payload file before verification when present, enabling the tamper check.
 - Tracks cumulative token usage across rounds and checks budget before and after each round.
 - Expands review scope by finding files that import changed files.
@@ -146,7 +149,7 @@ Primary callers: `run.sh`, `mentions.sh`, `gh-pr-lifecycle.sh`, `maintenance.sh`
 | `record-mention` | `<comment-id> [--state-dir DIR]` | echoes the full processed-mention JSON array | atomically writes `processed-mentions.json` |
 | `has-mention` | `<comment-id> [--state-dir DIR]` | prints `true` and exits 0 when present; prints `false` and exits non-zero when absent | reads processed mention state |
 | `extract-payload` | `<codex-output-file>` | prints the last fenced block from the source file | reads a payload file |
-| `validate-payload` | `<worktree> <base-sha> <codex-output-file>` | prints normalized payload JSON with fields such as `status`, file lists, test/build booleans, `payload_source`, `patched_fields`, `discrepancies` | reads git state and may synthesize fallback payload data |
+| `validate-payload` | `<worktree> <base-sha> <codex-output-file>` | prints normalized payload JSON with fields such as `status`, file lists, test/build booleans, `payload_schema_valid`, `payload_schema_errors`, `payload_source`, `patched_fields`, `discrepancies`, and optional `thread_id` | reads git state, validates payload schema shape/types, and may synthesize fallback payload data |
 
 Allowed phase transitions:
 

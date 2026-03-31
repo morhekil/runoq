@@ -59,21 +59,24 @@ func (e contractError) Error() string {
 }
 
 type normalizedPayload struct {
-	Status        string   `json:"status"`
-	CommitsPushed []string `json:"commits_pushed"`
-	CommitRange   string   `json:"commit_range"`
-	FilesChanged  []string `json:"files_changed"`
-	FilesAdded    []string `json:"files_added"`
-	FilesDeleted  []string `json:"files_deleted"`
-	TestsRun      bool     `json:"tests_run"`
-	TestsPassed   bool     `json:"tests_passed"`
-	TestSummary   string   `json:"test_summary"`
-	BuildPassed   bool     `json:"build_passed"`
-	Blockers      []string `json:"blockers"`
-	Notes         string   `json:"notes"`
-	PayloadSource string   `json:"payload_source"`
-	PatchedFields []string `json:"patched_fields"`
-	Discrepancies []string `json:"discrepancies"`
+	Status              string   `json:"status"`
+	CommitsPushed       []string `json:"commits_pushed"`
+	CommitRange         string   `json:"commit_range"`
+	FilesChanged        []string `json:"files_changed"`
+	FilesAdded          []string `json:"files_added"`
+	FilesDeleted        []string `json:"files_deleted"`
+	TestsRun            bool     `json:"tests_run"`
+	TestsPassed         bool     `json:"tests_passed"`
+	TestSummary         string   `json:"test_summary"`
+	BuildPassed         bool     `json:"build_passed"`
+	Blockers            []string `json:"blockers"`
+	Notes               string   `json:"notes"`
+	PayloadSchemaValid  bool     `json:"payload_schema_valid"`
+	PayloadSchemaErrors []string `json:"payload_schema_errors"`
+	ThreadID            string   `json:"thread_id,omitempty"`
+	PayloadSource       string   `json:"payload_source"`
+	PatchedFields       []string `json:"patched_fields"`
+	Discrepancies       []string `json:"discrepancies"`
 }
 
 type groundTruth struct {
@@ -347,16 +350,32 @@ func (a *App) runValidatePayload(ctx context.Context, args []string) int {
 	}
 
 	block, err := extractPayloadBlock(source)
+	threadID, threadErr := extractThreadID(source)
+	if threadErr != nil {
+		threadID = ""
+	}
 	if err != nil || block == "" {
-		return writeJSON(a.stdout, a.stderr, synthesizePayload(truth))
+		synthesized := synthesizePayload(truth)
+		if threadID != "" {
+			synthesized.ThreadID = threadID
+		}
+		return writeJSON(a.stdout, a.stderr, synthesized)
 	}
 
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(block), &payload); err != nil {
-		return writeJSON(a.stdout, a.stderr, synthesizePayload(truth))
+		synthesized := synthesizePayload(truth)
+		if threadID != "" {
+			synthesized.ThreadID = threadID
+		}
+		return writeJSON(a.stdout, a.stderr, synthesized)
 	}
 
-	return writeJSON(a.stdout, a.stderr, normalizePayload(payload, truth))
+	normalized := normalizePayload(payload, truth)
+	if threadID != "" {
+		normalized.ThreadID = threadID
+	}
+	return writeJSON(a.stdout, a.stderr, normalized)
 }
 
 func (a *App) groundTruth(ctx context.Context, worktree string, baseSHA string) (groundTruth, error) {
@@ -514,20 +533,23 @@ func (a *App) printUsage() {
 }
 
 func normalizePayload(payload map[string]any, truth groundTruth) normalizedPayload {
+	schemaErrors := payloadSchemaErrors(payload)
 	result := normalizedPayload{
-		Status:        validStatus(payload["status"]),
-		CommitsPushed: truthBackedStringArray(payload["commits_pushed"], truth.CommitsPushed),
-		CommitRange:   truthBackedString(payload["commit_range"], truth.CommitRange),
-		FilesChanged:  truthBackedStringArray(payload["files_changed"], truth.FilesChanged),
-		FilesAdded:    truthBackedStringArray(payload["files_added"], truth.FilesAdded),
-		FilesDeleted:  truthBackedStringArray(payload["files_deleted"], truth.FilesDeleted),
-		TestsRun:      boolOr(payload["tests_run"], false),
-		TestsPassed:   boolOr(payload["tests_passed"], false),
-		TestSummary:   stringOrDefault(payload["test_summary"], ""),
-		BuildPassed:   boolOr(payload["build_passed"], false),
-		Blockers:      stringArrayOr(payload["blockers"], []string{}),
-		Notes:         stringOrDefault(payload["notes"], ""),
-		PayloadSource: "patched",
+		Status:              validStatus(payload["status"]),
+		CommitsPushed:       truthBackedStringArray(payload["commits_pushed"], truth.CommitsPushed),
+		CommitRange:         truthBackedString(payload["commit_range"], truth.CommitRange),
+		FilesChanged:        truthBackedStringArray(payload["files_changed"], truth.FilesChanged),
+		FilesAdded:          truthBackedStringArray(payload["files_added"], truth.FilesAdded),
+		FilesDeleted:        truthBackedStringArray(payload["files_deleted"], truth.FilesDeleted),
+		TestsRun:            boolOr(payload["tests_run"], false),
+		TestsPassed:         boolOr(payload["tests_passed"], false),
+		TestSummary:         stringOrDefault(payload["test_summary"], ""),
+		BuildPassed:         boolOr(payload["build_passed"], false),
+		Blockers:            stringArrayOr(payload["blockers"], []string{}),
+		Notes:               stringOrDefault(payload["notes"], ""),
+		PayloadSchemaValid:  len(schemaErrors) == 0,
+		PayloadSchemaErrors: schemaErrors,
+		PayloadSource:       "patched",
 	}
 
 	patched := make([]string, 0)
@@ -616,24 +638,29 @@ func normalizePayload(payload map[string]any, truth groundTruth) normalizedPaylo
 	if result.Discrepancies == nil {
 		result.Discrepancies = []string{}
 	}
+	if result.PayloadSchemaErrors == nil {
+		result.PayloadSchemaErrors = []string{}
+	}
 	return result
 }
 
 func synthesizePayload(truth groundTruth) normalizedPayload {
 	return normalizedPayload{
-		Status:        "failed",
-		CommitsPushed: truth.CommitsPushed,
-		CommitRange:   truth.CommitRange,
-		FilesChanged:  truth.FilesChanged,
-		FilesAdded:    truth.FilesAdded,
-		FilesDeleted:  truth.FilesDeleted,
-		TestsRun:      false,
-		TestsPassed:   false,
-		TestSummary:   "",
-		BuildPassed:   false,
-		Blockers:      []string{"Codex did not return a structured payload"},
-		Notes:         "",
-		PayloadSource: "synthetic",
+		Status:              "failed",
+		CommitsPushed:       truth.CommitsPushed,
+		CommitRange:         truth.CommitRange,
+		FilesChanged:        truth.FilesChanged,
+		FilesAdded:          truth.FilesAdded,
+		FilesDeleted:        truth.FilesDeleted,
+		TestsRun:            false,
+		TestsPassed:         false,
+		TestSummary:         "",
+		BuildPassed:         false,
+		Blockers:            []string{"Codex did not return a structured payload"},
+		Notes:               "",
+		PayloadSchemaValid:  false,
+		PayloadSchemaErrors: []string{"payload_missing_or_malformed"},
+		PayloadSource:       "synthetic",
 		PatchedFields: []string{
 			"status",
 			"commits_pushed",
@@ -650,6 +677,47 @@ func synthesizePayload(truth groundTruth) normalizedPayload {
 		},
 		Discrepancies: []string{"payload_missing_or_malformed"},
 	}
+}
+
+func payloadSchemaErrors(payload map[string]any) []string {
+	errorsList := make([]string, 0, 12)
+	if !isValidStatus(payload["status"]) {
+		errorsList = append(errorsList, "status_missing_or_invalid")
+	}
+	if _, ok := parseStringArray(payload["commits_pushed"]); !ok {
+		errorsList = append(errorsList, "commits_pushed_missing_or_non_string_array")
+	}
+	if _, ok := payload["commit_range"].(string); !ok {
+		errorsList = append(errorsList, "commit_range_missing_or_non_string")
+	}
+	if _, ok := parseStringArray(payload["files_changed"]); !ok {
+		errorsList = append(errorsList, "files_changed_missing_or_non_string_array")
+	}
+	if _, ok := parseStringArray(payload["files_added"]); !ok {
+		errorsList = append(errorsList, "files_added_missing_or_non_string_array")
+	}
+	if _, ok := parseStringArray(payload["files_deleted"]); !ok {
+		errorsList = append(errorsList, "files_deleted_missing_or_non_string_array")
+	}
+	if _, ok := payload["tests_run"].(bool); !ok {
+		errorsList = append(errorsList, "tests_run_missing_or_non_boolean")
+	}
+	if _, ok := payload["tests_passed"].(bool); !ok {
+		errorsList = append(errorsList, "tests_passed_missing_or_non_boolean")
+	}
+	if _, ok := payload["test_summary"].(string); !ok {
+		errorsList = append(errorsList, "test_summary_missing_or_non_string")
+	}
+	if _, ok := payload["build_passed"].(bool); !ok {
+		errorsList = append(errorsList, "build_passed_missing_or_non_boolean")
+	}
+	if _, ok := parseStringArray(payload["blockers"]); !ok {
+		errorsList = append(errorsList, "blockers_missing_or_non_string_array")
+	}
+	if _, ok := payload["notes"].(string); !ok {
+		errorsList = append(errorsList, "notes_missing_or_non_string")
+	}
+	return uniqueSorted(errorsList)
 }
 
 func validatePhaseTransition(from string, to string) error {
@@ -749,6 +817,51 @@ func extractPayloadBlock(path string) (string, error) {
 		}
 	}
 	return lastBlock, nil
+}
+
+func extractThreadID(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+
+	threadID := ""
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(line), &payload); err != nil {
+			continue
+		}
+
+		eventType := stringOrDefault(payload["type"], "")
+		if eventType == "" {
+			eventType = stringOrDefault(payload["event"], "")
+		}
+		if eventType != "thread.started" {
+			continue
+		}
+
+		if id := threadIDFromEvent(payload); id != "" {
+			threadID = id
+		}
+	}
+
+	return threadID, nil
+}
+
+func threadIDFromEvent(event map[string]any) string {
+	if id := strings.TrimSpace(stringOrDefault(event["thread_id"], "")); id != "" {
+		return id
+	}
+	threadValue, ok := event["thread"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(stringOrDefault(threadValue["id"], ""))
 }
 
 func readMentions(path string) ([]int64, error) {

@@ -151,6 +151,12 @@ func TestValidatePayloadSynthesizesWhenMissingJSON(t *testing.T) {
 	if !strings.Contains(stdout, `"payload_source": "synthetic"`) {
 		t.Fatalf("expected synthetic payload: %q", stdout)
 	}
+	if !strings.Contains(stdout, `"payload_schema_valid": false`) {
+		t.Fatalf("expected payload_schema_valid=false: %q", stdout)
+	}
+	if !strings.Contains(stdout, `"payload_schema_errors": [`) || !strings.Contains(stdout, "payload_missing_or_malformed") {
+		t.Fatalf("expected payload schema errors in output: %q", stdout)
+	}
 	if !strings.Contains(stdout, "Codex did not return a structured payload") {
 		t.Fatalf("missing synthetic blocker message: %q", stdout)
 	}
@@ -182,8 +188,102 @@ func TestValidatePayloadSynthesizesWhenSourceFileMissing(t *testing.T) {
 	if !strings.Contains(stdout, `"payload_source": "synthetic"`) {
 		t.Fatalf("expected synthetic payload: %q", stdout)
 	}
+	if !strings.Contains(stdout, `"payload_schema_valid": false`) {
+		t.Fatalf("expected payload_schema_valid=false: %q", stdout)
+	}
+	if !strings.Contains(stdout, `"payload_schema_errors": [`) || !strings.Contains(stdout, "payload_missing_or_malformed") {
+		t.Fatalf("expected payload schema errors in output: %q", stdout)
+	}
 	if !strings.Contains(stdout, "Codex did not return a structured payload") {
 		t.Fatalf("missing synthetic blocker message: %q", stdout)
+	}
+}
+
+func TestValidatePayloadIncludesThreadIDAndSchemaMetadata(t *testing.T) {
+	t.Parallel()
+
+	repoDir, baseSHA := setupPayloadRepo(t)
+	if err := os.WriteFile(filepath.Join(repoDir, "src", "app.ts"), []byte("console.log('updated')\n"), 0o644); err != nil {
+		t.Fatalf("write updated source: %v", err)
+	}
+	mustRun(t, repoDir, "git", "add", "src/app.ts")
+	mustRun(t, repoDir, "git", "commit", "-m", "Update app")
+
+	source := filepath.Join(repoDir, "out.txt")
+	content := strings.Join([]string{
+		`{"type":"thread.started","thread_id":"thread-abc123"}`,
+		"<!-- runoq:payload:codex-return -->",
+		"```json",
+		`{"status":"completed","commits_pushed":["fake"],"commit_range":"fake..fake","files_changed":[],"files_added":[],"files_deleted":[],"tests_run":true,"tests_passed":true,"test_summary":"ok","build_passed":true,"blockers":[],"notes":"ok"}`,
+		"```",
+	}, "\n")
+	if err := os.WriteFile(source, []byte(content), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	code, stdout, stderr := runApp(
+		t,
+		[]string{"validate-payload", repoDir, baseSHA, source},
+		nil,
+		repoDir,
+		"",
+		nil,
+	)
+	if code != 0 {
+		t.Fatalf("validate-payload code=%d stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stdout, `"thread_id": "thread-abc123"`) {
+		t.Fatalf("expected thread_id in output: %q", stdout)
+	}
+	if !strings.Contains(stdout, `"payload_schema_valid": true`) {
+		t.Fatalf("expected payload_schema_valid=true: %q", stdout)
+	}
+	if !strings.Contains(stdout, `"payload_schema_errors": []`) {
+		t.Fatalf("expected empty payload schema errors: %q", stdout)
+	}
+}
+
+func TestValidatePayloadFlagsSchemaErrorsForInvalidFieldTypes(t *testing.T) {
+	t.Parallel()
+
+	repoDir, baseSHA := setupPayloadRepo(t)
+	if err := os.WriteFile(filepath.Join(repoDir, "src", "app.ts"), []byte("console.log('updated')\n"), 0o644); err != nil {
+		t.Fatalf("write updated source: %v", err)
+	}
+	mustRun(t, repoDir, "git", "add", "src/app.ts")
+	mustRun(t, repoDir, "git", "commit", "-m", "Update app")
+
+	source := filepath.Join(repoDir, "out-invalid.txt")
+	content := strings.Join([]string{
+		`{"type":"thread.started","thread_id":"thread-invalid"}`,
+		"<!-- runoq:payload:codex-return -->",
+		"```json",
+		`{"status":"completed","commits_pushed":[],"commit_range":"","files_changed":[],"files_added":[],"files_deleted":[],"tests_run":true,"tests_passed":"yes","test_summary":"","build_passed":"true","blockers":[],"notes":""}`,
+		"```",
+	}, "\n")
+	if err := os.WriteFile(source, []byte(content), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	code, stdout, stderr := runApp(
+		t,
+		[]string{"validate-payload", repoDir, baseSHA, source},
+		nil,
+		repoDir,
+		"",
+		nil,
+	)
+	if code != 0 {
+		t.Fatalf("validate-payload code=%d stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stdout, `"payload_schema_valid": false`) {
+		t.Fatalf("expected payload_schema_valid=false: %q", stdout)
+	}
+	if !strings.Contains(stdout, "tests_passed_missing_or_non_boolean") {
+		t.Fatalf("expected tests_passed schema error: %q", stdout)
+	}
+	if !strings.Contains(stdout, "build_passed_missing_or_non_boolean") {
+		t.Fatalf("expected build_passed schema error: %q", stdout)
 	}
 }
 

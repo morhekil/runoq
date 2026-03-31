@@ -79,6 +79,158 @@ EOF
   chmod +x "$path"
 }
 
+write_fake_codex_schema_resume_bin() {
+  local path="$1"
+  cat >"$path" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+log_file="${RUNOQ_TEST_FAKE_CODEX_LOG:?}"
+state_file="${RUNOQ_TEST_FAKE_CODEX_STATE:?}"
+printf '%s\n' "$*" >>"$log_file"
+
+mode="${1:-}"
+shift || true
+[[ "$mode" == "exec" ]] || exit 2
+
+resume_mode="false"
+if [[ "${1:-}" == "resume" ]]; then
+  resume_mode="true"
+  resume_thread_id="${2:-}"
+  printf 'RESUME_THREAD_ID=%s\n' "$resume_thread_id" >>"$log_file"
+  shift 2 || true
+fi
+
+output_file=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dangerously-bypass-approvals-and-sandbox|--json)
+      shift
+      ;;
+    -o)
+      output_file="${2:-}"
+      shift 2
+      ;;
+    *)
+      prompt="$1"
+      shift
+      ;;
+  esac
+done
+
+[[ -n "$output_file" ]] || exit 3
+
+if [[ ! -f "$state_file" ]]; then
+  printf '0\n' >"$state_file"
+fi
+count="$(cat "$state_file")"
+count=$((count + 1))
+printf '%s\n' "$count" >"$state_file"
+
+if [[ "$count" -eq 1 ]]; then
+  if [[ -n "${RUNOQ_TEST_DEV_COMMAND:-}" ]]; then
+    bash -lc "$RUNOQ_TEST_DEV_COMMAND"
+  fi
+  printf '{"type":"thread.started","thread_id":"thread-issue-runner-1"}\n'
+  cat >"$output_file" <<'PAYLOAD'
+<!-- runoq:payload:codex-return -->
+```json
+{
+  "status": "completed",
+  "tests_run": true,
+  "tests_passed": "yes",
+  "build_passed": true
+}
+```
+PAYLOAD
+  exit 0
+fi
+
+commit_sha="$(git rev-parse HEAD)"
+printf '{"type":"thread.started","thread_id":"thread-issue-runner-1"}\n'
+cat >"$output_file" <<PAYLOAD
+<!-- runoq:payload:codex-return -->
+\`\`\`json
+{
+  "status": "completed",
+  "commits_pushed": ["$commit_sha"],
+  "commit_range": "$commit_sha..$commit_sha",
+  "files_changed": [],
+  "files_added": ["src/queue.ts"],
+  "files_deleted": [],
+  "tests_run": true,
+  "tests_passed": true,
+  "test_summary": "ok",
+  "build_passed": true,
+  "blockers": [],
+  "notes": "ok"
+}
+\`\`\`
+PAYLOAD
+EOF
+  chmod +x "$path"
+}
+
+write_fake_codex_always_schema_invalid_bin() {
+  local path="$1"
+  cat >"$path" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+log_file="${RUNOQ_TEST_FAKE_CODEX_LOG:?}"
+state_file="${RUNOQ_TEST_FAKE_CODEX_STATE:?}"
+printf '%s\n' "$*" >>"$log_file"
+
+mode="${1:-}"
+shift || true
+[[ "$mode" == "exec" ]] || exit 2
+
+if [[ "${1:-}" == "resume" ]]; then
+  resume_thread_id="${2:-}"
+  printf 'RESUME_THREAD_ID=%s\n' "$resume_thread_id" >>"$log_file"
+  shift 2 || true
+fi
+
+output_file=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dangerously-bypass-approvals-and-sandbox|--json)
+      shift
+      ;;
+    -o)
+      output_file="${2:-}"
+      shift 2
+      ;;
+    *)
+      prompt="$1"
+      shift
+      ;;
+  esac
+done
+
+[[ -n "$output_file" ]] || exit 3
+
+if [[ ! -f "$state_file" ]]; then
+  printf '0\n' >"$state_file"
+fi
+count="$(cat "$state_file")"
+count=$((count + 1))
+printf '%s\n' "$count" >"$state_file"
+
+printf '{"type":"thread.started","thread_id":"thread-issue-runner-bad"}\n'
+cat >"$output_file" <<'PAYLOAD'
+<!-- runoq:payload:codex-return -->
+```json
+{
+  "status": "completed",
+  "tests_passed": "yes"
+}
+```
+PAYLOAD
+EOF
+  chmod +x "$path"
+}
+
 happy_issue_body() {
   cat <<'EOF'
 <!-- runoq:meta
@@ -355,6 +507,107 @@ assert_capture_contains() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"FAKE_GO_CWD:$RUNOQ_ROOT"* ]]
   [[ "$output" == *"FAKE_GO_ARGS:run $RUNOQ_ROOT/cmd/runoq-runtime __issue_runner run $payload_file"* ]]
+}
+
+@test "issue-runner resumes the same codex thread for payload schema retries" {
+  remote_dir="$TEST_TMPDIR/direct-runner-resume-remote.git"
+  project_dir="$TEST_TMPDIR/direct-runner-resume-project"
+  prepare_issue_repo "$remote_dir" "$project_dir"
+
+  config_path="$TEST_TMPDIR/direct-runner-resume-config.json"
+  write_run_config "$config_path"
+
+  fake_codex="$TEST_TMPDIR/fake-codex-schema-resume"
+  write_fake_codex_schema_resume_bin "$fake_codex"
+  export RUNOQ_TEST_FAKE_CODEX_LOG="$TEST_TMPDIR/fake-codex-schema-resume.log"
+  export RUNOQ_TEST_FAKE_CODEX_STATE="$TEST_TMPDIR/fake-codex-schema-resume.state"
+  export RUNOQ_TEST_DEV_COMMAND='mkdir -p src && printf "export const queue = true;\n" > src/queue.ts && git add src/queue.ts && git commit -m "Add queue implementation" >/dev/null && git push -u origin HEAD >/dev/null 2>&1'
+
+  spec_path="$TEST_TMPDIR/direct-runner-resume-spec.md"
+  cat >"$spec_path" <<'EOF'
+## Acceptance Criteria
+- [ ] Add queue implementation
+EOF
+
+  payload_file="$TEST_TMPDIR/direct-runner-resume-payload.json"
+  cat >"$payload_file" <<EOF
+{
+  "issueNumber": 42,
+  "prNumber": 87,
+  "worktree": "$project_dir",
+  "branch": "main",
+  "specPath": "$spec_path",
+  "repo": "owner/repo",
+  "maxRounds": 2,
+  "maxTokenBudget": 500000,
+  "guidelines": []
+}
+EOF
+
+  run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION="shell" RUNOQ_ISSUE_RUNNER_IMPLEMENTATION="shell" RUNOQ_CODEX_BIN="'"$fake_codex"'" RUNOQ_CONFIG="'"$config_path"'" "'"$RUNOQ_ROOT"'/scripts/issue-runner.sh" run "'"$payload_file"'"'
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | jq -r '.status')" != "budget_exhausted" ]
+
+  log_dir="$(printf '%s' "$output" | jq -r '.logDir')"
+  round_payload="$project_dir/$log_dir/round-1-payload.json"
+  thread_file="$project_dir/$log_dir/round-1-thread-id.txt"
+  retry_message_file="$project_dir/$log_dir/round-1-schema-retry-1-last-message.md"
+
+  run test -f "$thread_file"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$thread_file")" = "thread-issue-runner-1" ]
+  run test -f "$retry_message_file"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.thread_id' "$round_payload")" = "thread-issue-runner-1" ]
+  [ "$(jq -r '.payload_schema_valid' "$round_payload")" = "true" ]
+
+  run rg -F -n "exec resume thread-issue-runner-1 --json -o" "$RUNOQ_TEST_FAKE_CODEX_LOG"
+  [ "$status" -eq 0 ]
+}
+
+@test "issue-runner enforces bounded schema retry cutoff" {
+  remote_dir="$TEST_TMPDIR/direct-runner-cutoff-remote.git"
+  project_dir="$TEST_TMPDIR/direct-runner-cutoff-project"
+  prepare_issue_repo "$remote_dir" "$project_dir"
+
+  config_path="$TEST_TMPDIR/direct-runner-cutoff-config.json"
+  write_run_config "$config_path"
+
+  fake_codex="$TEST_TMPDIR/fake-codex-schema-cutoff"
+  write_fake_codex_always_schema_invalid_bin "$fake_codex"
+  export RUNOQ_TEST_FAKE_CODEX_LOG="$TEST_TMPDIR/fake-codex-schema-cutoff.log"
+  export RUNOQ_TEST_FAKE_CODEX_STATE="$TEST_TMPDIR/fake-codex-schema-cutoff.state"
+  export RUNOQ_TEST_DEV_COMMAND=''
+
+  spec_path="$TEST_TMPDIR/direct-runner-cutoff-spec.md"
+  cat >"$spec_path" <<'EOF'
+## Acceptance Criteria
+- [ ] Add queue implementation
+EOF
+
+  payload_file="$TEST_TMPDIR/direct-runner-cutoff-payload.json"
+  cat >"$payload_file" <<EOF
+{
+  "issueNumber": 42,
+  "prNumber": 87,
+  "worktree": "$project_dir",
+  "branch": "main",
+  "specPath": "$spec_path",
+  "repo": "owner/repo",
+  "maxRounds": 1,
+  "maxTokenBudget": 500000,
+  "guidelines": []
+}
+EOF
+
+  run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION="shell" RUNOQ_ISSUE_RUNNER_IMPLEMENTATION="shell" RUNOQ_CODEX_BIN="'"$fake_codex"'" RUNOQ_CONFIG="'"$config_path"'" "'"$RUNOQ_ROOT"'/scripts/issue-runner.sh" run "'"$payload_file"'"'
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | jq -r '.status')" = "fail" ]
+
+  [ "$(cat "$RUNOQ_TEST_FAKE_CODEX_STATE")" = "3" ]
+  [ "$(printf '%s' "$output" | jq -r '.verificationFailures[0]')" = "codex payload schema invalid after 2 resume attempt(s)" ]
+  run rg -F -n "exec resume thread-issue-runner-bad --json -o" "$RUNOQ_TEST_FAKE_CODEX_LOG"
+  [ "$status" -eq 0 ]
 }
 
 @test "acceptance parity: run --issue no-commit escalation matches shell and runtime" {

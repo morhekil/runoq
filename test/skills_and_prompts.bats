@@ -100,6 +100,16 @@ load test_helper
   [ "$status" -eq 0 ]
   run grep -n "Do NOT combine this with \`--full-auto\`" "$RUNOQ_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
+  run grep -n "thread.started" "$RUNOQ_ROOT/.claude/agents/issue-runner.md"
+  [ "$status" -eq 0 ]
+  run grep -n -- "--json -o <logDir>/round-<round>-last-message.md" "$RUNOQ_ROOT/.claude/agents/issue-runner.md"
+  [ "$status" -eq 0 ]
+  run grep -n "codex exec resume <thread_id>" "$RUNOQ_ROOT/.claude/agents/issue-runner.md"
+  [ "$status" -eq 0 ]
+  run grep -n "payload_schema_valid" "$RUNOQ_ROOT/.claude/agents/issue-runner.md"
+  [ "$status" -eq 0 ]
+  run grep -n "payload_schema_errors" "$RUNOQ_ROOT/.claude/agents/issue-runner.md"
+  [ "$status" -eq 0 ]
   run grep -n "runoq:payload:codex-return" "$RUNOQ_ROOT/.claude/agents/issue-runner.md"
   [ "$status" -eq 0 ]
   run grep -n "runoq:payload:issue-runner" "$RUNOQ_ROOT/.claude/agents/issue-runner.md"

@@ -49,6 +49,74 @@ codex_exec() {
   runoq::captured_exec codex "$worktree" "$codex_bin" "$@"
 }
 
+required_payload_schema_block() {
+  cat <<'EOF'
+<!-- runoq:payload:codex-return -->
+```json
+{
+  "status": "completed" | "failed" | "stuck",
+  "commits_pushed": ["<sha>", "..."],
+  "commit_range": "<first-sha>..<last-sha>",
+  "files_changed": ["path", "..."],
+  "files_added": ["path", "..."],
+  "files_deleted": ["path", "..."],
+  "tests_run": true | false,
+  "tests_passed": true | false,
+  "test_summary": "<short summary>",
+  "build_passed": true | false,
+  "blockers": ["message", "..."],
+  "notes": "<short note>"
+}
+```
+EOF
+}
+
+build_schema_retry_prompt() {
+  local schema_errors_json="$1"
+  local errors_text
+  errors_text="$(printf '%s' "$schema_errors_json" | jq -r '.[] | "- " + .' 2>/dev/null || true)"
+  if [[ -z "$errors_text" ]]; then
+    errors_text="- payload_missing_or_malformed"
+  fi
+
+  cat <<EOF
+Your last payload block did not satisfy the required payload schema.
+
+Detected schema errors:
+${errors_text}
+
+Return ONLY a corrected payload block using this exact schema (verbatim):
+$(required_payload_schema_block)
+
+Do not run additional commands. Re-emit only the corrected final payload block with strict JSON types.
+EOF
+}
+
+extract_thread_id_from_events() {
+  local event_log_file="$1"
+  [[ -f "$event_log_file" ]] || return 0
+  jq -Rsr '
+    split("\n")
+    | map((try fromjson catch empty))
+    | map(
+        select((.type // .event // "") == "thread.started")
+        | (.thread_id // .thread.id // empty)
+      )
+    | map(select(type == "string" and length > 0))
+    | last // empty
+  ' <"$event_log_file" 2>/dev/null || true
+}
+
+inject_thread_id_into_payload_file() {
+  local payload_json_file="$1"
+  local thread_id="$2"
+  [[ -n "$thread_id" ]] || return 0
+  local tmp_payload
+  tmp_payload="$(mktemp "${TMPDIR:-/tmp}/runoq-payload-thread.XXXXXX")"
+  jq --arg thread_id "$thread_id" '. + {thread_id: $thread_id}' "$payload_json_file" >"$tmp_payload"
+  mv "$tmp_payload" "$payload_json_file"
+}
+
 # ---------------------------------------------------------------------------
 # Token tracking — best-effort extraction from codex output
 # ---------------------------------------------------------------------------
@@ -359,14 +427,24 @@ ${criteria_files}
       fi
     fi
 
-    # Run codex
-    local dev_log="$logDir/round-${round}-dev.md"
+    # Run codex (event stream + final assistant message in separate artifacts)
     local codex_capture_dir="$logDir/codex-round-${round}"
+    local event_log_file="$logDir/round-${round}-codex-events.jsonl"
+    local last_message_file="$logDir/round-${round}-last-message.md"
+    local thread_id_file="$logDir/round-${round}-thread-id.txt"
+    local thread_id=""
+    local round_tokens=0
+    local max_schema_retries=2
+    local schema_retry_count=0
+    local payload_json_file="$logDir/round-${round}-payload.json"
+    local payload_schema_valid
+    local payload_schema_errors_json
 
+    local codex_prompt
     if [[ "$previousChecklist" == "None — first round" ]]; then
       runoq::log "issue-runner" "round ${round}: invoking codex (first round — implement spec)"
-      RUNOQ_CODEX_CAPTURE_DIR="$codex_capture_dir" \
-      codex_exec exec --dangerously-bypass-approvals-and-sandbox "Implement the following spec. Read the spec file and all AGENTS.md files for rules and constraints.
+      codex_prompt="$(cat <<EOF
+Implement the following spec. Read the spec file and all AGENTS.md files for rules and constraints.
 
 Spec: ${specPath}
 ${protected_files_warning}
@@ -374,14 +452,13 @@ Commit granularity: make one commit per semantic unit of work.
 When done, push your branch: git push origin ${branch}
 
 Then print the required final stdout payload block:
-<!-- runoq:payload:codex-return -->
-\`\`\`json
-{ ... }
-\`\`\`" >"$dev_log" 2>&1
+$(required_payload_schema_block)
+EOF
+)"
     else
       runoq::log "issue-runner" "round ${round}: invoking codex (subsequent round — address feedback)"
-      RUNOQ_CODEX_CAPTURE_DIR="$codex_capture_dir" \
-      codex_exec exec --dangerously-bypass-approvals-and-sandbox "Address the following code review or verification feedback.
+      codex_prompt="$(cat <<EOF
+Address the following code review or verification feedback.
 
 Checklist:
 ${previousChecklist}
@@ -393,11 +470,49 @@ Commit granularity: make one commit per semantic unit of work.
 When done, push your branch: git push origin ${branch}
 
 Then print the required final stdout payload block:
-<!-- runoq:payload:codex-return -->
-\`\`\`json
-{ ... }
-\`\`\`" >"$dev_log" 2>&1
+$(required_payload_schema_block)
+EOF
+)"
     fi
+
+    RUNOQ_CODEX_CAPTURE_DIR="$codex_capture_dir" \
+      codex_exec exec --dangerously-bypass-approvals-and-sandbox --json -o "$last_message_file" "$codex_prompt" >"$event_log_file" 2>&1
+
+    thread_id="$(extract_thread_id_from_events "$event_log_file")"
+    printf '%s\n' "$thread_id" >"$thread_id_file"
+
+    "$RUNOQ_ROOT/scripts/state.sh" validate-payload "$worktree" "$baseline" "$last_message_file" >"$payload_json_file"
+    inject_thread_id_into_payload_file "$payload_json_file" "$thread_id"
+
+    payload_schema_valid="$(jq -r '.payload_schema_valid // false' "$payload_json_file")"
+    payload_schema_errors_json="$(jq -c '.payload_schema_errors // []' "$payload_json_file")"
+    round_tokens=$(( round_tokens + $(extract_tokens_from_log "$event_log_file") ))
+
+    while [[ "$payload_schema_valid" != "true" && -n "$thread_id" && "$schema_retry_count" -lt "$max_schema_retries" ]]; do
+      schema_retry_count=$((schema_retry_count + 1))
+      local retry_event_log_file="$logDir/round-${round}-schema-retry-${schema_retry_count}-events.jsonl"
+      local retry_last_message_file="$logDir/round-${round}-schema-retry-${schema_retry_count}-last-message.md"
+      local retry_prompt
+      retry_prompt="$(build_schema_retry_prompt "$payload_schema_errors_json")"
+
+      runoq::log "issue-runner" "round ${round}: schema retry ${schema_retry_count}/${max_schema_retries} on thread ${thread_id}"
+      RUNOQ_CODEX_CAPTURE_DIR="$codex_capture_dir/schema-retry-${schema_retry_count}" \
+        codex_exec exec resume "$thread_id" --json -o "$retry_last_message_file" "$retry_prompt" >"$retry_event_log_file" 2>&1
+
+      local resumed_thread_id
+      resumed_thread_id="$(extract_thread_id_from_events "$retry_event_log_file")"
+      if [[ -n "$resumed_thread_id" ]]; then
+        thread_id="$resumed_thread_id"
+      fi
+      printf '%s\n' "$thread_id" >"$thread_id_file"
+
+      "$RUNOQ_ROOT/scripts/state.sh" validate-payload "$worktree" "$baseline" "$retry_last_message_file" >"$payload_json_file"
+      inject_thread_id_into_payload_file "$payload_json_file" "$thread_id"
+
+      payload_schema_valid="$(jq -r '.payload_schema_valid // false' "$payload_json_file")"
+      payload_schema_errors_json="$(jq -c '.payload_schema_errors // []' "$payload_json_file")"
+      round_tokens=$(( round_tokens + $(extract_tokens_from_log "$retry_event_log_file") ))
+    done
 
     # Capture new commits — full diff for emit_payload, per-round for index logging
     local commits_text round_commits_text
@@ -409,10 +524,6 @@ Then print the required final stdout payload block:
     commit_count="$(printf '%s\n' "$round_commits_text" | grep -c -v '^$' || true)"
     runoq::log "issue-runner" "round ${round}: after codex — commit_count=${commit_count} head=${head_hash}"
 
-    # Validate payload via state.sh
-    local payload_json_file="$logDir/round-${round}-payload.json"
-    "$RUNOQ_ROOT/scripts/state.sh" validate-payload "$worktree" "$baseline" "$dev_log" > "$payload_json_file"
-
     # Inject criteria_commit into payload file if present
     if [[ "$criteria_commit" != "null" ]]; then
       local tmp_payload
@@ -422,8 +533,6 @@ Then print the required final stdout payload block:
     fi
 
     # Track tokens
-    local round_tokens
-    round_tokens="$(extract_tokens_from_log "$dev_log")"
     cumulativeTokens=$(( cumulativeTokens + round_tokens ))
 
     # Budget check after round
@@ -439,8 +548,32 @@ Then print the required final stdout payload block:
     # -----------------------------------------------------------------
 
     local verify_output
-    runoq::log "issue-runner" "round ${round}: running verification"
-    verify_output="$("$RUNOQ_ROOT/scripts/verify.sh" round "$worktree" "$branch" "$baseline" "$payload_json_file")"
+    if [[ "$payload_schema_valid" != "true" ]]; then
+      local schema_failure_reason
+      if [[ -n "$thread_id" ]]; then
+        schema_failure_reason="codex payload schema invalid after ${schema_retry_count} resume attempt(s)"
+      else
+        schema_failure_reason="codex payload schema invalid and thread_id missing from codex events"
+      fi
+      verify_output="$(jq -n \
+        --arg reason "$schema_failure_reason" \
+        --argjson schema_errors "$payload_schema_errors_json" \
+        '{
+          review_allowed: false,
+          failures: ([$reason] + ($schema_errors | map("payload schema error: " + .))),
+          actual: {
+            commits_pushed: [],
+            commit_range: "",
+            files_changed: [],
+            files_added: [],
+            files_deleted: []
+          }
+        }')"
+      runoq::log "issue-runner" "round ${round}: schema validation failed before verification"
+    else
+      runoq::log "issue-runner" "round ${round}: running verification"
+      verify_output="$("$RUNOQ_ROOT/scripts/verify.sh" round "$worktree" "$branch" "$baseline" "$payload_json_file")"
+    fi
 
     local review_allowed
     review_allowed="$(printf '%s' "$verify_output" | jq -r '.review_allowed')"

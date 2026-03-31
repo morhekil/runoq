@@ -237,6 +237,21 @@ normalize_payload() {
         if ($value | type) == "string" and $value == $fallback then $value else $fallback end;
       def truth_backed_mismatch($value; $fallback):
         ($value | type) != ($fallback | type) or $value != $fallback;
+      def schema_errors:
+        [
+          if (p.status | type) == "string" and (p.status == "completed" or p.status == "failed" or p.status == "stuck") then empty else "status_missing_or_invalid" end,
+          if (p.commits_pushed | type) == "array" and all(p.commits_pushed[]?; type == "string") then empty else "commits_pushed_missing_or_non_string_array" end,
+          if (p.commit_range | type) == "string" then empty else "commit_range_missing_or_non_string" end,
+          if (p.files_changed | type) == "array" and all(p.files_changed[]?; type == "string") then empty else "files_changed_missing_or_non_string_array" end,
+          if (p.files_added | type) == "array" and all(p.files_added[]?; type == "string") then empty else "files_added_missing_or_non_string_array" end,
+          if (p.files_deleted | type) == "array" and all(p.files_deleted[]?; type == "string") then empty else "files_deleted_missing_or_non_string_array" end,
+          if (p.tests_run | type) == "boolean" then empty else "tests_run_missing_or_non_boolean" end,
+          if (p.tests_passed | type) == "boolean" then empty else "tests_passed_missing_or_non_boolean" end,
+          if (p.test_summary | type) == "string" then empty else "test_summary_missing_or_non_string" end,
+          if (p.build_passed | type) == "boolean" then empty else "build_passed_missing_or_non_boolean" end,
+          if (p.blockers | type) == "array" and all(p.blockers[]?; type == "string") then empty else "blockers_missing_or_non_string_array" end,
+          if (p.notes | type) == "string" then empty else "notes_missing_or_non_string" end
+        ] | unique | sort;
 
       {
         status: valid_status(p.status),
@@ -251,6 +266,8 @@ normalize_payload() {
         build_passed: bool_or(p.build_passed; false),
         blockers: string_array_or(p.blockers; []),
         notes: string_or(p.notes; ""),
+        payload_schema_valid: ((schema_errors | length) == 0),
+        payload_schema_errors: schema_errors,
         payload_source: "patched",
         patched_fields: [
           if (p.status | type != "string") or (p.status != "completed" and p.status != "failed" and p.status != "stuck") then "status" else empty end,
@@ -295,6 +312,8 @@ synthesize_payload() {
       build_passed: false,
       blockers: ["Codex did not return a structured payload"],
       notes: "",
+      payload_schema_valid: false,
+      payload_schema_errors: ["payload_missing_or_malformed"],
       payload_source: "synthetic",
       patched_fields: [
         "status",
@@ -315,6 +334,30 @@ synthesize_payload() {
   '
 }
 
+extract_thread_id_from_source() {
+  local source_file="$1"
+  [[ -f "$source_file" ]] || return 0
+  jq -Rsr '
+    split("\n")
+    | map((try fromjson catch empty))
+    | map(
+        select((.type // .event // "") == "thread.started")
+        | (.thread_id // .thread.id // empty)
+      )
+    | map(select(type == "string" and length > 0))
+    | last // empty
+  ' <"$source_file" 2>/dev/null || true
+}
+
+attach_thread_metadata() {
+  local thread_id="$1"
+  if [[ -z "$thread_id" ]]; then
+    cat
+    return
+  fi
+  jq --arg thread_id "$thread_id" '. + {thread_id: $thread_id}'
+}
+
 extract_payload() {
   local source_file="$1"
   local block
@@ -327,25 +370,26 @@ validate_payload() {
   local worktree="$1"
   local base_sha="$2"
   local source_file="$3"
-  local extracted_file truth_file
+  local extracted_file truth_file thread_id
 
   extracted_file="$(mktemp "${TMPDIR:-/tmp}/runoq-payload.XXXXXX")"
   truth_file="$(mktemp "${TMPDIR:-/tmp}/runoq-truth.XXXXXX")"
   ground_truth_json "$worktree" "$base_sha" >"$truth_file"
+  thread_id="$(extract_thread_id_from_source "$source_file")"
 
   if ! extract_payload_block "$source_file" >"$extracted_file" || [[ ! -s "$extracted_file" ]]; then
-    synthesize_payload "$truth_file"
+    synthesize_payload "$truth_file" | attach_thread_metadata "$thread_id"
     rm -f "$extracted_file" "$truth_file"
     return
   fi
 
   if ! jq -e '.' "$extracted_file" >/dev/null 2>&1; then
-    synthesize_payload "$truth_file"
+    synthesize_payload "$truth_file" | attach_thread_metadata "$thread_id"
     rm -f "$extracted_file" "$truth_file"
     return
   fi
 
-  normalize_payload "$extracted_file" "$truth_file"
+  normalize_payload "$extracted_file" "$truth_file" | attach_thread_metadata "$thread_id"
   rm -f "$extracted_file" "$truth_file"
 }
 
