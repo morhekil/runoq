@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RUNOQ_ROOT="${RUNOQ_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 export RUNOQ_ROOT
 
-worktree_implementation="${RUNOQ_WORKTREE_IMPLEMENTATION:-${RUNOQ_IMPLEMENTATION:-shell}}"
+worktree_implementation="${RUNOQ_WORKTREE_IMPLEMENTATION:-${RUNOQ_IMPLEMENTATION:-runtime}}"
 case "$worktree_implementation" in
   shell|"")
     ;;

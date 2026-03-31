@@ -25,6 +25,34 @@ normalize_path_text() {
   printf '%s' "$1" | sed -E 's#/[[:graph:]]+#__PATH__#g'
 }
 
+write_fake_runtime_worktree_bin() {
+  local path="$1"
+  cat >"$path" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'FAKE_RUNTIME:%s %s\n' "$1" "${*:2}"
+EOF
+  chmod +x "$path"
+}
+
+@test "worktree wrapper defaults to runtime and preserves explicit shell override" {
+  project_dir="$TEST_TMPDIR/default-wrapper-project"
+  make_git_repo "$project_dir"
+
+  fake_runtime_bin="$TEST_TMPDIR/fake-runtime-worktree"
+  write_fake_runtime_worktree_bin "$fake_runtime_bin"
+
+  run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION="" RUNOQ_WORKTREE_IMPLEMENTATION="" RUNOQ_RUNTIME_BIN="'"$fake_runtime_bin"'" "'"$RUNOQ_ROOT"'/scripts/worktree.sh" inspect 42'
+  [ "$status" -eq 0 ]
+  [ "$output" = "FAKE_RUNTIME:__worktree inspect 42" ]
+
+  run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION="" RUNOQ_WORKTREE_IMPLEMENTATION="shell" RUNOQ_RUNTIME_BIN="'"$fake_runtime_bin"'" "'"$RUNOQ_ROOT"'/scripts/worktree.sh"'
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"FAKE_RUNTIME:"* ]]
+  [[ "$output" == *"Usage:"* ]]
+  [[ "$output" == *"worktree.sh create"* ]]
+}
+
 @test "acceptance parity: worktree create/remove/inspect matches shell and runtime contracts" {
   prepare_runtime_bin
 

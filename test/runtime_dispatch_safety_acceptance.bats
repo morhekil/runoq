@@ -48,6 +48,34 @@ normalize_json() {
   printf '%s' "$1" | jq -S -c .
 }
 
+write_fake_runtime_dispatch_safety_bin() {
+  local path="$1"
+  cat >"$path" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'FAKE_RUNTIME:%s %s\n' "$1" "${*:2}"
+EOF
+  chmod +x "$path"
+}
+
+@test "dispatch-safety wrapper defaults to runtime and preserves explicit shell override" {
+  project_dir="$TEST_TMPDIR/default-wrapper-project"
+  make_git_repo "$project_dir"
+
+  fake_runtime_bin="$TEST_TMPDIR/fake-runtime-dispatch-safety"
+  write_fake_runtime_dispatch_safety_bin "$fake_runtime_bin"
+
+  run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION="" RUNOQ_DISPATCH_SAFETY_IMPLEMENTATION="" RUNOQ_RUNTIME_BIN="'"$fake_runtime_bin"'" "'"$RUNOQ_ROOT"'/scripts/dispatch-safety.sh" reconcile owner/repo'
+  [ "$status" -eq 0 ]
+  [ "$output" = "FAKE_RUNTIME:__dispatch_safety reconcile owner/repo" ]
+
+  run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION="" RUNOQ_DISPATCH_SAFETY_IMPLEMENTATION="shell" RUNOQ_RUNTIME_BIN="'"$fake_runtime_bin"'" "'"$RUNOQ_ROOT"'/scripts/dispatch-safety.sh"'
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"FAKE_RUNTIME:"* ]]
+  [[ "$output" == *"Usage:"* ]]
+  [[ "$output" == *"dispatch-safety.sh reconcile"* ]]
+}
+
 @test "acceptance parity: dispatch-safety reconcile matches shell and runtime contract" {
   shell_remote="$TEST_TMPDIR/shell-remote.git"
   shell_project="$TEST_TMPDIR/shell-project"
