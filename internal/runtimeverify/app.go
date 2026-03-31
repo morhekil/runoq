@@ -8,10 +8,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/saruman/runoq/internal/common"
 )
 
 const usageText = `Usage:
@@ -19,24 +20,13 @@ const usageText = `Usage:
   verify.sh integrate <worktree> <criteria-commit>
 `
 
-type commandRequest struct {
-	Name   string
-	Args   []string
-	Dir    string
-	Env    []string
-	Stdout io.Writer
-	Stderr io.Writer
-}
-
-type commandExecutor func(context.Context, commandRequest) error
-
 type App struct {
 	args        []string
 	env         []string
 	cwd         string
 	stdout      io.Writer
 	stderr      io.Writer
-	execCommand commandExecutor
+	execCommand common.CommandExecutor
 }
 
 type groundTruth struct {
@@ -65,13 +55,13 @@ func New(args []string, env []string, cwd string, stdout io.Writer, stderr io.Wr
 		cwd:         cwd,
 		stdout:      stdout,
 		stderr:      stderr,
-		execCommand: runCommand,
+		execCommand: common.RunCommand,
 	}
 }
 
-func (a *App) SetCommandExecutor(execFn commandExecutor) {
+func (a *App) SetCommandExecutor(execFn common.CommandExecutor) {
 	if execFn == nil {
-		a.execCommand = runCommand
+		a.execCommand = common.RunCommand
 		return
 	}
 	a.execCommand = execFn
@@ -105,12 +95,12 @@ func (a *App) Run(ctx context.Context) int {
 func (a *App) runRound(ctx context.Context, worktree string, branch string, baseSHA string, payloadFile string) int {
 	truth, err := a.groundTruth(ctx, worktree, baseSHA)
 	if err != nil {
-		return a.failf("Failed to compute ground truth: %v", err)
+		return common.Failf(a.stderr, "Failed to compute ground truth: %v", err)
 	}
 
 	payload, err := a.readPayload(payloadFile)
 	if err != nil {
-		return a.failf("%v", err)
+		return common.Failf(a.stderr, "%v", err)
 	}
 
 	failures := make([]string, 0, 8)
@@ -131,17 +121,17 @@ func (a *App) runRound(ctx context.Context, worktree string, branch string, base
 		failures = append(failures, "file lists do not match ground truth")
 	}
 
-	localSHA, err := a.commandOutput(ctx, commandRequest{
+	localSHA, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
 		Name: "git",
 		Args: []string{"-C", worktree, "rev-parse", "HEAD"},
 		Dir:  a.cwd,
 		Env:  a.env,
 	})
 	if err != nil {
-		return a.failf("Failed to resolve local HEAD: %v", err)
+		return common.Failf(a.stderr, "Failed to resolve local HEAD: %v", err)
 	}
 
-	remoteSHA, _ := a.commandOutput(ctx, commandRequest{
+	remoteSHA, _ := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
 		Name: "git",
 		Args: []string{"-C", worktree, "ls-remote", "origin", branch},
 		Dir:  a.cwd,
@@ -154,7 +144,7 @@ func (a *App) runRound(ctx context.Context, worktree string, branch string, base
 
 	testCommand, buildCommand, err := a.verificationCommands()
 	if err != nil {
-		return a.fail(err.Error())
+		return common.Fail(a.stderr, err.Error())
 	}
 
 	if output, err := a.runCheckCommand(ctx, worktree, testCommand); err != nil {
@@ -194,7 +184,7 @@ func (a *App) runRound(ctx context.Context, worktree string, branch string, base
 		Failures:      failures,
 		Actual:        truth,
 	}
-	return a.writeJSON(res)
+	return common.WriteJSON(a.stdout, a.stderr, res)
 }
 
 func (a *App) runIntegrate(ctx context.Context, worktree string, criteriaCommit string) int {
@@ -219,13 +209,13 @@ func (a *App) runIntegrate(ctx context.Context, worktree string, criteriaCommit 
 
 	testCommand, _, err := a.verificationCommands()
 	if err != nil {
-		return a.fail(err.Error())
+		return common.Fail(a.stderr, err.Error())
 	}
 	if _, err := a.runCheckCommand(ctx, worktree, testCommand); err != nil {
 		failures = append(failures, "test command failed")
 	}
 
-	return a.writeJSON(integrateResult{
+	return common.WriteJSON(a.stdout, a.stderr, integrateResult{
 		OK:       len(failures) == 0,
 		Failures: failures,
 	})
@@ -244,7 +234,7 @@ func (a *App) readPayload(payloadFile string) (map[string]any, error) {
 }
 
 func (a *App) groundTruth(ctx context.Context, worktree string, baseSHA string) (groundTruth, error) {
-	commitsOut, err := a.commandOutput(ctx, commandRequest{
+	commitsOut, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
 		Name: "git",
 		Args: []string{"-C", worktree, "rev-list", "--reverse", baseSHA + "..HEAD"},
 		Dir:  a.cwd,
@@ -253,7 +243,7 @@ func (a *App) groundTruth(ctx context.Context, worktree string, baseSHA string) 
 	if err != nil {
 		return groundTruth{}, err
 	}
-	diffOut, err := a.commandOutput(ctx, commandRequest{
+	diffOut, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
 		Name: "git",
 		Args: []string{"-C", worktree, "diff", "--name-status", baseSHA + "..HEAD"},
 		Dir:  a.cwd,
@@ -292,9 +282,9 @@ func (a *App) groundTruth(ctx context.Context, worktree string, baseSHA string) 
 
 func (a *App) verificationCommands() (string, string, error) {
 	configPath := ""
-	if value, ok := envLookup(a.env, "RUNOQ_CONFIG"); ok && strings.TrimSpace(value) != "" {
+	if value, ok := common.EnvLookup(a.env, "RUNOQ_CONFIG"); ok && strings.TrimSpace(value) != "" {
 		configPath = value
-	} else if root, ok := envLookup(a.env, "RUNOQ_ROOT"); ok && strings.TrimSpace(root) != "" {
+	} else if root, ok := common.EnvLookup(a.env, "RUNOQ_ROOT"); ok && strings.TrimSpace(root) != "" {
 		configPath = filepath.Join(root, "config", "runoq.json")
 	} else if strings.TrimSpace(a.cwd) != "" {
 		configPath = filepath.Join(a.cwd, "config", "runoq.json")
@@ -329,7 +319,7 @@ func (a *App) verificationCommands() (string, string, error) {
 func (a *App) runCheckCommand(ctx context.Context, worktree string, command string) (string, error) {
 	script := fmt.Sprintf("cd %s && %s", shellQuote(worktree), command)
 	var output bytes.Buffer
-	err := a.execCommand(ctx, commandRequest{
+	err := a.execCommand(ctx, common.CommandRequest{
 		Name:   "bash",
 		Args:   []string{"-lc", script},
 		Dir:    a.cwd,
@@ -341,7 +331,7 @@ func (a *App) runCheckCommand(ctx context.Context, worktree string, command stri
 }
 
 func (a *App) commitExists(ctx context.Context, worktree string, sha string) bool {
-	err := a.execCommand(ctx, commandRequest{
+	err := a.execCommand(ctx, common.CommandRequest{
 		Name:   "git",
 		Args:   []string{"-C", worktree, "rev-parse", "--verify", sha + "^{commit}"},
 		Dir:    a.cwd,
@@ -353,7 +343,7 @@ func (a *App) commitExists(ctx context.Context, worktree string, sha string) boo
 }
 
 func (a *App) criteriaFiles(ctx context.Context, worktree string, criteriaCommit string) []string {
-	out, err := a.commandOutput(ctx, commandRequest{
+	out, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
 		Name: "git",
 		Args: []string{"-C", worktree, "diff-tree", "--no-commit-id", "--name-only", "-r", criteriaCommit},
 		Dir:  a.cwd,
@@ -366,7 +356,7 @@ func (a *App) criteriaFiles(ctx context.Context, worktree string, criteriaCommit
 }
 
 func (a *App) isCriteriaTampered(ctx context.Context, worktree string, criteriaCommit string, cfile string) bool {
-	err := a.execCommand(ctx, commandRequest{
+	err := a.execCommand(ctx, common.CommandRequest{
 		Name:   "git",
 		Args:   []string{"-C", worktree, "diff", "--quiet", criteriaCommit, "HEAD", "--", cfile},
 		Dir:    a.cwd,
@@ -490,63 +480,6 @@ func shellQuote(input string) string {
 	return "'" + strings.ReplaceAll(input, "'", `'"'"'`) + "'"
 }
 
-func (a *App) commandOutput(ctx context.Context, req commandRequest) (string, error) {
-	var stdout bytes.Buffer
-	req.Stdout = &stdout
-	if req.Stderr == nil {
-		req.Stderr = io.Discard
-	}
-	if err := a.execCommand(ctx, req); err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(stdout.String()), nil
-}
-
-func (a *App) writeJSON(value any) int {
-	encoder := json.NewEncoder(a.stdout)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(value); err != nil {
-		return a.failf("Failed to encode JSON output: %v", err)
-	}
-	return 0
-}
-
-func (a *App) fail(message string) int {
-	_, _ = fmt.Fprintf(a.stderr, "runoq: %s\n", message)
-	return 1
-}
-
-func (a *App) failf(format string, args ...any) int {
-	return a.fail(fmt.Sprintf(format, args...))
-}
-
 func (a *App) printUsage() {
 	_, _ = io.WriteString(a.stderr, usageText)
-}
-
-func runCommand(ctx context.Context, req commandRequest) error {
-	cmd := exec.CommandContext(ctx, req.Name, req.Args...)
-	cmd.Dir = req.Dir
-	cmd.Env = req.Env
-	if req.Stdout != nil {
-		cmd.Stdout = req.Stdout
-	} else {
-		cmd.Stdout = io.Discard
-	}
-	if req.Stderr != nil {
-		cmd.Stderr = req.Stderr
-	} else {
-		cmd.Stderr = io.Discard
-	}
-	return cmd.Run()
-}
-
-func envLookup(env []string, key string) (string, bool) {
-	prefix := key + "="
-	for i := len(env) - 1; i >= 0; i-- {
-		if strings.HasPrefix(env[i], prefix) {
-			return strings.TrimPrefix(env[i], prefix), true
-		}
-	}
-	return "", false
 }
