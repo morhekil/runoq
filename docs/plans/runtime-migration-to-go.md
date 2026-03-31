@@ -2,7 +2,9 @@
 
 ## Status
 
-In progress. The current landed fact set is:
+Migration status: code/runtime migration is complete through the last known blocker on main (`86713bd` schema-retry hardening and `b947c1f` absolute last-message artifact-path fix). Runtime lifecycle smoke now reaches `REVIEW` and is currently blocked by Claude diff-reviewer `out_of_credits` rather than a runtime code failure. Sandbox smoke remains blocked by inaccessible configured repo access unless otherwise noted by smoke operators. Remaining work is smoke/ops-gated cleanup and confidence-cycle validation, not known migration code gaps.
+
+Current landed fact set:
 
 - foundation slices already in-repo: Go runtime skeleton (`cmd/runoq-runtime`, `internal/runtimecli`), explicit shell/runtime selection at `bin/runoq` with runtime now default and explicit shell fallback preserved, and first acceptance parity scenarios for `run --dry-run` plus `plan --dry-run`
 - runtime-backed `state.sh` (`internal/runtimestate`), `report` (`internal/runtimereport`), and `verify.sh` (`internal/runtimeverify`) with shell/runtime parity coverage
@@ -24,7 +26,7 @@ In progress. The current landed fact set is:
 - current slice: `issue-runner.sh` now runs codex with split event/message artifacts (`--json` plus `-o`), persists round `thread_id`, performs bounded same-thread schema retries via `codex exec resume <thread_id> ...` on payload-schema failures, and `state.sh validate-payload` / `internal/runtimestate` now emit deterministic `payload_schema_valid` + `payload_schema_errors` metadata (with optional `thread_id`) to distinguish schema failures from ordinary normalization or verification mismatches
 - current slice: `issue-runner.sh` now resolves codex `-o` last-message targets to absolute paths (initial + schema-retry) before `runoq::captured_exec` changes into the sibling worktree, preserving repo-root log artifact writes and preventing malformed-payload retry loops caused by misplaced last-message files
 
-Still pending: smoke-gated rollout completion and cleanup remain (confidence-cycle smoke lanes, fallback retirement timing, and final simplification steps in later milestones).
+Still pending: smoke-gated rollout completion and cleanup (confidence-cycle smoke lanes, fallback retirement timing, and final simplification steps in later milestones).
 
 ## Purpose
 
