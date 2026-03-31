@@ -2,16 +2,19 @@
 
 ## Status
 
-In progress. The M1/M2 foundation slice is now implemented in-repo:
+In progress. The current landed fact set is:
 
-- Go runtime skeleton (`cmd/runoq-runtime`, `internal/runtimecli`)
-- explicit shell/runtime selection at `bin/runoq` (shell remains default)
-- first acceptance parity scenarios for `run --dry-run` and `plan --dry-run`
-- runtime-backed `state.sh` implementation (`internal/runtimestate`) with shell/runtime parity tests
-- runtime-backed `report` command implementation (`internal/runtimereport`) with shell/runtime parity tests
-- runtime-backed `verify.sh` implementation (`internal/runtimeverify`) with shell/runtime parity tests
+- foundation slices already in-repo: Go runtime skeleton (`cmd/runoq-runtime`, `internal/runtimecli`), explicit shell/runtime selection at `bin/runoq` with shell still default, and first acceptance parity scenarios for `run --dry-run` plus `plan --dry-run`
+- runtime-backed `state.sh` (`internal/runtimestate`), `report` (`internal/runtimereport`), and `verify.sh` (`internal/runtimeverify`) with shell/runtime parity coverage
+- `0913f00` (`runtime: migrate gh-issue-queue behind runtime wrapper`): runtime-backed `gh-issue-queue.sh` list/next/set-status coverage behind the stable shell wrapper
+- `136dea5` (`runtimeorchestrator: support queue dry-run`): runtime orchestrator queue dry-run slice with preserved selection, skipped-reason logging, and explicit `INIT` dry-run output
+- `947607b` (`runtime: migrate issue-runner run slice`): first real runtime-backed `issue-runner.sh run <payload-json-file>` slice covering budget handling, malformed-payload recovery via `state.sh validate-payload`, single-round `review_ready`, and verification-driven round control within the stable payload-file contract
+- `23c67ac` (`runtime: deepen issue-runner failure-path coverage`): deeper deterministic acceptance/unit coverage for issue-runner verification failure and escalation paths
+- current slice: runtime orchestrator low-complexity `run --issue` composition now progresses past `INIT` through `CRITERIA`, `DEVELOP`, and the bounded success path `REVIEW -> DECIDE -> FINALIZE`, using the runtime `issue-runner.sh run <payload-json-file>` boundary for develop, preserving the existing deterministic `needs-review` handoff for non-`review_ready` outcomes, and applying the current low-complexity auto-merge decision table plus done-status/worktree cleanup on successful finalize
+- current slice: runtime orchestrator non-low-complexity `CRITERIA` handling now progresses past the former not-implemented boundary by recording deterministic `CRITERIA` state and taking an explicit bounded handoff directly to `REVIEW -> DECIDE -> FINALIZE` with `needs-review`, without porting the broader iterative `DECIDE -> DEVELOP` loop or epic `INTEGRATE`
+- current slice: runtime orchestrator `REVIEW` after `review_ready` now follows the real diff-review boundary instead of inferred success, by invoking `diff-reviewer` via `runoq::claude_stream`, parsing verdict data from `review_log_path` with claude-output fallback, persisting deterministic `REVIEW` state, and then continuing through bounded `DECIDE -> FINALIZE`
 
-Remaining milestones are still pending for the rest of M3+ (capture/logging substrate and other command families).
+Still pending: the runtime orchestrator does not yet own the broader iterative `DECIDE -> DEVELOP` loop or epic `INTEGRATE` flow. Those remain part of the remaining M5/M6 work.
 
 ## Purpose
 

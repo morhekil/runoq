@@ -6,6 +6,7 @@ import (
 
 	"github.com/saruman/runoq/internal/runtimecli"
 	"github.com/saruman/runoq/internal/runtimedispatchsafety"
+	"github.com/saruman/runoq/internal/runtimeissuequeue"
 	"github.com/saruman/runoq/internal/runtimeorchestrator"
 	"github.com/saruman/runoq/internal/runtimestate"
 	"github.com/saruman/runoq/internal/runtimeverify"
@@ -54,6 +55,16 @@ func main() {
 			os.Stderr,
 		)
 		os.Exit(worktreeApp.Run(context.Background()))
+	}
+	if len(args) > 0 && args[0] == "__issue_queue" {
+		queueApp := runtimeissuequeue.New(
+			args[1:],
+			os.Environ(),
+			cwd,
+			os.Stdout,
+			os.Stderr,
+		)
+		os.Exit(queueApp.Run(context.Background()))
 	}
 	if len(args) > 0 && args[0] == "__dispatch_safety" {
 		dispatchSafetyApp := runtimedispatchsafety.New(
