@@ -58,6 +58,16 @@ normalize_run_issue_output() {
   printf '%s' "$1" | jq '.worktree = (.worktree | split("/")[-1])' | normalize_json
 }
 
+write_fake_runtime_issue_runner_bin() {
+  local path="$1"
+  cat >"$path" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'FAKE_RUNTIME:%s %s\n' "$1" "${*:2}"
+EOF
+  chmod +x "$path"
+}
+
 happy_issue_body() {
   cat <<'EOF'
 <!-- runoq:meta
@@ -297,6 +307,27 @@ assert_capture_contains() {
   local needle="$2"
   run rg -F -n "$needle" "$capture_dir"
   [ "$status" -eq 0 ]
+}
+
+@test "issue-runner wrapper defaults to runtime and preserves explicit shell override" {
+  local_dir="$TEST_TMPDIR/default-wrapper-local"
+  make_git_repo "$local_dir"
+
+  fake_runtime_bin="$TEST_TMPDIR/fake-runtime-issue-runner"
+  write_fake_runtime_issue_runner_bin "$fake_runtime_bin"
+
+  payload_file="$TEST_TMPDIR/payload.json"
+  printf '%s\n' '{}' >"$payload_file"
+
+  run bash -lc 'cd "'"$local_dir"'" && RUNOQ_IMPLEMENTATION="" RUNOQ_ISSUE_RUNNER_IMPLEMENTATION="" RUNOQ_RUNTIME_BIN="'"$fake_runtime_bin"'" "'"$RUNOQ_ROOT"'/scripts/issue-runner.sh" run "'"$payload_file"'"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "FAKE_RUNTIME:__issue_runner run $payload_file" ]
+
+  run bash -lc 'cd "'"$local_dir"'" && RUNOQ_IMPLEMENTATION="" RUNOQ_ISSUE_RUNNER_IMPLEMENTATION="shell" RUNOQ_RUNTIME_BIN="'"$fake_runtime_bin"'" "'"$RUNOQ_ROOT"'/scripts/issue-runner.sh"'
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"FAKE_RUNTIME:"* ]]
+  [[ "$output" == *"Usage:"* ]]
+  [[ "$output" == *"issue-runner.sh run"* ]]
 }
 
 @test "acceptance parity: run --issue no-commit escalation matches shell and runtime" {
