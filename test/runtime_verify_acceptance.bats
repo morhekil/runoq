@@ -71,6 +71,34 @@ normalized_json() {
   printf '%s' "$1" | jq -S -c .
 }
 
+write_fake_runtime_verify_bin() {
+  local path="$1"
+  cat >"$path" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'FAKE_RUNTIME:%s %s\n' "$1" "${*:2}"
+EOF
+  chmod +x "$path"
+}
+
+@test "verify wrapper defaults to runtime and preserves explicit shell override" {
+  local_dir="$TEST_TMPDIR/default-wrapper-local"
+  make_git_repo "$local_dir"
+
+  fake_runtime_bin="$TEST_TMPDIR/fake-runtime-verify"
+  write_fake_runtime_verify_bin "$fake_runtime_bin"
+
+  run bash -lc 'cd "'"$local_dir"'" && RUNOQ_IMPLEMENTATION="" RUNOQ_VERIFY_IMPLEMENTATION="" RUNOQ_RUNTIME_BIN="'"$fake_runtime_bin"'" "'"$RUNOQ_ROOT"'/scripts/verify.sh" round one two three four'
+  [ "$status" -eq 0 ]
+  [ "$output" = "FAKE_RUNTIME:__verify round one two three four" ]
+
+  run bash -lc 'cd "'"$local_dir"'" && RUNOQ_IMPLEMENTATION="" RUNOQ_VERIFY_IMPLEMENTATION="shell" RUNOQ_RUNTIME_BIN="'"$fake_runtime_bin"'" "'"$RUNOQ_ROOT"'/scripts/verify.sh" round one two three'
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"FAKE_RUNTIME:"* ]]
+  [[ "$output" == *"Usage:"* ]]
+  [[ "$output" == *"verify.sh round"* ]]
+}
+
 @test "acceptance parity: verify round success matches shell and runtime contract" {
   remote_dir="$TEST_TMPDIR/remote.git"
   local_dir="$TEST_TMPDIR/local"

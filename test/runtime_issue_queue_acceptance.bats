@@ -6,6 +6,34 @@ normalize_json() {
   printf '%s' "$1" | jq -S .
 }
 
+write_fake_runtime_issue_queue_bin() {
+  local path="$1"
+  cat >"$path" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'FAKE_RUNTIME:%s %s\n' "$1" "${*:2}"
+EOF
+  chmod +x "$path"
+}
+
+@test "issue queue wrapper defaults to runtime and preserves explicit shell override" {
+  project_dir="$TEST_TMPDIR/default-wrapper-project"
+  make_git_repo "$project_dir"
+
+  fake_runtime_bin="$TEST_TMPDIR/fake-runtime-issue-queue"
+  write_fake_runtime_issue_queue_bin "$fake_runtime_bin"
+
+  run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION="" RUNOQ_ISSUE_QUEUE_IMPLEMENTATION="" RUNOQ_RUNTIME_BIN="'"$fake_runtime_bin"'" "'"$RUNOQ_ROOT"'/scripts/gh-issue-queue.sh" list owner/repo runoq:ready'
+  [ "$status" -eq 0 ]
+  [ "$output" = "FAKE_RUNTIME:__issue_queue list owner/repo runoq:ready" ]
+
+  run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION="" RUNOQ_ISSUE_QUEUE_IMPLEMENTATION="shell" RUNOQ_RUNTIME_BIN="'"$fake_runtime_bin"'" "'"$RUNOQ_ROOT"'/scripts/gh-issue-queue.sh" list owner/repo'
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"FAKE_RUNTIME:"* ]]
+  [[ "$output" == *"Usage:"* ]]
+  [[ "$output" == *"gh-issue-queue.sh list"* ]]
+}
+
 @test "acceptance parity: issue queue list matches shell and runtime contracts" {
   prepare_runtime_bin
 

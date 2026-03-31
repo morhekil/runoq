@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RUNOQ_ROOT="${RUNOQ_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 export RUNOQ_ROOT
 
-verify_implementation="${RUNOQ_VERIFY_IMPLEMENTATION:-${RUNOQ_IMPLEMENTATION:-shell}}"
+verify_implementation="${RUNOQ_VERIFY_IMPLEMENTATION:-${RUNOQ_IMPLEMENTATION:-runtime}}"
 case "$verify_implementation" in
   shell|"")
     ;;
