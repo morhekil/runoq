@@ -12,8 +12,8 @@ Use this skill when delegation is desirable, but only if the orchestration bound
 Keep delegation safe by making the control boundary explicit:
 
 - one sibling git worktree per worker
-- exact owned files
-- exact forbidden files
+- exact owned files or directories
+- exact forbidden files or directories or "all other files are out of bounds"
 - no nested delegation
 - focused tests only
 - early inspection and cleanup
@@ -48,8 +48,8 @@ Do not silently downgrade implementation workers to an older or smaller model fo
 6. For Go tasks, explicitly require the worker to use the available Go skills and repo guidance rather than silently ignoring them.
 7. For Go tasks, include lint setup and lint verification early unless the task is explicitly read-only and lint would add no value.
 8. Give every worker an exact write set:
-   - exact owned files
-   - exact forbidden files or "all other files are out of bounds"
+   - exact owned files or directories
+   - exact forbidden files or directories or "all other files are out of bounds"
 9. Give every worker an exact validation set:
    - exact tests to run
    - no unrelated exploration
@@ -69,8 +69,8 @@ Do not silently downgrade implementation workers to an older or smaller model fo
    - worktree path
    - branch name
    - required repo guidance to read first (`AGENTS.md`, relevant skill files)
-   - exact owned files
-   - exact forbidden files
+   - exact owned files or directories
+   - exact forbidden files or directories or "all other files are out of bounds"
    - exact task
    - exact tests
    - exact lint command when the task includes Go code
@@ -80,8 +80,8 @@ Do not silently downgrade implementation workers to an older or smaller model fo
    - `git status --short`
    - `git diff --stat`
    - first worker output
-   Use these to confirm scope and direction, not to require immediate file edits.
-   A worker that is still reading the relevant contracts or comparing behavior may be making normal progress even if the diff is still empty.
+     Use these to confirm scope and direction, not to require immediate file edits.
+     A worker that is still reading the relevant contracts or comparing behavior may be making normal progress even if the diff is still empty.
 6. Review the diff and test results before starting the next worker.
 7. Only after the implementation slice is stable should a second worker handle parity/docs or verification.
 8. Keep only the most recent few completed agents you still need for inspection; close older completed agents as part of the normal control loop.
