@@ -730,6 +730,7 @@ func validatePhaseTransition(from string, to string) error {
 		"INIT:FINALIZE":    {},
 		"INIT:FAILED":      {},
 		"CRITERIA:DEVELOP": {},
+		"CRITERIA:REVIEW":  {},
 		"CRITERIA:FAILED":  {},
 		"DEVELOP:REVIEW":   {},
 		"DEVELOP:FAILED":   {},

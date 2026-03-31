@@ -126,6 +126,7 @@ Fields commonly written by `run.sh` and `orchestrator.sh`:
 - `INIT -> FINALIZE`
 - `INIT -> FAILED`
 - `CRITERIA -> DEVELOP`
+- `CRITERIA -> REVIEW`
 - `CRITERIA -> FAILED`
 - `DEVELOP -> REVIEW`
 - `DEVELOP -> FAILED`

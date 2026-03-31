@@ -76,6 +76,7 @@ Phase transitions driven by orchestrator:
 
 - `INIT -> CRITERIA` (when estimated_complexity is medium or higher)
 - `INIT -> DEVELOP` (when estimated_complexity is low, skipping CRITERIA)
+- `CRITERIA -> REVIEW` (non-low complexity deterministic handoff path)
 - `CRITERIA -> DEVELOP`
 - `DEVELOP -> REVIEW`
 - `REVIEW -> DECIDE`
@@ -154,7 +155,7 @@ Primary callers: `run.sh`, `mentions.sh`, `gh-pr-lifecycle.sh`, `maintenance.sh`
 Allowed phase transitions:
 
 - `INIT -> CRITERIA | DEVELOP | FINALIZE | FAILED`
-- `CRITERIA -> DEVELOP | FAILED`
+- `CRITERIA -> DEVELOP | REVIEW | FAILED`
 - `DEVELOP -> REVIEW | FAILED`
 - `REVIEW -> DECIDE | FAILED`
 - `DECIDE -> DEVELOP | FINALIZE | INTEGRATE | FAILED`
