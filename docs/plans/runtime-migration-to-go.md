@@ -4,7 +4,7 @@
 
 In progress. The current landed fact set is:
 
-- foundation slices already in-repo: Go runtime skeleton (`cmd/runoq-runtime`, `internal/runtimecli`), explicit shell/runtime selection at `bin/runoq` with shell still default, and first acceptance parity scenarios for `run --dry-run` plus `plan --dry-run`
+- foundation slices already in-repo: Go runtime skeleton (`cmd/runoq-runtime`, `internal/runtimecli`), explicit shell/runtime selection at `bin/runoq` with runtime now default and explicit shell fallback preserved, and first acceptance parity scenarios for `run --dry-run` plus `plan --dry-run`
 - runtime-backed `state.sh` (`internal/runtimestate`), `report` (`internal/runtimereport`), and `verify.sh` (`internal/runtimeverify`) with shell/runtime parity coverage
 - `0913f00` (`runtime: migrate gh-issue-queue behind runtime wrapper`): runtime-backed `gh-issue-queue.sh` list/next/set-status coverage behind the stable shell wrapper
 - `136dea5` (`runtimeorchestrator: support queue dry-run`): runtime orchestrator queue dry-run slice with preserved selection, skipped-reason logging, and explicit `INIT` dry-run output
@@ -18,6 +18,7 @@ In progress. The current landed fact set is:
 - current slice: `scripts/orchestrator.sh` now defaults `run`-path routing to runtime when no implementation env override is set, while preserving explicit `RUNOQ_ORCHESTRATOR_IMPLEMENTATION=shell` fallback behavior with deterministic acceptance coverage for both paths
 - current slice: helper wrappers used by the runtime run path now default to runtime when no implementation env override is set (`scripts/state.sh`, `scripts/verify.sh`, `scripts/gh-issue-queue.sh`), while preserving explicit `..._IMPLEMENTATION=shell` fallback behavior with deterministic acceptance coverage for default-routing plus shell-override paths
 - current slice: remaining runtime-proven run-path wrappers now default to runtime when no implementation env override is set (`scripts/dispatch-safety.sh`, `scripts/worktree.sh`), while preserving explicit `..._IMPLEMENTATION=shell` fallback behavior with deterministic acceptance coverage for default-routing plus shell-override paths
+- current slice: the top-level CLI wrapper `bin/runoq` now defaults to runtime when no implementation env override is set, while preserving explicit `RUNOQ_IMPLEMENTATION=shell` fallback behavior with deterministic acceptance coverage at the CLI boundary
 
 Still pending: broader migration gates outside this orchestrator/issue-runner cutover (default-switch sequencing, fallback deletion, and repeated smoke confidence cycles listed in later milestones) remain tracked in the milestone table below.
 

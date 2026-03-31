@@ -2,6 +2,16 @@
 
 load test_helper
 
+write_fake_runtime_cli_bin() {
+  local path="$1"
+  cat >"$path" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'FAKE_RUNTIME:%s %s\n' "$1" "${*:2}"
+EOF
+  chmod +x "$path"
+}
+
 setup_acceptance_project() {
   local dir="$1"
   make_git_repo "$dir" "git@github.com:owner/repo.git"
@@ -32,6 +42,24 @@ EOF
 
 normalize_runtime_stderr() {
   printf '%s' "$1" | sed -E 's/plan-decomposer-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}-[0-9]+/plan-decomposer-NORMALIZED/g'
+}
+
+@test "CLI wrapper defaults to runtime and preserves explicit shell override" {
+  project_dir="$TEST_TMPDIR/default-cli-project"
+  make_git_repo "$project_dir" "git@github.com:owner/repo.git"
+
+  fake_runtime_bin="$TEST_TMPDIR/fake-runtime-cli"
+  write_fake_runtime_cli_bin "$fake_runtime_bin"
+
+  run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION="" RUNOQ_RUNTIME_BIN="'"$fake_runtime_bin"'" "'"$RUNOQ_ROOT"'/bin/runoq" help'
+  [ "$status" -eq 0 ]
+  [ "$output" = "FAKE_RUNTIME:help " ]
+
+  run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION=shell RUNOQ_RUNTIME_BIN="'"$fake_runtime_bin"'" "'"$RUNOQ_ROOT"'/bin/runoq" help'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"FAKE_RUNTIME:"* ]]
+  [[ "$output" == *"Usage:"* ]]
+  [[ "$output" == *"runoq run [--issue N] [--dry-run]"* ]]
 }
 
 @test "acceptance parity: run --dry-run queue mode matches shell and runtime" {

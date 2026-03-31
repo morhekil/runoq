@@ -13,7 +13,7 @@ RUNOQ_ROOT="$(cd "$(dirname "$SELF_PATH")/.." && pwd)"
 export RUNOQ_ROOT
 export RUNOQ_CONFIG="${RUNOQ_CONFIG:-$RUNOQ_ROOT/config/runoq.json}"
 
-implementation="${RUNOQ_IMPLEMENTATION:-shell}"
+implementation="${RUNOQ_IMPLEMENTATION:-runtime}"
 case "$implementation" in
   shell|"")
     ;;
