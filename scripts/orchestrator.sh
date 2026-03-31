@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RUNOQ_ROOT="${RUNOQ_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 export RUNOQ_ROOT
 
-orchestrator_implementation="${RUNOQ_ORCHESTRATOR_IMPLEMENTATION:-${RUNOQ_IMPLEMENTATION:-shell}}"
+orchestrator_implementation="${RUNOQ_ORCHESTRATOR_IMPLEMENTATION:-${RUNOQ_IMPLEMENTATION:-runtime}}"
 case "$orchestrator_implementation" in
   shell|"")
     ;;

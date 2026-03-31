@@ -131,6 +131,17 @@ EOF
   chmod +x "$path"
 }
 
+write_fake_runtime_orchestrator_bin() {
+  local path="$1"
+  cat >"$path" <<'EOF'
+#!/usr/bin/env bash
+
+set -euo pipefail
+printf 'FAKE_RUNTIME:%s\n' "$*"
+EOF
+  chmod +x "$path"
+}
+
 happy_issue_body() {
   cat <<'EOF'
 <!-- runoq:meta
@@ -177,6 +188,25 @@ normalize_json_output() {
 
 normalize_orchestrator_stderr() {
   printf '%s' "$1" | sed -E 's#/(shell|runtime)-project#/<project>#g'
+}
+
+@test "orchestrator wrapper defaults to runtime and preserves explicit shell override" {
+  project_dir="$TEST_TMPDIR/default-wrapper-project"
+  remote_dir="$TEST_TMPDIR/default-wrapper-remote.git"
+  prepare_orchestrator_repo "$remote_dir" "$project_dir"
+
+  fake_runtime_bin="$TEST_TMPDIR/fake-runtime-orchestrator"
+  write_fake_runtime_orchestrator_bin "$fake_runtime_bin"
+
+  run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION="" RUNOQ_ORCHESTRATOR_IMPLEMENTATION="" RUNOQ_RUNTIME_BIN="'"$fake_runtime_bin"'" "'"$RUNOQ_ROOT"'/scripts/orchestrator.sh" --help'
+  [ "$status" -eq 0 ]
+  [ "$output" = "FAKE_RUNTIME:__orchestrator --help" ]
+
+  run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION="" RUNOQ_ORCHESTRATOR_IMPLEMENTATION="shell" RUNOQ_RUNTIME_BIN="'"$fake_runtime_bin"'" "'"$RUNOQ_ROOT"'/scripts/orchestrator.sh" --help'
+  [ "$status" -ne 127 ]
+  [[ "$output" != *"FAKE_RUNTIME:"* ]]
+  [[ "$output" == *"Usage:"* ]]
+  [[ "$output" == *"orchestrator.sh run"* ]]
 }
 
 @test "acceptance parity: orchestrator init-failure rollback matches shell and runtime" {
