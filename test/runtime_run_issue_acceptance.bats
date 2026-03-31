@@ -492,12 +492,14 @@ assert_capture_contains() {
 EOF
 
   payload_file="$TEST_TMPDIR/direct-runner-resume-payload.json"
+  log_dir="$project_dir/log/direct-runner-resume"
   cat >"$payload_file" <<EOF
 {
   "issueNumber": 42,
   "prNumber": 87,
   "worktree": "$project_dir",
   "branch": "main",
+  "logDir": "$log_dir",
   "specPath": "$spec_path",
   "repo": "owner/repo",
   "maxRounds": 2,
@@ -508,12 +510,13 @@ EOF
 
   run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION="shell" RUNOQ_ISSUE_RUNNER_IMPLEMENTATION="shell" RUNOQ_CODEX_BIN="'"$fake_codex"'" RUNOQ_CONFIG="'"$config_path"'" "'"$RUNOQ_ROOT"'/scripts/issue-runner.sh" run "'"$payload_file"'"'
   [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | jq -r '.status')" = "review_ready" ]
   [ "$(printf '%s' "$output" | jq -r '.status')" != "budget_exhausted" ]
 
   log_dir="$(printf '%s' "$output" | jq -r '.logDir')"
-  round_payload="$project_dir/$log_dir/round-1-payload.json"
-  thread_file="$project_dir/$log_dir/round-1-thread-id.txt"
-  retry_message_file="$project_dir/$log_dir/round-1-schema-retry-1-last-message.md"
+  round_payload="$log_dir/round-1-payload.json"
+  thread_file="$log_dir/round-1-thread-id.txt"
+  retry_message_file="$log_dir/round-1-schema-retry-1-last-message.md"
 
   run test -f "$thread_file"
   [ "$status" -eq 0 ]
@@ -522,6 +525,7 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(jq -r '.thread_id' "$round_payload")" = "thread-issue-runner-1" ]
   [ "$(jq -r '.payload_schema_valid' "$round_payload")" = "true" ]
+  [ "$(jq -c '.payload_schema_errors' "$round_payload")" = "[]" ]
 
   run rg -F -n "exec resume thread-issue-runner-1 --json -o" "$RUNOQ_TEST_FAKE_CODEX_LOG"
   [ "$status" -eq 0 ]
@@ -550,12 +554,14 @@ EOF
 EOF
 
   payload_file="$TEST_TMPDIR/direct-runner-abs-paths-payload.json"
+  log_dir="$root_project_dir/log/direct-runner-abs-paths"
   cat >"$payload_file" <<EOF
 {
   "issueNumber": 42,
   "prNumber": 87,
   "worktree": "$worktree_dir",
   "branch": "runoq/42-abs-paths",
+  "logDir": "$log_dir",
   "specPath": "$spec_path",
   "repo": "owner/repo",
   "maxRounds": 2,
@@ -569,15 +575,16 @@ EOF
   [ "$(printf '%s' "$output" | jq -r '.status')" = "review_ready" ]
 
   log_dir="$(printf '%s' "$output" | jq -r '.logDir')"
-  round_payload="$root_project_dir/$log_dir/round-1-payload.json"
-  root_message_file="$root_project_dir/$log_dir/round-1-last-message.md"
-  root_retry_message_file="$root_project_dir/$log_dir/round-1-schema-retry-1-last-message.md"
-  worktree_message_file="$worktree_dir/$log_dir/round-1-last-message.md"
-  worktree_retry_message_file="$worktree_dir/$log_dir/round-1-schema-retry-1-last-message.md"
+  round_payload="$log_dir/round-1-payload.json"
+  root_message_file="$log_dir/round-1-last-message.md"
+  root_retry_message_file="$log_dir/round-1-schema-retry-1-last-message.md"
+  worktree_message_file="$worktree_dir/log/direct-runner-abs-paths/round-1-last-message.md"
+  worktree_retry_message_file="$worktree_dir/log/direct-runner-abs-paths/round-1-schema-retry-1-last-message.md"
 
   run test -f "$round_payload"
   [ "$status" -eq 0 ]
   [ "$(jq -r '.payload_schema_valid' "$round_payload")" = "true" ]
+  [ "$(jq -c '.payload_schema_errors' "$round_payload")" = "[]" ]
   run test -f "$root_message_file"
   [ "$status" -eq 0 ]
   run test -f "$root_retry_message_file"

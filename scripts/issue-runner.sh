@@ -471,7 +471,7 @@ EOF
     thread_id="$(extract_thread_id_from_events "$event_log_file")"
     printf '%s\n' "$thread_id" >"$thread_id_file"
 
-    "$RUNOQ_ROOT/scripts/state.sh" validate-payload "$worktree" "$baseline" "$last_message_file" >"$payload_json_file"
+    "$RUNOQ_ROOT/scripts/state.sh" validate-payload "$worktree" "$baseline" "$last_message_file_abs" >"$payload_json_file"
     inject_thread_id_into_payload_file "$payload_json_file" "$thread_id"
 
     payload_schema_valid="$(jq -r '.payload_schema_valid // false' "$payload_json_file")"
@@ -498,7 +498,7 @@ EOF
       fi
       printf '%s\n' "$thread_id" >"$thread_id_file"
 
-      "$RUNOQ_ROOT/scripts/state.sh" validate-payload "$worktree" "$baseline" "$retry_last_message_file" >"$payload_json_file"
+      "$RUNOQ_ROOT/scripts/state.sh" validate-payload "$worktree" "$baseline" "$retry_last_message_file_abs" >"$payload_json_file"
       inject_thread_id_into_payload_file "$payload_json_file" "$thread_id"
 
       payload_schema_valid="$(jq -r '.payload_schema_valid // false' "$payload_json_file")"
