@@ -57,6 +57,32 @@ write_fake_codex() {
 
 set -euo pipefail
 
+mode="${1:-}"
+shift || true
+[[ "$mode" == "exec" ]] || exit 2
+
+if [[ "${1:-}" == "resume" ]]; then
+  shift 2 || true
+fi
+
+output_file=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dangerously-bypass-approvals-and-sandbox|--json)
+      shift
+      ;;
+    -o)
+      output_file="${2:-}"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+[[ -n "$output_file" ]] || exit 3
+
 round=1
 if [[ -n "${RUNOQ_TEST_ISSUE_RUNNER_ROUND_STATE_FILE:-}" ]]; then
   if [[ -f "${RUNOQ_TEST_ISSUE_RUNNER_ROUND_STATE_FILE}" ]]; then
@@ -75,20 +101,25 @@ if [[ -n "${tokens:-}" ]]; then
   printf 'tokens: %s\n' "$tokens" >&2
 fi
 
-printf '<!-- runoq:payload:codex-return -->\n'
-printf '```json\n'
 payload_file_var="RUNOQ_TEST_ISSUE_RUNNER_PAYLOAD_FILE_${round}"
 payload_json_var="RUNOQ_TEST_ISSUE_RUNNER_PAYLOAD_JSON_${round}"
 payload_file="${!payload_file_var:-${RUNOQ_TEST_ISSUE_RUNNER_PAYLOAD_FILE:-}}"
 payload_json="${!payload_json_var:-${RUNOQ_TEST_ISSUE_RUNNER_PAYLOAD_JSON:-}}"
-if [[ -n "${payload_file:-}" ]]; then
-  cat "$payload_file"
-elif [[ -n "${payload_json:-}" ]]; then
-  printf '%s\n' "$payload_json"
-else
-  printf '%s\n' "${RUNOQ_TEST_ISSUE_RUNNER_PAYLOAD_JSON:-{"status":"completed","commits_pushed":[],"commit_range":"","files_changed":[],"files_added":[],"files_deleted":[],"tests_run":true,"tests_passed":true,"test_summary":"ok","build_passed":true,"blockers":[],"notes":""}}"
-fi
-printf '```\n'
+
+printf '{"type":"thread.started","thread_id":"thread-issue-runner-1"}\n'
+
+{
+  printf '<!-- runoq:payload:codex-return -->\n'
+  printf '```json\n'
+  if [[ -n "${payload_file:-}" ]]; then
+    cat "$payload_file"
+  elif [[ -n "${payload_json:-}" ]]; then
+    printf '%s\n' "$payload_json"
+  else
+    printf '%s\n' "${RUNOQ_TEST_ISSUE_RUNNER_PAYLOAD_JSON:-{"status":"completed","commits_pushed":[],"commit_range":"","files_changed":[],"files_added":[],"files_deleted":[],"tests_run":true,"tests_passed":true,"test_summary":"ok","build_passed":true,"blockers":[],"notes":""}}"
+  fi
+  printf '```\n'
+} >"$output_file"
 EOF
   chmod +x "$path"
 }
