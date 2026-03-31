@@ -30,7 +30,9 @@ state_files_query() {
 summary_report() {
   local last="${1:-}"
   local files=()
-  mapfile -t files < <(state_files_query "$last")
+  while IFS= read -r file; do
+    files+=("$file")
+  done < <(state_files_query "$last")
   if [[ "${#files[@]}" -eq 0 ]]; then
     jq -n '{issues:0, pass:0, fail:0, caveats:0, tokens:{input:0,cached_input:0,output:0,total:0}, average_rounds:0}'
     return
@@ -79,7 +81,9 @@ issue_report() {
 cost_report() {
   local last="${1:-}"
   local files=() input cached output
-  mapfile -t files < <(state_files_query "$last")
+  while IFS= read -r file; do
+    files+=("$file")
+  done < <(state_files_query "$last")
   if [[ "${#files[@]}" -eq 0 ]]; then
     jq -n '{issues:0, estimated_cost:0}'
     return

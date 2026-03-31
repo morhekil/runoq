@@ -110,3 +110,13 @@ ensure_modern_bash() {
 
   skip "requires bash >= 4 to run scripts/report.sh tests"
 }
+
+run_with_system_bash() {
+  local script="$1"
+  shift
+  if [[ -x "/bin/bash" ]]; then
+    /bin/bash "$script" "$@"
+    return
+  fi
+  bash "$script" "$@"
+}

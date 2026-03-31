@@ -3,7 +3,6 @@
 load test_helper
 
 @test "report summary aggregates completed state files" {
-  ensure_modern_bash
   export TARGET_ROOT="$TEST_TMPDIR/project"
   export RUNOQ_STATE_DIR="$TARGET_ROOT/.runoq/state"
   mkdir -p "$RUNOQ_STATE_DIR"
@@ -28,7 +27,7 @@ EOF
 }
 EOF
 
-  run "$RUNOQ_ROOT/scripts/report.sh" summary
+  run run_with_system_bash "$RUNOQ_ROOT/scripts/report.sh" summary
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.issues')" = "2" ]
@@ -38,7 +37,6 @@ EOF
 }
 
 @test "report issue returns the stored state for a specific issue" {
-  ensure_modern_bash
   export TARGET_ROOT="$TEST_TMPDIR/project"
   export RUNOQ_STATE_DIR="$TARGET_ROOT/.runoq/state"
   mkdir -p "$RUNOQ_STATE_DIR"
@@ -50,14 +48,13 @@ EOF
 }
 EOF
 
-  run "$RUNOQ_ROOT/scripts/report.sh" issue 42
+  run run_with_system_bash "$RUNOQ_ROOT/scripts/report.sh" issue 42
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.phase')" = "DONE" ]
 }
 
 @test "report cost uses config-driven rates" {
-  ensure_modern_bash
   export TARGET_ROOT="$TEST_TMPDIR/project"
   export RUNOQ_STATE_DIR="$TARGET_ROOT/.runoq/state"
   mkdir -p "$RUNOQ_STATE_DIR"
@@ -117,26 +114,24 @@ EOF
 EOF
   export RUNOQ_CONFIG="$TEST_TMPDIR/config.json"
 
-  run "$RUNOQ_ROOT/scripts/report.sh" cost
+  run run_with_system_bash "$RUNOQ_ROOT/scripts/report.sh" cost
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.estimated_cost')" = "2" ]
 }
 
 @test "report summary handles an empty state directory" {
-  ensure_modern_bash
   export TARGET_ROOT="$TEST_TMPDIR/project"
   export RUNOQ_STATE_DIR="$TARGET_ROOT/.runoq/state"
   mkdir -p "$RUNOQ_STATE_DIR"
 
-  run "$RUNOQ_ROOT/scripts/report.sh" summary
+  run run_with_system_bash "$RUNOQ_ROOT/scripts/report.sh" summary
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.issues')" = "0" ]
 }
 
 @test "report summary aggregates lifecycle state files with status/result schema" {
-  ensure_modern_bash
   export TARGET_ROOT="$TEST_TMPDIR/project"
   export RUNOQ_STATE_DIR="$TARGET_ROOT/.runoq/state"
   mkdir -p "$RUNOQ_STATE_DIR"
@@ -157,7 +152,7 @@ EOF
 }
 EOF
 
-  run "$RUNOQ_ROOT/scripts/report.sh" summary
+  run run_with_system_bash "$RUNOQ_ROOT/scripts/report.sh" summary
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.issues')" = "2" ]
@@ -167,7 +162,6 @@ EOF
 }
 
 @test "report summary aggregates lifecycle state files with top-level verdict schema" {
-  ensure_modern_bash
   export TARGET_ROOT="$TEST_TMPDIR/project"
   export RUNOQ_STATE_DIR="$TARGET_ROOT/.runoq/state"
   mkdir -p "$RUNOQ_STATE_DIR"
@@ -188,7 +182,7 @@ EOF
 }
 EOF
 
-  run "$RUNOQ_ROOT/scripts/report.sh" summary
+  run run_with_system_bash "$RUNOQ_ROOT/scripts/report.sh" summary
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.issues')" = "2" ]
