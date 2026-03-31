@@ -6,25 +6,13 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RUNOQ_ROOT="${RUNOQ_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 export RUNOQ_ROOT
 
-issue_runner_implementation="${RUNOQ_ISSUE_RUNNER_IMPLEMENTATION:-${RUNOQ_IMPLEMENTATION:-runtime}}"
+issue_runner_implementation="${RUNOQ_ISSUE_RUNNER_IMPLEMENTATION:-shell}"
 case "$issue_runner_implementation" in
-  shell|"")
-    ;;
-  runtime)
-    runtime_bin="${RUNOQ_RUNTIME_BIN:-}"
-    if [[ -n "$runtime_bin" ]]; then
-      exec "$runtime_bin" "__issue_runner" "$@"
-    fi
-    go_bin="${RUNOQ_GO_BIN:-go}"
-    command -v "$go_bin" >/dev/null 2>&1 || {
-      echo "runoq: Go toolchain not found: $go_bin" >&2
-      exit 1
-    }
-    cd "$RUNOQ_ROOT"
-    exec "$go_bin" run "$RUNOQ_ROOT/cmd/runoq-runtime" "__issue_runner" "$@"
+  shell|runtime|"")
+    # runtime remains a compatibility alias while issue-runner is shell-owned.
     ;;
   *)
-    echo "runoq: Unknown RUNOQ_ISSUE_RUNNER_IMPLEMENTATION: $issue_runner_implementation (expected shell or runtime)" >&2
+    echo "runoq: Unknown RUNOQ_ISSUE_RUNNER_IMPLEMENTATION: $issue_runner_implementation (expected shell)" >&2
     exit 1
     ;;
 esac
