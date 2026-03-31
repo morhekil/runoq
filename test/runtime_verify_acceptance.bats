@@ -92,7 +92,7 @@ EOF
   chmod +x "$path"
 }
 
-@test "verify wrapper defaults to runtime and preserves explicit shell override" {
+@test "verify wrapper defaults to runtime and ignores explicit shell override" {
   local_dir="$TEST_TMPDIR/default-wrapper-local"
   make_git_repo "$local_dir"
 
@@ -104,10 +104,8 @@ EOF
   [ "$output" = "FAKE_RUNTIME:__verify round one two three four" ]
 
   run bash -lc 'cd "'"$local_dir"'" && RUNOQ_IMPLEMENTATION="" RUNOQ_VERIFY_IMPLEMENTATION="shell" RUNOQ_RUNTIME_BIN="'"$fake_runtime_bin"'" "'"$RUNOQ_ROOT"'/scripts/verify.sh" round one two three'
-  [ "$status" -ne 0 ]
-  [[ "$output" != *"FAKE_RUNTIME:"* ]]
-  [[ "$output" == *"Usage:"* ]]
-  [[ "$output" == *"verify.sh round"* ]]
+  [ "$status" -eq 0 ]
+  [ "$output" = "FAKE_RUNTIME:__verify round one two three" ]
 }
 
 @test "verify wrapper go fallback runs from RUNOQ_ROOT when runtime bin is unset" {

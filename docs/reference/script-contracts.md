@@ -37,6 +37,7 @@ Notes:
 - `create` accepts `--type`, `--parent-epic`, and `--complexity-rationale` flags for hierarchical issue structures and rationale tracking.
 - `epic-status` checks whether all children of an epic have the `runoq:done` label, enabling INTEGRATE phase triggering.
 - dependency checks require upstream issues to carry the configured done label.
+- `gh-issue-queue.sh` remains the stable shell entrypoint and dispatches to the Go runtime queue engine (`RUNOQ_RUNTIME_BIN` first, then `go run` fallback from `RUNOQ_ROOT`).
 
 ## `plan.sh`
 
@@ -91,6 +92,7 @@ Notes:
 
 - The orchestrator does not perform reasoning. It dispatches to agents for bounded tasks and applies a deterministic decision table for phase transitions.
 - Mention triage uses a haiku structured-output call, not a full agent invocation.
+- `orchestrator.sh` remains the stable shell entrypoint and dispatches to the Go runtime orchestrator (`RUNOQ_RUNTIME_BIN` first, then `go run` fallback from `RUNOQ_ROOT`).
 
 ## `issue-runner.sh`
 
@@ -166,7 +168,7 @@ Terminal phases `DONE` and `FAILED` reject further transitions.
 
 Notes:
 
-- `state.sh` remains the stable shell entrypoint; when `RUNOQ_STATE_IMPLEMENTATION=runtime` (or global `RUNOQ_IMPLEMENTATION=runtime`) it dispatches to the Go runtime state engine while preserving the same subcommand contract.
+- `state.sh` remains the stable shell entrypoint and dispatches to the Go runtime state engine (`RUNOQ_RUNTIME_BIN` first, then `go run` fallback from `RUNOQ_ROOT`).
 
 ## `verify.sh`
 
@@ -199,7 +201,7 @@ Verification checks for `integrate`:
 
 Notes:
 
-- `verify.sh` remains the stable shell entrypoint; when `RUNOQ_VERIFY_IMPLEMENTATION=runtime` (or global `RUNOQ_IMPLEMENTATION=runtime`) it dispatches to the Go runtime verify engine while preserving this contract.
+- `verify.sh` remains the stable shell entrypoint and dispatches to the Go runtime verify engine (`RUNOQ_RUNTIME_BIN` first, then `go run` fallback from `RUNOQ_ROOT`).
 
 ## `worktree.sh`
 
@@ -218,6 +220,7 @@ Notes:
 
 - worktree paths are derived from `worktreePrefix` and live next to the target repo.
 - `create` fails if the target path already exists.
+- `worktree.sh` remains the stable shell entrypoint and dispatches to the Go runtime worktree engine (`RUNOQ_RUNTIME_BIN` first, then `go run` fallback from `RUNOQ_ROOT`).
 
 ## `dispatch-safety.sh`
 
@@ -236,6 +239,10 @@ Eligibility failure reasons currently include:
 - incomplete dependencies
 - existing open PR for the derived branch
 - unresolved conflicts between the existing branch and `origin/main`
+
+Notes:
+
+- `dispatch-safety.sh` remains the stable shell entrypoint and dispatches to the Go runtime dispatch-safety engine (`RUNOQ_RUNTIME_BIN` first, then `go run` fallback from `RUNOQ_ROOT`).
 
 ## `report.sh`
 

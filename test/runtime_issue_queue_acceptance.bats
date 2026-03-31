@@ -27,7 +27,7 @@ EOF
   chmod +x "$path"
 }
 
-@test "issue queue wrapper defaults to runtime and preserves explicit shell override" {
+@test "issue queue wrapper defaults to runtime and ignores explicit shell override" {
   project_dir="$TEST_TMPDIR/default-wrapper-project"
   make_git_repo "$project_dir"
 
@@ -39,10 +39,8 @@ EOF
   [ "$output" = "FAKE_RUNTIME:__issue_queue list owner/repo runoq:ready" ]
 
   run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION="" RUNOQ_ISSUE_QUEUE_IMPLEMENTATION="shell" RUNOQ_RUNTIME_BIN="'"$fake_runtime_bin"'" "'"$RUNOQ_ROOT"'/scripts/gh-issue-queue.sh" list owner/repo'
-  [ "$status" -ne 0 ]
-  [[ "$output" != *"FAKE_RUNTIME:"* ]]
-  [[ "$output" == *"Usage:"* ]]
-  [[ "$output" == *"gh-issue-queue.sh list"* ]]
+  [ "$status" -eq 0 ]
+  [ "$output" = "FAKE_RUNTIME:__issue_queue list owner/repo" ]
 }
 
 @test "issue queue wrapper go fallback runs from RUNOQ_ROOT when runtime bin is unset" {

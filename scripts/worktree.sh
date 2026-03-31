@@ -6,28 +6,17 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RUNOQ_ROOT="${RUNOQ_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 export RUNOQ_ROOT
 
-worktree_implementation="${RUNOQ_WORKTREE_IMPLEMENTATION:-${RUNOQ_IMPLEMENTATION:-runtime}}"
-case "$worktree_implementation" in
-  shell|"")
-    ;;
-  runtime)
-    runtime_bin="${RUNOQ_RUNTIME_BIN:-}"
-    if [[ -n "$runtime_bin" ]]; then
-      exec "$runtime_bin" "__worktree" "$@"
-    fi
-    go_bin="${RUNOQ_GO_BIN:-go}"
-    command -v "$go_bin" >/dev/null 2>&1 || {
-      echo "runoq: Go toolchain not found: $go_bin" >&2
-      exit 1
-    }
-    cd "$RUNOQ_ROOT"
-    exec "$go_bin" run "$RUNOQ_ROOT/cmd/runoq-runtime" "__worktree" "$@"
-    ;;
-  *)
-    echo "runoq: Unknown RUNOQ_WORKTREE_IMPLEMENTATION: $worktree_implementation (expected shell or runtime)" >&2
-    exit 1
-    ;;
-esac
+runtime_bin="${RUNOQ_RUNTIME_BIN:-}"
+if [[ -n "$runtime_bin" ]]; then
+  exec "$runtime_bin" "__worktree" "$@"
+fi
+go_bin="${RUNOQ_GO_BIN:-go}"
+command -v "$go_bin" >/dev/null 2>&1 || {
+  echo "runoq: Go toolchain not found: $go_bin" >&2
+  exit 1
+}
+cd "$RUNOQ_ROOT"
+exec "$go_bin" run "$RUNOQ_ROOT/cmd/runoq-runtime" "__worktree" "$@"
 
 source "$(cd "$(dirname "$0")" && pwd)/lib/common.sh"
 

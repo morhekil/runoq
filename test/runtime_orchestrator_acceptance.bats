@@ -232,7 +232,7 @@ normalize_orchestrator_stderr() {
   printf '%s' "$1" | sed -E 's#/(shell|runtime)-project#/<project>#g'
 }
 
-@test "orchestrator wrapper defaults to runtime and preserves explicit shell override" {
+@test "orchestrator wrapper defaults to runtime and ignores explicit shell override" {
   project_dir="$TEST_TMPDIR/default-wrapper-project"
   remote_dir="$TEST_TMPDIR/default-wrapper-remote.git"
   prepare_orchestrator_repo "$remote_dir" "$project_dir"
@@ -245,10 +245,8 @@ normalize_orchestrator_stderr() {
   [ "$output" = "FAKE_RUNTIME:__orchestrator --help" ]
 
   run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION="" RUNOQ_ORCHESTRATOR_IMPLEMENTATION="shell" RUNOQ_RUNTIME_BIN="'"$fake_runtime_bin"'" "'"$RUNOQ_ROOT"'/scripts/orchestrator.sh" --help'
-  [ "$status" -ne 127 ]
-  [[ "$output" != *"FAKE_RUNTIME:"* ]]
-  [[ "$output" == *"Usage:"* ]]
-  [[ "$output" == *"orchestrator.sh run"* ]]
+  [ "$status" -eq 0 ]
+  [ "$output" = "FAKE_RUNTIME:__orchestrator --help" ]
 }
 
 @test "orchestrator wrapper go fallback runs from RUNOQ_ROOT when runtime bin is unset" {

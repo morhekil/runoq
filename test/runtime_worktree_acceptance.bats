@@ -46,7 +46,7 @@ EOF
   chmod +x "$path"
 }
 
-@test "worktree wrapper defaults to runtime and preserves explicit shell override" {
+@test "worktree wrapper defaults to runtime and ignores explicit shell override" {
   project_dir="$TEST_TMPDIR/default-wrapper-project"
   make_git_repo "$project_dir"
 
@@ -58,10 +58,8 @@ EOF
   [ "$output" = "FAKE_RUNTIME:__worktree inspect 42" ]
 
   run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION="" RUNOQ_WORKTREE_IMPLEMENTATION="shell" RUNOQ_RUNTIME_BIN="'"$fake_runtime_bin"'" "'"$RUNOQ_ROOT"'/scripts/worktree.sh"'
-  [ "$status" -ne 0 ]
-  [[ "$output" != *"FAKE_RUNTIME:"* ]]
-  [[ "$output" == *"Usage:"* ]]
-  [[ "$output" == *"worktree.sh create"* ]]
+  [ "$status" -eq 0 ]
+  [ "$output" = "FAKE_RUNTIME:__worktree " ]
 }
 
 @test "worktree wrapper go fallback runs from RUNOQ_ROOT when runtime bin is unset" {

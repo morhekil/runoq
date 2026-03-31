@@ -69,7 +69,7 @@ EOF
   chmod +x "$path"
 }
 
-@test "dispatch-safety wrapper defaults to runtime and preserves explicit shell override" {
+@test "dispatch-safety wrapper defaults to runtime and ignores explicit shell override" {
   project_dir="$TEST_TMPDIR/default-wrapper-project"
   make_git_repo "$project_dir"
 
@@ -81,10 +81,8 @@ EOF
   [ "$output" = "FAKE_RUNTIME:__dispatch_safety reconcile owner/repo" ]
 
   run bash -lc 'cd "'"$project_dir"'" && RUNOQ_IMPLEMENTATION="" RUNOQ_DISPATCH_SAFETY_IMPLEMENTATION="shell" RUNOQ_RUNTIME_BIN="'"$fake_runtime_bin"'" "'"$RUNOQ_ROOT"'/scripts/dispatch-safety.sh"'
-  [ "$status" -ne 0 ]
-  [[ "$output" != *"FAKE_RUNTIME:"* ]]
-  [[ "$output" == *"Usage:"* ]]
-  [[ "$output" == *"dispatch-safety.sh reconcile"* ]]
+  [ "$status" -eq 0 ]
+  [ "$output" = "FAKE_RUNTIME:__dispatch_safety " ]
 }
 
 @test "dispatch-safety wrapper go fallback runs from RUNOQ_ROOT when runtime bin is unset" {
