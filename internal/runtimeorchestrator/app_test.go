@@ -50,6 +50,58 @@ type: epic
 	}
 }
 
+func TestRunIssueDryRunDoesNotForceShellForMigratedHelpers(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+	writeRuntimeConfig(t, root)
+
+	var stdout bytes.Buffer
+	app := New([]string{"run", "owner/repo", "--issue", "42", "--dry-run"}, []string{
+		"RUNOQ_ROOT=" + root,
+		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
+		"TARGET_ROOT=" + root,
+	}, root, &stdout, io.Discard)
+	app.SetCommandExecutor(func(_ context.Context, req commandRequest) error {
+		switch {
+		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
+			_, _ = io.WriteString(req.Stdout, "fail\n")
+			return nil
+		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "configure_git_bot_identity"):
+			return nil
+		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "configure_git_bot_remote"):
+			return nil
+		case strings.HasSuffix(req.Name, "/dispatch-safety.sh") && strings.Join(req.Args, " ") == "reconcile owner/repo":
+			assertEnvNotValue(t, req.Env, "RUNOQ_DISPATCH_SAFETY_IMPLEMENTATION", "shell")
+			return nil
+		case req.Name == "gh" && strings.Join(req.Args, " ") == "issue view 42 --repo owner/repo --json title":
+			_, _ = io.WriteString(req.Stdout, `{"title":"Implement queue"}`)
+			return nil
+		case req.Name == "gh" && strings.Join(req.Args, " ") == "issue view 42 --repo owner/repo --json number,title,body,labels,url":
+			_, _ = io.WriteString(req.Stdout, `{"number":42,"title":"Implement queue","body":"<!-- runoq:meta\nestimated_complexity: low\ntype: task\n-->\n","labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/42"}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "list owner/repo runoq:ready":
+			assertEnvNotValue(t, req.Env, "RUNOQ_ISSUE_QUEUE_IMPLEMENTATION", "shell")
+			_, _ = io.WriteString(req.Stdout, `[{"number":42,"title":"Implement queue","body":"body","url":"https://example.test/issues/42","estimated_complexity":"low","type":"task"}]`)
+			return nil
+		case strings.HasSuffix(req.Name, "/dispatch-safety.sh") && strings.Join(req.Args, " ") == "eligibility owner/repo 42":
+			assertEnvNotValue(t, req.Env, "RUNOQ_DISPATCH_SAFETY_IMPLEMENTATION", "shell")
+			_, _ = io.WriteString(req.Stdout, `{"allowed":true,"issue":42,"branch":"runoq/42-implement-queue","reasons":[]}`)
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s", commandLine(req))
+			return nil
+		}
+	})
+
+	code := app.Run(ctx)
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d", code)
+	}
+	if strings.TrimSpace(stdout.String()) != `{"branch":"runoq/42-implement-queue","dry_run":true,"issue":42,"phase":"INIT"}` {
+		t.Fatalf("unexpected stdout: %q", stdout.String())
+	}
+}
+
 func TestPhaseInitPRCreateFailureWritesRollbackStateAndCleansUp(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
@@ -1061,4 +1113,11 @@ func containsAny(values []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+func assertEnvNotValue(t *testing.T, env []string, key string, disallowed string) {
+	t.Helper()
+	if value, ok := envLookup(env, key); ok && value == disallowed {
+		t.Fatalf("expected %s to not be %q, got %q", key, disallowed, value)
+	}
 }

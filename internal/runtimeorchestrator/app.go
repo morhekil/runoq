@@ -263,7 +263,7 @@ func (a *App) runCommandEntry(ctx context.Context, root string, env []string, ar
 	}
 
 	a.logInfo("Running reconciliation")
-	reconcileEnv := envSet(env, "RUNOQ_DISPATCH_SAFETY_IMPLEMENTATION", "shell")
+	reconcileEnv := append([]string(nil), env...)
 	reconcileEnv = envSet(reconcileEnv, "RUNOQ_NO_AUTO_TOKEN", "1")
 	_ = a.runScript(ctx, root, reconcileEnv, "dispatch-safety.sh", []string{"reconcile", repo}, nil, io.Discard, io.Discard)
 
@@ -301,7 +301,7 @@ func (a *App) runQueue(ctx context.Context, root string, env []string, repo stri
 		return a.fail(err.Error())
 	}
 
-	queueEnv := envSet(env, "RUNOQ_ISSUE_QUEUE_IMPLEMENTATION", "shell")
+	queueEnv := append([]string(nil), env...)
 	queueEnv = envSet(queueEnv, "RUNOQ_LOG", "1")
 	queueEnv = envSet(queueEnv, "RUNOQ_NO_AUTO_TOKEN", "1")
 
@@ -368,7 +368,7 @@ func (a *App) runQueueDryRun(ctx context.Context, root string, env []string, rep
 		return a.fail(err.Error())
 	}
 
-	queueEnv := envSet(env, "RUNOQ_ISSUE_QUEUE_IMPLEMENTATION", "shell")
+	queueEnv := append([]string(nil), env...)
 	queueEnv = envSet(queueEnv, "RUNOQ_LOG", "1")
 	queueEnv = envSet(queueEnv, "RUNOQ_NO_AUTO_TOKEN", "1")
 	queueOut, queueStderr, err := a.scriptOutputWithStderr(ctx, root, queueEnv, "gh-issue-queue.sh", []string{"next", repo, cfg.Labels.Ready}, nil)
@@ -735,7 +735,7 @@ func (a *App) getIssueMetadata(ctx context.Context, root string, env []string, r
 func (a *App) phaseInit(ctx context.Context, root string, env []string, repo string, issueNumber int, dryRun bool, title string) (string, error) {
 	a.logInfo("INIT: issue #%d", issueNumber)
 
-	dispatchEnv := envSet(env, "RUNOQ_DISPATCH_SAFETY_IMPLEMENTATION", "shell")
+	dispatchEnv := append([]string(nil), env...)
 	dispatchEnv = envSet(dispatchEnv, "RUNOQ_NO_AUTO_TOKEN", "1")
 	eligibilityOut, eligibilityErr := a.scriptOutput(ctx, root, dispatchEnv, "dispatch-safety.sh", []string{"eligibility", repo, strconv.Itoa(issueNumber)}, nil)
 	if eligibilityErr != nil {
