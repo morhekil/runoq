@@ -1,14 +1,12 @@
 package runtimestate
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -16,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"github.com/saruman/runoq/internal/common"
 )
 
 const usageText = `Usage:
@@ -27,18 +26,6 @@ const usageText = `Usage:
   state.sh validate-payload <worktree> <base-sha> <codex-output-file>
 `
 
-type commandRequest struct {
-	Name   string
-	Args   []string
-	Dir    string
-	Env    []string
-	Stdin  io.Reader
-	Stdout io.Writer
-	Stderr io.Writer
-}
-
-type commandExecutor func(context.Context, commandRequest) error
-
 type App struct {
 	args        []string
 	env         []string
@@ -46,7 +33,7 @@ type App struct {
 	stdin       io.Reader
 	stdout      io.Writer
 	stderr      io.Writer
-	execCommand commandExecutor
+	execCommand common.CommandExecutor
 	nowFn       func() time.Time
 }
 
@@ -95,14 +82,14 @@ func New(args []string, env []string, cwd string, stdin io.Reader, stdout io.Wri
 		stdin:       stdin,
 		stdout:      stdout,
 		stderr:      stderr,
-		execCommand: runCommand,
+		execCommand: common.RunCommand,
 		nowFn:       time.Now,
 	}
 }
 
-func (a *App) SetCommandExecutor(execFn commandExecutor) {
+func (a *App) SetCommandExecutor(execFn common.CommandExecutor) {
 	if execFn == nil {
-		a.execCommand = runCommand
+		a.execCommand = common.RunCommand
 		return
 	}
 	a.execCommand = execFn
@@ -149,12 +136,12 @@ func (a *App) runSave(ctx context.Context, args []string) int {
 
 	issue, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil {
-		return a.fail("State payload must be valid JSON")
+		return common.Fail(a.stderr, "State payload must be valid JSON")
 	}
 
 	stateDirArg, rest, err := parseStateDirArg(args[1:])
 	if err != nil {
-		return a.fail(err.Error())
+		return common.Fail(a.stderr, err.Error())
 	}
 	if len(rest) != 0 {
 		a.printUsage()
@@ -166,33 +153,33 @@ func (a *App) runSave(ctx context.Context, args []string) int {
 		return code
 	}
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
-		return a.failf("Failed to create state directory: %v", err)
+		return common.Failf(a.stderr, "Failed to create state directory: %v", err)
 	}
 
 	payloadBytes, err := io.ReadAll(a.stdin)
 	if err != nil {
-		return a.failf("Failed to read state payload: %v", err)
+		return common.Failf(a.stderr, "Failed to read state payload: %v", err)
 	}
 
 	var payload map[string]any
 	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
-		return a.fail("State payload must be valid JSON")
+		return common.Fail(a.stderr, "State payload must be valid JSON")
 	}
 
 	now := a.nowFn().UTC().Format(time.RFC3339)
 	statePath := filepath.Join(stateDir, fmt.Sprintf("%d.json", issue))
 	startedAt := now
 
-	if fileExists(statePath) {
+	if common.FileExists(statePath) {
 		current, err := a.loadStateJSON(statePath)
 		if err != nil {
-			return a.fail(err.Error())
+			return common.Fail(a.stderr, err.Error())
 		}
 		startedAt = stringOrDefault(current["started_at"], "")
 		fromPhase := jsonScalarString(current["phase"])
 		toPhase := jsonScalarString(payload["phase"])
 		if err := validatePhaseTransition(fromPhase, toPhase); err != nil {
-			return a.fail(err.Error())
+			return common.Fail(a.stderr, err.Error())
 		}
 	}
 
@@ -204,7 +191,7 @@ func (a *App) runSave(ctx context.Context, args []string) int {
 	payload["issue"] = issue
 
 	if err := writeAtomicJSON(statePath, payload); err != nil {
-		return a.failf("Failed to write state file: %v", err)
+		return common.Failf(a.stderr, "Failed to write state file: %v", err)
 	}
 	return a.writeStateFile(statePath)
 }
@@ -218,7 +205,7 @@ func (a *App) runLoad(args []string) int {
 	issue := args[0]
 	stateDirArg, rest, err := parseStateDirArg(args[1:])
 	if err != nil {
-		return a.fail(err.Error())
+		return common.Fail(a.stderr, err.Error())
 	}
 	if len(rest) != 0 {
 		a.printUsage()
@@ -230,8 +217,8 @@ func (a *App) runLoad(args []string) int {
 		return code
 	}
 	statePath := filepath.Join(stateDir, fmt.Sprintf("%s.json", issue))
-	if !fileExists(statePath) {
-		return a.failf("State file not found for issue %s", issue)
+	if !common.FileExists(statePath) {
+		return common.Failf(a.stderr, "State file not found for issue %s", issue)
 	}
 	return a.writeStateFile(statePath)
 }
@@ -244,12 +231,12 @@ func (a *App) runRecordMention(args []string) int {
 
 	commentID, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil {
-		return a.fail("comment-id must be a number")
+		return common.Fail(a.stderr, "comment-id must be a number")
 	}
 
 	stateDirArg, rest, err := parseStateDirArg(args[1:])
 	if err != nil {
-		return a.fail(err.Error())
+		return common.Fail(a.stderr, err.Error())
 	}
 	if len(rest) != 0 {
 		a.printUsage()
@@ -261,20 +248,20 @@ func (a *App) runRecordMention(args []string) int {
 		return code
 	}
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
-		return a.failf("Failed to create state directory: %v", err)
+		return common.Failf(a.stderr, "Failed to create state directory: %v", err)
 	}
 
 	mentionsPath := filepath.Join(stateDir, "processed-mentions.json")
 	mentions, err := readMentions(mentionsPath)
 	if err != nil {
-		return a.fail(err.Error())
+		return common.Fail(a.stderr, err.Error())
 	}
 	if !slices.Contains(mentions, commentID) {
 		mentions = append(mentions, commentID)
 	}
 
 	if err := writeAtomicJSON(mentionsPath, mentions); err != nil {
-		return a.failf("Failed to write processed mentions: %v", err)
+		return common.Failf(a.stderr, "Failed to write processed mentions: %v", err)
 	}
 	return writeJSON(a.stdout, a.stderr, mentions)
 }
@@ -287,12 +274,12 @@ func (a *App) runHasMention(args []string) int {
 
 	commentID, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil {
-		return a.fail("comment-id must be a number")
+		return common.Fail(a.stderr, "comment-id must be a number")
 	}
 
 	stateDirArg, rest, err := parseStateDirArg(args[1:])
 	if err != nil {
-		return a.fail(err.Error())
+		return common.Fail(a.stderr, err.Error())
 	}
 	if len(rest) != 0 {
 		a.printUsage()
@@ -306,7 +293,7 @@ func (a *App) runHasMention(args []string) int {
 	mentionsPath := filepath.Join(stateDir, "processed-mentions.json")
 	mentions, err := readMentions(mentionsPath)
 	if err != nil {
-		return a.fail(err.Error())
+		return common.Fail(a.stderr, err.Error())
 	}
 
 	if slices.Contains(mentions, commentID) {
@@ -325,10 +312,10 @@ func (a *App) runExtractPayload(args []string) int {
 
 	block, err := extractPayloadBlock(args[0])
 	if err != nil {
-		return a.failf("Failed to read payload file: %v", err)
+		return common.Failf(a.stderr, "Failed to read payload file: %v", err)
 	}
 	if block == "" {
-		return a.fail("No fenced payload block found")
+		return common.Fail(a.stderr, "No fenced payload block found")
 	}
 	_, _ = io.WriteString(a.stdout, block)
 	return 0
@@ -346,7 +333,7 @@ func (a *App) runValidatePayload(ctx context.Context, args []string) int {
 
 	truth, err := a.groundTruth(ctx, worktree, baseSHA)
 	if err != nil {
-		return a.failf("Failed to collect git ground truth: %v", err)
+		return common.Failf(a.stderr, "Failed to collect git ground truth: %v", err)
 	}
 
 	block, err := extractPayloadBlock(source)
@@ -379,7 +366,7 @@ func (a *App) runValidatePayload(ctx context.Context, args []string) int {
 }
 
 func (a *App) groundTruth(ctx context.Context, worktree string, baseSHA string) (groundTruth, error) {
-	revList, err := a.commandOutput(ctx, commandRequest{
+	revList, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
 		Name: "git",
 		Args: []string{"-C", worktree, "rev-list", "--reverse", baseSHA + "..HEAD"},
 		Dir:  a.cwd,
@@ -402,7 +389,7 @@ func (a *App) groundTruth(ctx context.Context, worktree string, baseSHA string) 
 		commitRange = commits[0] + ".." + commits[len(commits)-1]
 	}
 
-	diff, err := a.commandOutput(ctx, commandRequest{
+	diff, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
 		Name: "git",
 		Args: []string{"-C", worktree, "diff", "--name-status", baseSHA + "..HEAD"},
 		Dir:  a.cwd,
@@ -461,39 +448,22 @@ func (a *App) loadStateJSON(path string) (map[string]any, error) {
 func (a *App) writeStateFile(path string) int {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return a.failf("Failed to read state file: %v", err)
+		return common.Failf(a.stderr, "Failed to read state file: %v", err)
 	}
 
 	var parsed any
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		issue := strings.TrimSuffix(filepath.Base(path), ".json")
-		return a.failf("State file is corrupted for issue %s", issue)
+		return common.Failf(a.stderr, "State file is corrupted for issue %s", issue)
 	}
 	return writeJSON(a.stdout, a.stderr, parsed)
-}
-
-func (a *App) commandOutput(ctx context.Context, req commandRequest) (string, error) {
-	var out bytes.Buffer
-	err := a.execCommand(ctx, commandRequest{
-		Name:   req.Name,
-		Args:   append([]string(nil), req.Args...),
-		Dir:    req.Dir,
-		Env:    append([]string(nil), req.Env...),
-		Stdin:  req.Stdin,
-		Stdout: &out,
-		Stderr: io.Discard,
-	})
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(out.String()), nil
 }
 
 func (a *App) stateDir(ctx context.Context, stateDirArg string) (string, int) {
 	if strings.TrimSpace(stateDirArg) != "" {
 		return stateDirArg, 0
 	}
-	if value, ok := envLookup(a.env, "RUNOQ_STATE_DIR"); ok && strings.TrimSpace(value) != "" {
+	if value, ok := common.EnvLookup(a.env, "RUNOQ_STATE_DIR"); ok && strings.TrimSpace(value) != "" {
 		return value, 0
 	}
 	targetRoot, code := a.targetRoot(ctx)
@@ -504,28 +474,19 @@ func (a *App) stateDir(ctx context.Context, stateDirArg string) (string, int) {
 }
 
 func (a *App) targetRoot(ctx context.Context) (string, int) {
-	if value, ok := envLookup(a.env, "TARGET_ROOT"); ok && strings.TrimSpace(value) != "" {
+	if value, ok := common.EnvLookup(a.env, "TARGET_ROOT"); ok && strings.TrimSpace(value) != "" {
 		return value, 0
 	}
-	root, err := a.commandOutput(ctx, commandRequest{
+	root, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
 		Name: "git",
 		Args: []string{"rev-parse", "--show-toplevel"},
 		Dir:  a.cwd,
 		Env:  a.env,
 	})
 	if err != nil {
-		return "", a.fail("Run runoq from inside a git repository.")
+		return "", common.Fail(a.stderr, "Run runoq from inside a git repository.")
 	}
 	return root, 0
-}
-
-func (a *App) fail(message string) int {
-	_, _ = fmt.Fprintf(a.stderr, "runoq: %s\n", message)
-	return 1
-}
-
-func (a *App) failf(format string, args ...any) int {
-	return a.fail(fmt.Sprintf(format, args...))
 }
 
 func (a *App) printUsage() {
@@ -866,7 +827,7 @@ func threadIDFromEvent(event map[string]any) string {
 }
 
 func readMentions(path string) ([]int64, error) {
-	if !fileExists(path) {
+	if !common.FileExists(path) {
 		return []int64{}, nil
 	}
 
@@ -1059,37 +1020,3 @@ func marshalJSON(value any) ([]byte, error) {
 	return data, nil
 }
 
-func envLookup(env []string, key string) (string, bool) {
-	prefix := key + "="
-	for _, entry := range env {
-		if strings.HasPrefix(entry, prefix) {
-			return strings.TrimPrefix(entry, prefix), true
-		}
-	}
-	return "", false
-}
-
-func fileExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && !info.IsDir()
-}
-
-func runCommand(ctx context.Context, req commandRequest) error {
-	cmd := exec.CommandContext(ctx, req.Name, req.Args...)
-	if req.Dir != "" {
-		cmd.Dir = req.Dir
-	}
-	if req.Env != nil {
-		cmd.Env = req.Env
-	}
-	if req.Stdin != nil {
-		cmd.Stdin = req.Stdin
-	}
-	if req.Stdout != nil {
-		cmd.Stdout = req.Stdout
-	}
-	if req.Stderr != nil {
-		cmd.Stderr = req.Stderr
-	}
-	return cmd.Run()
-}

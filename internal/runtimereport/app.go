@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"github.com/saruman/runoq/internal/common"
 )
 
 const usageText = `Usage:
@@ -96,10 +97,10 @@ func (a *App) runSummary(args []string) int {
 
 	files, err := a.stateFiles(last)
 	if err != nil {
-		return a.failf("%v", err)
+		return common.Failf(a.stderr, "%v", err)
 	}
 	if len(files) == 0 {
-		return a.writeJSON(summaryResult{
+		return common.WriteJSON(a.stdout, a.stderr, summaryResult{
 			Issues:        0,
 			Pass:          0,
 			Fail:          0,
@@ -111,7 +112,7 @@ func (a *App) runSummary(args []string) int {
 
 	states, err := loadStateFiles(files)
 	if err != nil {
-		return a.failf("%v", err)
+		return common.Failf(a.stderr, "%v", err)
 	}
 
 	result := summaryResult{
@@ -142,7 +143,7 @@ func (a *App) runSummary(args []string) int {
 	}
 
 	result.AverageRounds = roundTotal / float64(len(states))
-	return a.writeJSON(result)
+	return common.WriteJSON(a.stdout, a.stderr, result)
 }
 
 func (a *App) runIssue(args []string) int {
@@ -153,31 +154,31 @@ func (a *App) runIssue(args []string) int {
 
 	stateDir, err := a.stateDir()
 	if err != nil {
-		return a.failf("%v", err)
+		return common.Failf(a.stderr, "%v", err)
 	}
 
 	statePath := filepath.Join(stateDir, fmt.Sprintf("%s.json", args[0]))
 	data, err := os.ReadFile(statePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return a.failf("No state file found for issue %s", args[0])
+			return common.Failf(a.stderr, "No state file found for issue %s", args[0])
 		}
-		return a.failf("Failed to read state file: %v", err)
+		return common.Failf(a.stderr, "Failed to read state file: %v", err)
 	}
 	if !json.Valid(data) {
-		return a.failf("Failed to parse state file: invalid JSON")
+		return common.Failf(a.stderr, "Failed to parse state file: invalid JSON")
 	}
 
 	var formatted bytes.Buffer
 	if err := json.Indent(&formatted, bytes.TrimSpace(data), "", "  "); err != nil {
-		return a.failf("Failed to format state file JSON: %v", err)
+		return common.Failf(a.stderr, "Failed to format state file JSON: %v", err)
 	}
 	if err := formatted.WriteByte('\n'); err != nil {
-		return a.failf("Failed to format state file JSON: %v", err)
+		return common.Failf(a.stderr, "Failed to format state file JSON: %v", err)
 	}
 
 	if _, err := a.stdout.Write(formatted.Bytes()); err != nil {
-		return a.failf("Failed to write state file: %v", err)
+		return common.Failf(a.stderr, "Failed to write state file: %v", err)
 	}
 	return 0
 }
@@ -190,10 +191,10 @@ func (a *App) runCost(args []string) int {
 
 	files, err := a.stateFiles(last)
 	if err != nil {
-		return a.failf("%v", err)
+		return common.Failf(a.stderr, "%v", err)
 	}
 	if len(files) == 0 {
-		return a.writeJSON(costResult{
+		return common.WriteJSON(a.stdout, a.stderr, costResult{
 			Issues:        0,
 			EstimatedCost: 0,
 		})
@@ -201,22 +202,22 @@ func (a *App) runCost(args []string) int {
 
 	states, err := loadStateFiles(files)
 	if err != nil {
-		return a.failf("%v", err)
+		return common.Failf(a.stderr, "%v", err)
 	}
 
-	configPath, ok := envLookup(a.env, "RUNOQ_CONFIG")
+	configPath, ok := common.EnvLookup(a.env, "RUNOQ_CONFIG")
 	if !ok || strings.TrimSpace(configPath) == "" {
-		return a.fail("RUNOQ_CONFIG is required")
+		return common.Fail(a.stderr, "RUNOQ_CONFIG is required")
 	}
 
 	configBytes, err := os.ReadFile(configPath)
 	if err != nil {
-		return a.failf("Failed to read config: %v", err)
+		return common.Failf(a.stderr, "Failed to read config: %v", err)
 	}
 
 	var config tokenCostConfig
 	if err := json.Unmarshal(configBytes, &config); err != nil {
-		return a.failf("Failed to parse config: %v", err)
+		return common.Failf(a.stderr, "Failed to parse config: %v", err)
 	}
 
 	tokens := tokenTotals{}
@@ -239,7 +240,7 @@ func (a *App) runCost(args []string) int {
 			((tokens.Output / 1_000_000) * config.TokenCost.OutputPerMillion),
 	}
 
-	return a.writeJSON(result)
+	return common.WriteJSON(a.stdout, a.stderr, result)
 }
 
 func (a *App) parseLastFlag(args []string) (*int, bool) {
@@ -253,7 +254,7 @@ func (a *App) parseLastFlag(args []string) (*int, bool) {
 
 	last, err := strconv.Atoi(args[1])
 	if err != nil || last < 0 {
-		a.failf("Invalid --last value: %s", args[1])
+		common.Failf(a.stderr, "Invalid --last value: %s", args[1])
 		return nil, false
 	}
 	return &last, true
@@ -298,10 +299,10 @@ func (a *App) stateFiles(last *int) ([]string, error) {
 }
 
 func (a *App) stateDir() (string, error) {
-	if stateDir, ok := envLookup(a.env, "RUNOQ_STATE_DIR"); ok && strings.TrimSpace(stateDir) != "" {
+	if stateDir, ok := common.EnvLookup(a.env, "RUNOQ_STATE_DIR"); ok && strings.TrimSpace(stateDir) != "" {
 		return stateDir, nil
 	}
-	if targetRoot, ok := envLookup(a.env, "TARGET_ROOT"); ok && strings.TrimSpace(targetRoot) != "" {
+	if targetRoot, ok := common.EnvLookup(a.env, "TARGET_ROOT"); ok && strings.TrimSpace(targetRoot) != "" {
 		return filepath.Join(targetRoot, ".runoq", "state"), nil
 	}
 	if strings.TrimSpace(a.cwd) != "" {
@@ -310,26 +311,8 @@ func (a *App) stateDir() (string, error) {
 	return "", fmt.Errorf("unable to resolve state directory")
 }
 
-func (a *App) writeJSON(value any) int {
-	encoder := json.NewEncoder(a.stdout)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(value); err != nil {
-		return a.failf("Failed to encode JSON output: %v", err)
-	}
-	return 0
-}
-
 func (a *App) printUsage() {
 	_, _ = io.WriteString(a.stderr, usageText)
-}
-
-func (a *App) fail(message string) int {
-	_, _ = fmt.Fprintf(a.stderr, "runoq: %s\n", message)
-	return 1
-}
-
-func (a *App) failf(format string, args ...any) int {
-	return a.fail(fmt.Sprintf(format, args...))
 }
 
 func loadStateFiles(files []string) ([]map[string]any, error) {
@@ -453,12 +436,3 @@ func numberOrZero(value any) float64 {
 	return 0
 }
 
-func envLookup(env []string, key string) (string, bool) {
-	prefix := key + "="
-	for _, line := range env {
-		if strings.HasPrefix(line, prefix) {
-			return strings.TrimPrefix(line, prefix), true
-		}
-	}
-	return "", false
-}
