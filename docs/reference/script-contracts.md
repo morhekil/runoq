@@ -108,8 +108,8 @@ The payload JSON file must include: `issueNumber`, `prNumber`, `worktree`, `bran
 
 Notes:
 
-- `issue-runner.sh` is intentionally shell-owned in the current migration slice; it does not dispatch through `runoq-runtime __issue_runner`.
-- `RUNOQ_ISSUE_RUNNER_IMPLEMENTATION` defaults to `shell`; `runtime` is accepted only as a compatibility alias and runs the same shell path.
+- `issue-runner.sh` is the one remaining shell-owned component; it does not dispatch through the Go runtime.
+- `RUNOQ_ISSUE_RUNNER_IMPLEMENTATION` defaults to `shell`; `runtime` is accepted only as a compatibility alias and runs the same shell path. All other subcommands (state, verify, worktree, dispatch-safety, issue-queue, orchestrator) are Go-owned via exec dispatch.
 - Invokes codex with `--json -o <last-message-file>` and keeps separate event/message artifacts.
 - Persists round `thread_id` from `thread.started` events and includes it in normalized payload artifacts.
 - Performs bounded schema retries in the same codex session (`codex exec resume <thread_id> ...`) when `payload_schema_valid` is false.

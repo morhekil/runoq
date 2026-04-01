@@ -12,7 +12,7 @@ For day-to-day contributor guidance, start with:
 
 These points are worth preserving because they explain why the repo is structured the way it is.
 
-- Keep orchestration rules in shell scripts and JSON contracts. The more behavior that lives in prompts, the harder it is to recover, test, and review.
+- Keep orchestration rules in Go packages (`internal/runtime*`) and JSON contracts. New changes should go in Go packages, not shell. The more behavior that lives in prompts, the harder it is to recover, test, and review.
 - Resume behavior needs explicit terminal-state handling. Maintenance only became safe after treating `COMPLETED` as idempotent instead of replaying its final summary.
 - Deterministic fake-`gh` integration coverage should carry almost all of the load. Real GitHub validation still matters, but only for auth, attribution, permission, and cleanup edges that fixtures cannot prove.
 - Live smoke tests must stay opt-in and credential-gated. They should never affect normal local `bats` runs.
@@ -23,7 +23,7 @@ These points are worth preserving because they explain why the repo is structure
 - Preserve the target repo main checkout. Execution work belongs in sibling worktrees or explicit sandbox clones.
 - Treat `.runoq/state/*.json` as resumability breadcrumbs, not the audit trail.
 - Prefer machine-readable script boundaries over prose-only prompt contracts.
-- Reuse existing scripts, helpers, fixtures, and skills before inventing new prompt behavior.
+- Reuse existing Go packages, scripts, helpers, fixtures, and skills before inventing new prompt behavior.
 - Keep maintenance review read-only until a human explicitly approves filing work.
 
 ## How To Use This Document

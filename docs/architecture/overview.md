@@ -1,10 +1,10 @@
 # Architecture Overview
 
-This document describes the current `runoq` runtime as implemented in the repository today. It is the primary architecture reference for the shipped shell/runtime layer.
+This document describes the current `runoq` runtime as implemented in the repository today. It is the primary architecture reference for the Go runtime with shell entrypoints.
 
 ## System Context
 
-`runoq` sits between a human operator, a target GitHub repository, and Claude-based agents. The operator invokes the CLI from inside the target repository. The runtime resolves repository context, authenticates to GitHub, manages queue and PR state through deterministic scripts, and delegates bounded reasoning work to agents and skills.
+`runoq` sits between a human operator, a target GitHub repository, and Claude-based agents. The operator invokes the CLI from inside the target repository. The runtime resolves repository context, authenticates to GitHub, manages queue and PR state through the Go runtime (with shell entrypoints for auth, setup, and issue-runner), and delegates bounded reasoning work to agents and skills.
 
 ```mermaid
 flowchart LR
@@ -69,7 +69,7 @@ flowchart TB
 | Subsystem | Purpose | Primary implementation |
 | --- | --- | --- |
 | CLI entrypoint | Thin command router that resolves repo context and auth, then dispatches to scripts or Claude | `bin/runoq` |
-| Deterministic shell runtime | Owns queue logic, PR lifecycle, auth, verification, maintenance operations, and recovery | `scripts/*.sh`, `config/runoq.json` |
+| Go runtime | Owns queue logic, PR lifecycle, verification, maintenance operations, state, and recovery via Go packages dispatched through shell entrypoints | `internal/runtime*` packages, shell entrypoints in `scripts/*.sh`, `config/runoq.json` |
 | Agent layer | Performs plan slicing, acceptance criteria authoring (bar-setter), code review (diff-reviewer), mention response, and maintenance review around script contracts | `.claude/agents/*`, `.claude/skills/*` |
 | GitHub control surface | Stores queue issues, PRs, labels, review comments, permissions, and audit comments | remote GitHub repo |
 | Local breadcrumb state | Stores resumability state and processed-mention tracking | `.runoq/state/*.json` |
@@ -77,7 +77,7 @@ flowchart TB
 
 ## Component View
 
-The deterministic shell runtime is the architectural center of gravity. Prompted agents exist around it, not inside it.
+The Go runtime is the architectural center of gravity. Shell entrypoints dispatch to Go packages in `internal/runtime*`. Prompted agents exist around the runtime, not inside it.
 
 ```mermaid
 flowchart LR
@@ -158,10 +158,10 @@ flowchart LR
 
 ### Deterministic layer vs prompt layer
 
-The core architectural rule is that durable behavior belongs in shell scripts and JSON contracts, not in prompts.
+The core architectural rule is that durable behavior belongs in Go packages and JSON contracts, not in prompts.
 
-- Scripts own queue ordering, label transitions, worktree paths, PR creation, verification gates, auth behavior, state transitions, mention authorization, maintenance triage side effects, phase dispatch (orchestrator.sh), and dev-round execution (issue-runner.sh).
-- The orchestrator and issue-runner are shell scripts, not agents. Their work is deterministic dispatch and state machine transitions, not reasoning.
+- The Go runtime owns queue ordering, label transitions, worktree paths, PR creation, verification gates, state transitions, mention authorization, maintenance triage side effects, phase dispatch (orchestrator), and most dispatch logic. Shell entrypoints remain for auth, setup, and issue-runner.
+- The orchestrator and issue-runner are deterministic dispatch, not agents. Their work is state machine transitions, not reasoning. The orchestrator dispatches to Go; issue-runner remains shell-owned.
 - Agents and skills are intentionally thin. They consume typed inputs, make bounded decisions, and are expected to call repository scripts instead of issuing ad hoc `gh` commands. Current agents: bar-setter (opus, criteria authoring), diff-reviewer (opus, code review), mention-responder (sonnet, PR question answering), maintenance-reviewer (opus, code health review).
 - Mention triage uses a haiku structured-output call for classification (question, change-request, approval, irrelevant), not a full agent.
 
@@ -187,7 +187,7 @@ The target repository main checkout is preserved. Execution work happens in sibl
 
 ## Architectural Constraints And Tradeoffs
 
-- Shell-first runtime: easier to test and recover, but shell contracts must stay narrow and stable.
+- Go runtime with shell entrypoints: easier to test with Go unit tests, but shell entrypoints must stay narrow and stable.
 - GitHub as control plane: gives operators a visible audit trail, but couples runtime behavior to GitHub issue/PR semantics and permissions.
 - Sibling worktrees: protect the target checkout, but require extra cleanup and branch reconciliation logic.
 - Local breadcrumb state: enables resume and stale-run detection, but must never be confused with the system audit trail.
