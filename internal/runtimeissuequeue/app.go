@@ -3,14 +3,7 @@ package runtimeissuequeue
 import (
 	"bytes"
 	"context"
-	"crypto"
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/sha256"
-	"crypto/x509"
-	"encoding/base64"
 	"encoding/json"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -21,8 +14,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
+
 	"github.com/saruman/runoq/internal/common"
+	"github.com/saruman/runoq/internal/gh"
 )
 
 const usageText = `Usage:
@@ -40,8 +34,7 @@ type App struct {
 	stdout      io.Writer
 	stderr      io.Writer
 	execCommand common.CommandExecutor
-	tokenInit   bool
-	httpClient  *http.Client
+	ghClient    *gh.Client
 }
 
 type config struct {
@@ -155,32 +148,29 @@ type queueIssue struct {
 	BlockedReasons      []string `json:"blocked_reasons"`
 }
 
-type identityFile struct {
-	AppID          int64  `json:"appId"`
-	InstallationID int64  `json:"installationId"`
-	PrivateKeyPath string `json:"privateKeyPath"`
-}
-
 var issueURLPattern = regexp.MustCompile(`[0-9]+$`)
 
 func New(args []string, env []string, cwd string, stdout io.Writer, stderr io.Writer) *App {
+	clonedEnv := slices.Clone(env)
 	return &App{
 		args:        slices.Clone(args),
-		env:         slices.Clone(env),
+		env:         clonedEnv,
 		cwd:         cwd,
 		stdout:      stdout,
 		stderr:      stderr,
 		execCommand: common.RunCommand,
-		httpClient:  http.DefaultClient,
+		ghClient:    gh.NewClient(common.RunCommand, http.DefaultClient, clonedEnv, cwd),
 	}
 }
 
 func (a *App) SetCommandExecutor(execFn common.CommandExecutor) {
 	if execFn == nil {
 		a.execCommand = common.RunCommand
+		a.ghClient = gh.NewClient(common.RunCommand, http.DefaultClient, a.env, a.cwd)
 		return
 	}
 	a.execCommand = execFn
+	a.ghClient = gh.NewClient(execFn, http.DefaultClient, a.env, a.cwd)
 }
 
 func (a *App) Run(ctx context.Context) int {
@@ -296,7 +286,7 @@ func (a *App) runSetStatus(ctx context.Context, repo string, issueNumber string,
 		return common.Failf(a.stderr, "Unknown status: %s", status)
 	}
 
-	raw, err := a.ghOutput(ctx, []string{"issue", "view", issueNumber, "--repo", repo, "--json", "labels"})
+	raw, err := a.ghClient.Output(ctx, "issue", "view", issueNumber, "--repo", repo, "--json", "labels")
 	if err != nil {
 		return common.Failf(a.stderr, "%v", err)
 	}
@@ -321,7 +311,7 @@ func (a *App) runSetStatus(ctx context.Context, repo string, issueNumber string,
 	editArgs = append(editArgs, "--add-label", newLabel)
 	a.log("issue-queue", fmt.Sprintf("set-status issue=#%s: removing=[%s] adding=[%s]", issueNumber, strings.Join(removing, ", "), newLabel))
 
-	if err := a.ghRun(ctx, editArgs, io.Discard, io.Discard); err != nil {
+	if err := a.ghClient.Run(ctx, editArgs, io.Discard, io.Discard); err != nil {
 		return common.Failf(a.stderr, "%v", err)
 	}
 
@@ -356,7 +346,7 @@ func (a *App) runCreate(ctx context.Context, repo string, title string, body str
 		_ = os.Remove(bodyFile)
 	}()
 
-	url, err := a.ghOutput(ctx, []string{"issue", "create", "--repo", repo, "--title", title, "--body-file", bodyFile, "--label", cfg.Labels.Ready})
+	url, err := a.ghClient.Output(ctx, "issue", "create", "--repo", repo, "--title", title, "--body-file", bodyFile, "--label", cfg.Labels.Ready)
 	if err != nil {
 		return common.Failf(a.stderr, "%v", err)
 	}
@@ -367,11 +357,11 @@ func (a *App) runCreate(ctx context.Context, repo string, title string, body str
 		if newIssueNumber == "" {
 			return common.Failf(a.stderr, "failed to parse created issue number from %q", url)
 		}
-		childID, err := a.ghOutput(ctx, []string{"api", fmt.Sprintf("repos/%s/issues/%s", repo, newIssueNumber), "--jq", ".id"})
+		childID, err := a.ghClient.Output(ctx, "api", fmt.Sprintf("repos/%s/issues/%s", repo, newIssueNumber), "--jq", ".id")
 		if err != nil {
 			return common.Failf(a.stderr, "%v", err)
 		}
-		if err := a.ghRun(ctx, []string{"api", fmt.Sprintf("repos/%s/issues/%s/sub_issues", repo, opts.ParentEpic), "--method", "POST", "-F", "sub_issue_id=" + childID}, io.Discard, io.Discard); err != nil {
+		if err := a.ghClient.Run(ctx, []string{"api", fmt.Sprintf("repos/%s/issues/%s/sub_issues", repo, opts.ParentEpic), "--method", "POST", "-F", "sub_issue_id=" + childID}, io.Discard, io.Discard); err != nil {
 			return common.Failf(a.stderr, "%v", err)
 		}
 		a.log("issue-queue", fmt.Sprintf("create: linked issue #%s as sub-issue of epic #%s", newIssueNumber, opts.ParentEpic))
@@ -386,7 +376,7 @@ func (a *App) runEpicStatus(ctx context.Context, repo string, issueNumber string
 		return common.Failf(a.stderr, "Failed to read config: %v", err)
 	}
 
-	raw, err := a.ghOutput(ctx, []string{"api", fmt.Sprintf("repos/%s/issues/%s/sub_issues", repo, issueNumber), "--paginate"})
+	raw, err := a.ghClient.Output(ctx, "api", fmt.Sprintf("repos/%s/issues/%s/sub_issues", repo, issueNumber), "--paginate")
 	if err != nil {
 		return common.Failf(a.stderr, "%v", err)
 	}
@@ -422,7 +412,7 @@ func (a *App) runEpicStatus(ctx context.Context, repo string, issueNumber string
 }
 
 func (a *App) listIssues(ctx context.Context, repo string, readyLabel string) ([]listedIssue, error) {
-	raw, err := a.ghOutput(ctx, []string{"issue", "list", "--repo", repo, "--label", readyLabel, "--state", "open", "--limit", "200", "--json", "number,title,body,labels,url"})
+	raw, err := a.ghClient.Output(ctx, "issue", "list", "--repo", repo, "--label", readyLabel, "--state", "open", "--limit", "200", "--json", "number,title,body,labels,url")
 	if err != nil {
 		return nil, err
 	}
@@ -467,7 +457,7 @@ func (a *App) dependencyStatus(ctx context.Context, repo string, dependency int)
 		return dependencyCheck{}, fmt.Errorf("failed to read config: %v", err)
 	}
 
-	raw, err := a.ghOutput(ctx, []string{"issue", "view", strconv.Itoa(dependency), "--repo", repo, "--json", "number,labels"})
+	raw, err := a.ghClient.Output(ctx, "issue", "view", strconv.Itoa(dependency), "--repo", repo, "--json", "number,labels")
 	if err != nil {
 		reason := fmt.Sprintf("missing dependency issue #%d", dependency)
 		a.log("issue-queue", fmt.Sprintf("dependency_status: dependency #%d not found (missing issue)", dependency))
@@ -703,142 +693,6 @@ func (a *App) writeCreateBody(body string, opts createOptions) (string, error) {
 	return file.Name(), nil
 }
 
-func (a *App) ghOutput(ctx context.Context, args []string) (string, error) {
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	if err := a.ghRun(ctx, args, &stdout, &stderr); err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(stdout.String()), nil
-}
-
-func (a *App) ghRun(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) error {
-	if err := a.ensureGHToken(ctx); err != nil {
-		return err
-	}
-	request := common.CommandRequest{
-		Name:   a.ghBin(),
-		Args:   args,
-		Dir:    a.cwd,
-		Env:    a.env,
-		Stdout: stdout,
-		Stderr: stderr,
-	}
-	if err := a.execCommand(ctx, request); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (a *App) ensureGHToken(ctx context.Context) error {
-	if _, ok := common.EnvLookup(a.env, "GH_TOKEN"); ok {
-		return nil
-	}
-	if _, ok := common.EnvLookup(a.env, "RUNOQ_NO_AUTO_TOKEN"); ok {
-		return nil
-	}
-	if a.tokenInit {
-		return nil
-	}
-	a.tokenInit = true
-
-	targetRoot, err := a.targetRoot(ctx)
-	if err != nil {
-		return nil
-	}
-	identityPath := filepath.Join(targetRoot, ".runoq", "identity.json")
-	data, err := os.ReadFile(identityPath)
-	if err != nil {
-		return nil
-	}
-
-	var identity identityFile
-	if err := json.Unmarshal(data, &identity); err != nil {
-		return nil
-	}
-	if identity.AppID == 0 || identity.InstallationID == 0 || identity.PrivateKeyPath == "" {
-		return nil
-	}
-	keyPath := strings.Replace(identity.PrivateKeyPath, "~", os.Getenv("HOME"), 1)
-	token, err := a.mintBotToken(identity.AppID, identity.InstallationID, keyPath)
-	if err != nil || token == "" {
-		return nil
-	}
-	a.env = common.EnvSet(a.env, "GH_TOKEN", token)
-	return nil
-}
-
-func (a *App) mintBotToken(appID int64, installationID int64, keyPath string) (string, error) {
-	privateKey, err := loadPrivateKey(keyPath)
-	if err != nil {
-		return "", err
-	}
-
-	now := time.Now().Unix()
-	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
-	payloadJSON := fmt.Sprintf(`{"iat":%d,"exp":%d,"iss":"%d"}`, now, now+540, appID)
-	payload := base64.RawURLEncoding.EncodeToString([]byte(payloadJSON))
-	unsigned := header + "." + payload
-
-	sum := sha256.Sum256([]byte(unsigned))
-	signature, err := rsa.SignPKCS1v15(rand.Reader, privateKey, crypto.SHA256, sum[:])
-	if err != nil {
-		return "", err
-	}
-	jwt := unsigned + "." + base64.RawURLEncoding.EncodeToString(signature)
-
-	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("https://api.github.com/app/installations/%d/access_tokens", installationID), nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Authorization", "Bearer "+jwt)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "runoq-runtime")
-
-	resp, err := a.httpClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("token request failed: %s", resp.Status)
-	}
-
-	var payloadResp struct {
-		Token string `json:"token"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payloadResp); err != nil {
-		return "", err
-	}
-	return payloadResp.Token, nil
-}
-
-func loadPrivateKey(path string) (*rsa.PrivateKey, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	block, _ := pem.Decode(data)
-	if block == nil {
-		return nil, errors.New("invalid PEM private key")
-	}
-
-	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
-		return key, nil
-	}
-	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-	if err != nil {
-		return nil, err
-	}
-	key, ok := parsed.(*rsa.PrivateKey)
-	if !ok {
-		return nil, errors.New("private key is not RSA")
-	}
-	return key, nil
-}
-
 func (a *App) loadConfig() (config, error) {
 	path, err := a.configPath()
 	if err != nil {
@@ -863,25 +717,6 @@ func (a *App) configPath() (string, error) {
 		return filepath.Join(value, "config", "runoq.json"), nil
 	}
 	return "", errors.New("RUNOQ_CONFIG is not set")
-}
-
-func (a *App) targetRoot(ctx context.Context) (string, error) {
-	if value, ok := common.EnvLookup(a.env, "TARGET_ROOT"); ok && strings.TrimSpace(value) != "" {
-		return value, nil
-	}
-	var stdout bytes.Buffer
-	err := a.execCommand(ctx, common.CommandRequest{
-		Name:   "git",
-		Args:   []string{"rev-parse", "--show-toplevel"},
-		Dir:    a.cwd,
-		Env:    a.env,
-		Stdout: &stdout,
-		Stderr: io.Discard,
-	})
-	if err != nil {
-		return "", errors.New("run runoq from inside a git repository")
-	}
-	return strings.TrimSpace(stdout.String()), nil
 }
 
 func labelForStatus(cfg config, status string) (string, bool) {
@@ -914,13 +749,6 @@ func cmpIssue(a listedIssue, b listedIssue) int {
 		return aPriority - bPriority
 	}
 	return a.Number - b.Number
-}
-
-func (a *App) ghBin() string {
-	if value, ok := common.EnvLookup(a.env, "GH_BIN"); ok && strings.TrimSpace(value) != "" {
-		return value
-	}
-	return "gh"
 }
 
 func (a *App) writeJSON(value any) int {
