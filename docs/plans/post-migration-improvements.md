@@ -2,19 +2,19 @@
 
 ## Status
 
-Status: in-progress
+Status: complete
 
 Completed:
-- A1: shared code extracted into internal/common (9 functions, 18 tests)
-- A2: runtimeorchestrator split into 5 files (2000→84 lines in app.go)
+- A1: shared code extracted into internal/common (9 functions, 18 tests); internal/gh package with Client struct, token lifecycle, 13 tests; issuequeue wired to gh.Client (-188 lines)
+- A2: orchestrator split into 5 files (2000→84 lines in app.go); all runtime* packages renamed to idiomatic Go names (dropped runtime prefix)
 - B1: ~3,100 lines dead shell code removed from 6 scripts
+- B2: issue-runner ported to Go (internal/issuerunner, 688 lines, 9 tests); exec dispatch wired; RUNOQ_ISSUE_RUNNER_IMPLEMENTATION removed
 - C1-C5: docs updated; C6: post-migration architecture doc created
 
-Deferred:
-- A3, A4: type safety pass (map[string]any at serialization boundaries)
-- B2: issue-runner Go migration
+Deferred to future work:
+- A3, A4: type safety pass (map[string]any at serialization boundaries — high effort, moderate value)
 - B3: wrapper scripts have active callers in bats tests, not deletable
-- A5, A6, B4: polish items
+- A5, A6, B4: polish items (registry dispatch, table-driven tests, smoke-common split)
 
 ## Purpose
 
