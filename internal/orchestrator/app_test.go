@@ -245,9 +245,6 @@ func TestRunLowComplexityDevelopFailureCompletesNeedsReviewHandoff(t *testing.T)
 			_, _ = io.WriteString(req.Stdout, `{"body":"## Acceptance Criteria\n\n- [ ] Works."}`)
 			return nil
 		case strings.HasSuffix(req.Name, "/issue-runner.sh") && strings.HasPrefix(strings.Join(req.Args, " "), "run "):
-			if value, ok := common.EnvLookup(req.Env, "RUNOQ_ISSUE_RUNNER_IMPLEMENTATION"); !ok || value != "shell" {
-				t.Fatalf("expected shell issue-runner env, got %q", req.Env)
-			}
 			payloadFile := req.Args[1]
 			payloadBody, err := os.ReadFile(payloadFile)
 			if err != nil {

@@ -443,8 +443,7 @@ func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo 
 		return "", issueRunnerResult{}, err
 	}
 
-	runnerEnv := common.EnvSet(env, "RUNOQ_ISSUE_RUNNER_IMPLEMENTATION", "shell")
-	runnerOut, runnerStderr, err := a.scriptOutputWithStderr(ctx, root, runnerEnv, "issue-runner.sh", []string{"run", payloadFile.Name()}, nil)
+	runnerOut, runnerStderr, err := a.scriptOutputWithStderr(ctx, root, env, "issue-runner.sh", []string{"run", payloadFile.Name()}, nil)
 	if strings.TrimSpace(runnerStderr) != "" {
 		a.logInfo("DEVELOP: issue-runner stderr: %s", runnerStderr)
 	}

@@ -7,6 +7,7 @@ import (
 	"github.com/saruman/runoq/internal/cli"
 	"github.com/saruman/runoq/internal/dispatchsafety"
 	"github.com/saruman/runoq/internal/issuequeue"
+	"github.com/saruman/runoq/internal/issuerunner"
 	"github.com/saruman/runoq/internal/orchestrator"
 	"github.com/saruman/runoq/internal/state"
 	"github.com/saruman/runoq/internal/verify"
@@ -75,6 +76,16 @@ func main() {
 			os.Stderr,
 		)
 		os.Exit(dispatchSafetyApp.Run(context.Background()))
+	}
+	if len(args) > 0 && args[0] == "__issue_runner" {
+		issueRunnerApp := issuerunner.New(
+			args[1:],
+			os.Environ(),
+			cwd,
+			os.Stdout,
+			os.Stderr,
+		)
+		os.Exit(issueRunnerApp.Run(context.Background()))
 	}
 	if len(args) > 0 && args[0] == "__orchestrator" {
 		orchestratorApp := orchestrator.New(
