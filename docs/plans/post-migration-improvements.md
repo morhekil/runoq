@@ -2,7 +2,19 @@
 
 ## Status
 
-Status: pending
+Status: in-progress
+
+Completed:
+- A1: shared code extracted into internal/common (9 functions, 18 tests)
+- A2: runtimeorchestrator split into 5 files (2000→84 lines in app.go)
+- B1: ~3,100 lines dead shell code removed from 6 scripts
+- C1-C5: docs updated; C6: post-migration architecture doc created
+
+Deferred:
+- A3, A4: type safety pass (map[string]any at serialization boundaries)
+- B2: issue-runner Go migration
+- B3: wrapper scripts have active callers in bats tests, not deletable
+- A5, A6, B4: polish items
 
 ## Purpose
 
