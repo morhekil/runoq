@@ -89,7 +89,7 @@ Epic issues use `type: epic`. Child tasks are tracked via GitHub's native sub-is
 ## Acceptance Criteria
 ```
 
-The shell runtime does not inspect checklist items semantically, but it does require the section header to exist.
+The runtime does not inspect checklist items semantically, but it does require the section header to exist.
 
 ### Labels owned by the runtime
 
@@ -122,7 +122,7 @@ Those are part of the expected operator-facing PR shape, even though the summary
 
 ## `AGENTS.md` In The Target Repo
 
-The shell runtime does not parse `AGENTS.md`, but the prompt layer does. Agent startup contracts (such as bar-setter and diff-reviewer) read `AGENTS.md` from the target repo context.
+The runtime does not parse `AGENTS.md`, but the prompt layer does. Agent startup contracts (such as bar-setter and diff-reviewer) read `AGENTS.md` from the target repo context.
 
 Downstream guidance:
 

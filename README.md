@@ -1,6 +1,6 @@
 # runoq
 
-`runoq` is a deterministic shell/runtime layer for GitHub-backed agentic development orchestration.
+`runoq` is a Go runtime with shell entrypoints for GitHub-backed agentic development orchestration.
 
 It gives a human operator a repeatable way to turn a plan into GitHub issues, run one issue or a whole queue through an agent workflow, publish PR and audit updates back to GitHub, and keep enough local state to resume safely after interruptions. The runtime keeps the target repository's main working tree intact by doing execution work in sibling worktrees.
 
@@ -20,7 +20,7 @@ It gives a human operator a repeatable way to turn a plan into GitHub issues, ru
 4. Inspect local state and token/cost summaries with `runoq report`.
 5. Launch maintenance review with `runoq maintenance`.
 
-The CLI is thin. Deterministic behavior lives in [`scripts/`](./scripts), JSON config, and test fixtures. Claude agents and skills are used as dispatch layers around those contracts.
+The CLI is thin. Deterministic behavior lives in [`internal/runtime*`](./internal/) Go packages, with shell entrypoints in [`scripts/`](./scripts) and JSON config. Claude agents and skills are used as dispatch layers around those contracts.
 
 ## Prerequisites
 
@@ -65,7 +65,8 @@ export RUNOQ_SYMLINK_DIR="$HOME/.local/bin"
 ## Repository Layout
 
 - [`bin/`](./bin): user-facing CLI entrypoint.
-- [`scripts/`](./scripts): deterministic runtime scripts and helpers.
+- [`internal/`](./internal): Go runtime packages (`runtime*`, `common`, `gh`).
+- [`scripts/`](./scripts): shell entrypoints that dispatch to the Go runtime.
 - [`config/`](./config): runtime configuration and label/auth defaults.
 - [`templates/`](./templates): issue and PR body templates.
 - [`test/`](./test): Bats suites, helpers, and fake `gh` fixtures.
@@ -96,8 +97,9 @@ More architecture, reference, and operator docs are tracked in the documentation
 
 ## Development And Testing
 
-This repo expects deterministic behavior to live in scripts and JSON contracts, with Bats coverage for shell behavior changes.
+This repo expects deterministic behavior to live in Go packages and JSON contracts, with Go unit tests for runtime logic and Bats coverage for remaining shell behavior.
 
-- Run focused Bats suites first, then adjacent regressions.
+- Run `go test ./internal/...` for Go runtime changes.
+- Run focused Bats suites first, then adjacent regressions, for shell changes.
 - Run `shellcheck -x` on shell scripts you touch.
 - Keep live GitHub validation opt-in through the sandbox smoke and lifecycle eval flows in [`docs/live-smoke.md`](./docs/live-smoke.md).
