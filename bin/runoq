@@ -12,6 +12,7 @@ done
 RUNOQ_ROOT="$(cd "$(dirname "$SELF_PATH")/.." && pwd)"
 export RUNOQ_ROOT
 export RUNOQ_CONFIG="${RUNOQ_CONFIG:-$RUNOQ_ROOT/config/runoq.json}"
+export RUNOQ_CWD="${RUNOQ_CWD:-$PWD}"
 
 implementation="${RUNOQ_IMPLEMENTATION:-runtime}"
 if [[ -n "$implementation" && "$implementation" != "runtime" ]]; then

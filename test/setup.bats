@@ -61,10 +61,9 @@ EOF
   [ -d "$project_dir/.runoq/state" ]
   [ -f "$project_dir/.runoq/identity.json" ]
   [ -f "$project_dir/package.json" ]
-  [ -f "$project_dir/.claude/agents/github-orchestrator.md" ]
-  [ -f "$project_dir/.claude/agents/issue-runner.md" ]
-  [ -f "$project_dir/.claude/skills/plan-to-issues/SKILL.md" ]
   [ -L "$project_dir/.claude/agents/github-orchestrator.md" ]
+  [ -L "$project_dir/.claude/agents/issue-runner.md" ]
+  [ -L "$project_dir/.claude/skills/plan-to-issues/SKILL.md" ]
   [ "$(readlink "$project_dir/.claude/agents/github-orchestrator.md")" = "$RUNOQ_ROOT/.claude/agents/github-orchestrator.md" ]
   [ "$(readlink "$project_dir/.claude/skills/plan-to-issues/SKILL.md")" = "$RUNOQ_ROOT/.claude/skills/plan-to-issues/SKILL.md" ]
   [ -L "$RUNOQ_SYMLINK_DIR/runoq" ]
@@ -201,7 +200,6 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(jq -r '.name' "$project_dir/package.json")" = "existing" ]
   [ "$(cat "$project_dir/.claude/agents/custom.md")" = "custom agent" ]
-  [ -f "$project_dir/.claude/agents/github-orchestrator.md" ]
   [ -L "$project_dir/.claude/agents/github-orchestrator.md" ]
   [ "$(readlink "$project_dir/.claude/agents/github-orchestrator.md")" = "$RUNOQ_ROOT/.claude/agents/github-orchestrator.md" ]
 }
@@ -220,7 +218,7 @@ EOF
 }
 EOF
   write_empty_key "$TEST_TMPDIR/app-key.pem"
-  cp "$RUNOQ_ROOT/.claude/agents/github-orchestrator.md" "$project_dir/.claude/agents/github-orchestrator.md"
+  printf 'copied agent content\n' >"$project_dir/.claude/agents/github-orchestrator.md"
   echo "stale skill content" >"$project_dir/.claude/skills/plan-to-issues/SKILL.md"
 
   scenario="$TEST_TMPDIR/scenario.json"
@@ -237,7 +235,6 @@ EOF
   run "$RUNOQ_ROOT/scripts/setup.sh"
 
   [ "$status" -eq 0 ]
-  [ -f "$project_dir/.claude/agents/github-orchestrator.md" ]
   [ -L "$project_dir/.claude/agents/github-orchestrator.md" ]
   [ "$(readlink "$project_dir/.claude/agents/github-orchestrator.md")" = "$RUNOQ_ROOT/.claude/agents/github-orchestrator.md" ]
   [ "$(readlink "$project_dir/.claude/skills/plan-to-issues/SKILL.md")" = "$RUNOQ_ROOT/.claude/skills/plan-to-issues/SKILL.md" ]

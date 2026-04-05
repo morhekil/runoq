@@ -151,7 +151,7 @@ ensure_claude_managed_tree() {
     [[ -n "$source_path" ]] || continue
     rel_path="${source_path#"$source_root"/}"
     sync_claude_managed_file "$source_path" "$destination_root/$rel_path"
-  done < <(find "$source_root" -type f | LC_ALL=C sort)
+  done < <(find "$source_root" \( -type f -o -type l \) | LC_ALL=C sort)
 }
 
 ensure_claude_managed_files() {

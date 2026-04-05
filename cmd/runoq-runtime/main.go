@@ -19,6 +19,9 @@ func main() {
 	if err != nil {
 		cwd = "."
 	}
+	if runoqCWD := os.Getenv("RUNOQ_CWD"); runoqCWD != "" {
+		cwd = runoqCWD
+	}
 
 	executablePath, err := os.Executable()
 	if err != nil {

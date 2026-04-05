@@ -8,6 +8,69 @@ setup_cli_project() {
   prepare_runtime_bin
 }
 
+write_empty_key() {
+  local key_path="$1"
+  openssl genrsa -out "$key_path" 2048 >/dev/null 2>&1
+}
+
+@test "runoq init preserves the caller cwd and bootstraps the target repo" {
+  project_dir="$TEST_TMPDIR/project"
+  setup_cli_project "$project_dir"
+  export PATH="$RUNOQ_ROOT/test/helpers:$PATH"
+  export RUNOQ_SYMLINK_DIR="$TEST_TMPDIR/bin"
+  export RUNOQ_APP_KEY="$TEST_TMPDIR/app-key.pem"
+  export RUNOQ_APP_ID="123"
+  write_empty_key "$RUNOQ_APP_KEY"
+
+  scenario="$TEST_TMPDIR/scenario.json"
+  write_fake_gh_scenario "$scenario" <<EOF
+[
+  {
+    "contains": ["api", "/repos/owner/repo/installation"],
+    "stdout": "{\"id\":789,\"app_id\":123,\"app_slug\":\"runoq\"}"
+  },
+  {
+    "contains": ["label", "list", "--repo owner/repo"],
+    "stdout": "[]"
+  },
+  {
+    "contains": ["label", "create", "runoq:ready", "--repo owner/repo"],
+    "stdout": ""
+  },
+  {
+    "contains": ["label", "create", "runoq:in-progress", "--repo owner/repo"],
+    "stdout": ""
+  },
+  {
+    "contains": ["label", "create", "runoq:done", "--repo owner/repo"],
+    "stdout": ""
+  },
+  {
+    "contains": ["label", "create", "runoq:needs-human-review", "--repo owner/repo"],
+    "stdout": ""
+  },
+  {
+    "contains": ["label", "create", "runoq:blocked", "--repo owner/repo"],
+    "stdout": ""
+  },
+  {
+    "contains": ["label", "create", "runoq:maintenance-review", "--repo owner/repo"],
+    "stdout": ""
+  }
+]
+EOF
+  use_fake_gh "$scenario"
+
+  run bash -lc 'cd "'"$project_dir"'" && "'"$RUNOQ_ROOT"'/bin/runoq" init'
+
+  [ "$status" -eq 0 ]
+  [ -d "$project_dir/.runoq/state" ]
+  [ -f "$project_dir/.runoq/identity.json" ]
+  [ -f "$project_dir/package.json" ]
+  [ -L "$project_dir/.claude/agents/github-orchestrator.md" ]
+  [ -L "$project_dir/.claude/skills/plan-to-issues/SKILL.md" ]
+}
+
 @test "runoq run passes through issue and dry-run flags and exports context" {
   project_dir="$TEST_TMPDIR/project"
   setup_cli_project "$project_dir"
