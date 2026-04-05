@@ -67,7 +67,12 @@ ensure_identity() {
 
   app_id="$(resolve_bootstrap_app_id "$expected_slug")"
   jwt="$(mint_bootstrap_jwt "$app_id" "${key_path/#\~/$HOME}")"
-  installation_json="$(app_gh "$jwt" "/repos/${repo}/installation")"
+  if ! installation_json="$(app_gh "$jwt" "/repos/${repo}/installation" 2>&1)"; then
+    if [[ "$installation_json" == *"404"* || "$installation_json" == *"Not Found"* ]]; then
+      runoq::die "GitHub App installation not found for ${repo}. Install the app on this repository, then rerun runoq init."
+    fi
+    runoq::die "Failed to resolve GitHub App installation for ${repo}: ${installation_json}"
+  fi
   app_id="$(printf '%s' "$installation_json" | jq -er '.app_id')"
   installation_id="$(printf '%s' "$installation_json" | jq -er '.id')"
   installation_slug="$(printf '%s' "$installation_json" | jq -r '.app_slug // empty')"

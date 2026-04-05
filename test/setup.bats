@@ -96,6 +96,33 @@ EOF
   [[ "$output" == *"Repository installation app slug wrong-app did not match configured identity.appSlug runoq."* ]]
 }
 
+@test "setup init shows a clear error when the app is not installed on the repo" {
+  project_dir="$TEST_TMPDIR/project"
+  make_git_repo "$project_dir" "git@github.com:owner/repo.git"
+  export TARGET_ROOT="$project_dir"
+  export RUNOQ_SYMLINK_DIR="$TEST_TMPDIR/bin"
+  export RUNOQ_APP_KEY="$TEST_TMPDIR/app-key.pem"
+  export RUNOQ_APP_ID="123"
+  write_empty_key "$RUNOQ_APP_KEY"
+
+  scenario="$TEST_TMPDIR/scenario.json"
+  write_fake_gh_scenario "$scenario" <<EOF
+[
+  {
+    "contains": ["api", "/repos/owner/repo/installation"],
+    "stderr": "gh: Not Found (HTTP 404)",
+    "exit_code": 1
+  }
+]
+EOF
+  use_fake_gh "$scenario"
+
+  run "$RUNOQ_ROOT/scripts/setup.sh"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"GitHub App installation not found for owner/repo. Install the app on this repository, then rerun runoq init."* ]]
+}
+
 @test "setup init resolves installation with an app JWT even when GH_TOKEN is set" {
   project_dir="$TEST_TMPDIR/project"
   make_git_repo "$project_dir" "git@github.com:owner/repo.git"
