@@ -1,5 +1,11 @@
 #!/usr/bin/env bats
 
+# Resolve real binaries before test_helper prepends test/helpers (which contains fake stubs).
+GH_BIN="$(command -v gh)"
+export GH_BIN
+RUNOQ_CLAUDE_BIN="$(command -v claude)"
+export RUNOQ_CLAUDE_BIN
+
 load test_helper
 
 @test "live lifecycle smoke validates the full runoq eval lane" {

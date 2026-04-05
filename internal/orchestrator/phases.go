@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -382,7 +383,11 @@ func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo 
 		return "", issueRunnerResult{}, fmt.Errorf("failed to parse issue body: %v", err)
 	}
 
-	specFile, err := os.CreateTemp("", "runoq-spec.*")
+	specDir := filepath.Join(state.Worktree, ".runoq")
+	if err := os.MkdirAll(specDir, 0o755); err != nil {
+		return "", issueRunnerResult{}, err
+	}
+	specFile, err := os.CreateTemp(specDir, "spec-*")
 	if err != nil {
 		return "", issueRunnerResult{}, err
 	}
@@ -408,7 +413,7 @@ func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo 
 		"maxRounds":      cfg.MaxRounds,
 		"maxTokenBudget": cfg.MaxTokenBudget,
 		"round":          round,
-		"guidelines":     "",
+		"guidelines":     []string{},
 	}
 	if strings.TrimSpace(state.LogDir) != "" {
 		payload["logDir"] = state.LogDir
@@ -508,17 +513,13 @@ func (a *App) phaseReview(ctx context.Context, root string, env []string, repo s
 	round := max(state.Round, 1)
 	a.logInfo("REVIEW: spawning diff-reviewer for issue #%d round %d", issueNumber, round)
 
-	changedFilesJSON := "[]"
-	if len(state.ChangedFiles) > 0 {
-		if payload, err := marshalJSON(state.ChangedFiles); err == nil {
-			changedFilesJSON = payload
-		}
+	changedFiles := state.ChangedFiles
+	if changedFiles == nil {
+		changedFiles = []string{}
 	}
-	relatedFilesJSON := "[]"
-	if len(state.RelatedFiles) > 0 {
-		if payload, err := marshalJSON(state.RelatedFiles); err == nil {
-			relatedFilesJSON = payload
-		}
+	relatedFiles := state.RelatedFiles
+	if relatedFiles == nil {
+		relatedFiles = []string{}
 	}
 
 	reviewPayload, err := marshalJSON(map[string]any{
@@ -529,9 +530,9 @@ func (a *App) phaseReview(ctx context.Context, root string, env []string, repo s
 		"headHash":          state.HeadHash,
 		"reviewLogPath":     state.ReviewLogPath,
 		"specRequirements":  state.SpecRequirements,
-		"guidelines":        "",
-		"changedFiles":      changedFilesJSON,
-		"relatedFiles":      relatedFilesJSON,
+		"guidelines":        []string{},
+		"changedFiles":      changedFiles,
+		"relatedFiles":      relatedFiles,
 		"previousChecklist": state.PreviousChecklist,
 	})
 	if err != nil {
@@ -550,6 +551,7 @@ func (a *App) phaseReview(ctx context.Context, root string, env []string, repo s
 		return "", err
 	}
 
+	var reviewStderr bytes.Buffer
 	if err := a.runProgram(ctx, env, "bash", []string{
 		"-lc",
 		`source "$1"; runoq::claude_stream "$2" --permission-mode bypassPermissions --agent diff-reviewer --add-dir "$3" -- "$4"`,
@@ -558,8 +560,12 @@ func (a *App) phaseReview(ctx context.Context, root string, env []string, repo s
 		reviewOutputPath,
 		root,
 		reviewPayload,
-	}, nil, io.Discard, io.Discard); err != nil {
+	}, nil, io.Discard, &reviewStderr); err != nil {
+		a.logInfo("REVIEW: claude_stream error: %v stderr: %s", err, reviewStderr.String())
 		return "", err
+	}
+	if reviewStderr.Len() > 0 {
+		a.logInfo("REVIEW: claude_stream stderr: %s", reviewStderr.String())
 	}
 
 	reviewLogAbs := strings.TrimSpace(state.ReviewLogPath)
@@ -602,7 +608,13 @@ func (a *App) phaseReview(ctx context.Context, root string, env []string, repo s
 	if err != nil {
 		return "", err
 	}
-	reviewBody := fmt.Sprintf("## Diff Review - round %d / %d\n\n> Posted by `orchestrator` via `diff-reviewer` agent\n\n| Field | Value |\n|-------|-------|\n| **Verdict** | %s |\n| **Score** | %s |\n| **Commit range** | `%s..%s` |\n| **Changed files** | %s |\n", round, cfg.MaxRounds, verdict, score, truncateHash(state.BaselineHash), truncateHash(state.HeadHash), changedFilesJSON)
+	changedFilesDisplay := "[]"
+	if len(changedFiles) > 0 {
+		if b, err := json.Marshal(changedFiles); err == nil {
+			changedFilesDisplay = string(b)
+		}
+	}
+	reviewBody := fmt.Sprintf("## Diff Review - round %d / %d\n\n> Posted by `orchestrator` via `diff-reviewer` agent\n\n| Field | Value |\n|-------|-------|\n| **Verdict** | %s |\n| **Score** | %s |\n| **Commit range** | `%s..%s` |\n| **Changed files** | %s |\n", round, cfg.MaxRounds, verdict, score, truncateHash(state.BaselineHash), truncateHash(state.HeadHash), changedFilesDisplay)
 	if strings.TrimSpace(reviewChecklist) != "" {
 		reviewBody += "\n### Checklist\n" + reviewChecklist + "\n"
 	}

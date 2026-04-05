@@ -676,7 +676,7 @@ create_managed_repo() {
   visibility="$(smoke_repo_visibility)"
   repo_name="$(runoq::branch_slug "${prefix}-${run_id}")"
   repo="${owner}/${repo_name}"
-  create_output="$(runoq::gh repo create "$repo" "--${visibility}" --source "$target_dir" --remote origin --push)"
+  create_output="$(runoq::gh repo create "$repo" "--${visibility}" --source "$target_dir" --remote origin --push 2>&1)"
   url="$(printf '%s\n' "$create_output" | tail -n1)"
   runoq::gh repo edit "$repo" --default-branch main --enable-auto-merge --enable-squash-merge --delete-branch-on-merge >/dev/null
   jq -n --arg repo "$repo" --arg url "$url" '{repo:$repo, url:$url}'
