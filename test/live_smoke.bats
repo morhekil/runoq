@@ -230,6 +230,29 @@ EOF
   [ "$status" -eq 1 ]
 }
 
+@test "operator_gh runs without inherited bot token" {
+  helper="$TEST_TMPDIR/gh-env"
+  cat >"$helper" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'GH_TOKEN=%s\n' "${GH_TOKEN:-}"
+EOF
+  chmod +x "$helper"
+
+  run bash -lc '
+    set -euo pipefail
+    export RUNOQ_ROOT="'"$RUNOQ_ROOT"'"
+    export RUNOQ_CONFIG="'"$RUNOQ_CONFIG"'"
+    export GH_BIN="'"$helper"'"
+    export GH_TOKEN="bot-token"
+    source "'"$RUNOQ_ROOT"'/scripts/lib/smoke-common.sh"
+    operator_gh repo view owner/repo --json name
+  '
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "GH_TOKEN=" ]
+}
+
 @test "live lifecycle smoke preflight requires explicit managed repo configuration" {
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<'EOF'

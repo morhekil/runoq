@@ -207,7 +207,13 @@ count_open_epics_excluding_project_planning() {
 issue_view_json() {
   local repo="$1"
   local issue_number="$2"
-  runoq::gh issue view "$issue_number" --repo "$repo" --json number,title,body,comments,labels,state,url
+  runoq::gh issue view "$issue_number" --repo "$repo" --json number,title,body,comments,labels,state,url,assignees
+}
+
+issue_assigned_to() {
+  local issue_view_json="$1"
+  local login="$2"
+  printf '%s' "$issue_view_json" | jq -e --arg login "$login" '(.assignees // []) | any(.login == $login)' >/dev/null 2>&1
 }
 
 add_check_or_failure() {
@@ -261,6 +267,7 @@ run_tick_smoke() {
   local plan_fixture rel_plan_path issues_json project_planning planning_issue planning_number planning_view
   local milestone1 milestone1_number milestone2 milestone2_number milestone1_plan milestone1_plan_number
   local adjustment_issue adjustment_number milestone2_plan milestone2_plan_number discovery_adjustment discovery_adjustment_number
+  local operator_login_value
   root="$(runoq::root)"
   run_id="$(smoke_run_id)"
   tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/runoq-live-tick.XXXXXX")"
@@ -272,6 +279,7 @@ run_tick_smoke() {
   CHECKS_JSON='[]'
   STEPS_JSON='[]'
   local comment_interactions=0 items_rejected=0 discovery_forced_adjustment=false
+  operator_login_value="$(operator_login)"
 
   cleanup() {
     if [[ -n "${tmpdir:-}" ]]; then
@@ -347,8 +355,12 @@ run_tick_smoke() {
     "$(printf '%s' "$planning_view" | jq -e '(.comments // []) | any(.body // "" | contains("runoq:payload:plan-proposal"))' >/dev/null && printf true || printf false)" \
     "bootstrap_proposal_posted" \
     "Bootstrap tick did not post a plan proposal comment."
+  add_check_or_failure \
+    "$(issue_assigned_to "$planning_view" "$operator_login_value" && printf true || printf false)" \
+    "bootstrap_planning_issue_assigned" \
+    "Bootstrap planning issue is not assigned to @${operator_login_value}."
 
-  runoq::gh issue comment "$planning_number" --repo "$repo" --body \
+  operator_gh issue comment "$planning_number" --repo "$repo" --body \
     "Why is caching before CLI? Also drop item 3, CLI wrapper is out of scope." >/dev/null
   comment_interactions=$((comment_interactions + 1))
   items_rejected=$((items_rejected + 1))
@@ -368,7 +380,7 @@ run_tick_smoke() {
     "awaiting_state_observed" \
     "Tick did not report the awaiting-review state."
 
-  runoq::gh issue comment "$planning_number" --repo "$repo" --body "OK, approved with item 3 removed" >/dev/null
+  operator_gh issue comment "$planning_number" --repo "$repo" --body "OK, approved with item 3 removed" >/dev/null
   runoq::gh issue edit "$planning_number" --repo "$repo" --add-label "$(runoq::config_get '.labels.planApproved')" >/dev/null
   comment_interactions=$((comment_interactions + 1))
   items_rejected=$((items_rejected + 1))
@@ -391,6 +403,13 @@ run_tick_smoke() {
     "$( [[ -n "$milestone1_plan_number" ]] && printf true || printf false )" \
     "first_milestone_planning_issue_created" \
     "No planning issue was created under the first milestone."
+  if [[ -n "$milestone1_plan_number" ]]; then
+    planning_view="$(issue_view_json "$repo" "$milestone1_plan_number")"
+    add_check_or_failure \
+      "$(issue_assigned_to "$planning_view" "$operator_login_value" && printf true || printf false)" \
+      "milestone_planning_issue_assigned" \
+      "Milestone planning issue #${milestone1_plan_number} is not assigned to @${operator_login_value}."
+  fi
 
   output="$(tick_once "$root")"
   add_step "milestone1_task_proposal" "$output"
@@ -435,8 +454,15 @@ run_tick_smoke() {
     "$( [[ -n "$adjustment_number" ]] && printf true || printf false )" \
     "adjustment_issue_created" \
     "Expected an adjustment issue after milestone 1 review."
+  if [[ -n "$adjustment_number" ]]; then
+    planning_view="$(issue_view_json "$repo" "$adjustment_number")"
+    add_check_or_failure \
+      "$(issue_assigned_to "$planning_view" "$operator_login_value" && printf true || printf false)" \
+      "adjustment_issue_assigned" \
+      "Adjustment issue #${adjustment_number} is not assigned to @${operator_login_value}."
+  fi
 
-  runoq::gh issue comment "$adjustment_number" --repo "$repo" --body "Approve item 1, reject item 2" >/dev/null
+  operator_gh issue comment "$adjustment_number" --repo "$repo" --body "Approve item 1, reject item 2" >/dev/null
   runoq::gh issue edit "$adjustment_number" --repo "$repo" --add-label "$(runoq::config_get '.labels.planApproved')" >/dev/null
   comment_interactions=$((comment_interactions + 1))
   items_rejected=$((items_rejected + 1))
@@ -450,6 +476,13 @@ run_tick_smoke() {
     "$( [[ -n "$milestone2_plan_number" ]] && printf true || printf false )" \
     "next_milestone_planning_issue_created" \
     "Expected planning issue under milestone 2 after adjustments."
+  if [[ -n "$milestone2_plan_number" ]]; then
+    planning_view="$(issue_view_json "$repo" "$milestone2_plan_number")"
+    add_check_or_failure \
+      "$(issue_assigned_to "$planning_view" "$operator_login_value" && printf true || printf false)" \
+      "next_milestone_planning_issue_assigned" \
+      "Next milestone planning issue #${milestone2_plan_number} is not assigned to @${operator_login_value}."
+  fi
 
   output="$(tick_once "$root")"
   add_step "discovery_task_proposal" "$output"
@@ -474,6 +507,11 @@ run_tick_smoke() {
   if [[ -n "$discovery_adjustment_number" ]]; then
     discovery_forced_adjustment=true
     CHECKS_JSON="$(append_check "$CHECKS_JSON" "discovery_adjustment_created")"
+    planning_view="$(issue_view_json "$repo" "$discovery_adjustment_number")"
+    add_check_or_failure \
+      "$(issue_assigned_to "$planning_view" "$operator_login_value" && printf true || printf false)" \
+      "discovery_adjustment_assigned" \
+      "Discovery adjustment issue #${discovery_adjustment_number} is not assigned to @${operator_login_value}."
   else
     FAILURES_JSON="$(append_missing "$FAILURES_JSON" "Discovery milestone did not force an adjustment review.")"
   fi

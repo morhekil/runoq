@@ -354,7 +354,16 @@ func (a *App) runCreate(ctx context.Context, repo string, title string, body str
 		_ = os.Remove(bodyFile)
 	}()
 
-	url, err := a.ghClient.Output(ctx, "issue", "create", "--repo", repo, "--title", title, "--body-file", bodyFile, "--label", cfg.Labels.Ready)
+	createArgs := []string{"issue", "create", "--repo", repo, "--title", title, "--body-file", bodyFile, "--label", cfg.Labels.Ready}
+	if opts.IssueType == "planning" || opts.IssueType == "adjustment" {
+		operator, err := a.operatorLogin(ctx)
+		if err != nil {
+			return common.Failf(a.stderr, "Failed to resolve operator login for %s issue assignment: %v", opts.IssueType, err)
+		}
+		createArgs = append(createArgs, "--assignee", operator)
+	}
+
+	url, err := a.ghClient.Output(ctx, createArgs...)
 	if err != nil {
 		return common.Failf(a.stderr, "%v", err)
 	}
@@ -376,6 +385,49 @@ func (a *App) runCreate(ctx context.Context, repo string, title string, body str
 	}
 
 	return a.writeJSON(createResult{Title: title, URL: url})
+}
+
+func (a *App) operatorLogin(ctx context.Context) (string, error) {
+	env := withoutEnvKeys(a.ghClient.Env(), "GH_TOKEN", "GITHUB_TOKEN")
+	bin := "gh"
+	if v, ok := common.EnvLookup(env, "GH_BIN"); ok && v != "" {
+		bin = v
+	}
+	login, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
+		Name: bin,
+		Args: []string{"api", "user", "--jq", ".login"},
+		Dir:  a.cwd,
+		Env:  env,
+	})
+	if err != nil {
+		return "", err
+	}
+	login = strings.TrimSpace(login)
+	if login == "" {
+		return "", fmt.Errorf("empty login")
+	}
+	return login, nil
+}
+
+func withoutEnvKeys(env []string, keys ...string) []string {
+	if len(keys) == 0 {
+		return slices.Clone(env)
+	}
+	blocked := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		blocked[key] = struct{}{}
+	}
+	filtered := make([]string, 0, len(env))
+	for _, entry := range env {
+		name, _, ok := strings.Cut(entry, "=")
+		if ok {
+			if _, exists := blocked[name]; exists {
+				continue
+			}
+		}
+		filtered = append(filtered, entry)
+	}
+	return filtered
 }
 
 func (a *App) runEpicStatus(ctx context.Context, repo string, issueNumber string) int {

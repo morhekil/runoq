@@ -168,7 +168,13 @@ find_open_child_by_type() {
 issue_view_json() {
   local repo="$1"
   local issue_number="$2"
-  runoq::gh issue view "$issue_number" --repo "$repo" --json number,title,body,comments,labels,state,url
+  runoq::gh issue view "$issue_number" --repo "$repo" --json number,title,body,comments,labels,state,url,assignees
+}
+
+issue_assigned_to() {
+  local issue_view_json="$1"
+  local login="$2"
+  printf '%s' "$issue_view_json" | jq -e --arg login "$login" '(.assignees // []) | any(.login == $login)' >/dev/null 2>&1
 }
 
 extract_marked_json_from_text() {
@@ -313,8 +319,10 @@ run_planning() {
 
   local output issues_json planning_issue planning_number planning_view proposal_json milestone1 milestone1_number
   local milestone1_plan milestone1_plan_number milestone1_plan_view created_tasks created_issues task_count milestone_count has_discovery_milestone comment_interactions
+  local operator_login_value
   created_issues='[]'
   comment_interactions=0
+  operator_login_value="$(operator_login)"
 
   if [[ "$(printf '%s' "$failures_json" | jq 'length')" -eq 0 ]]; then
     smoke_log "running tick bootstrap"
@@ -338,12 +346,17 @@ run_planning() {
       else
         checks_json="$(append_check "$checks_json" "bootstrap_proposal_posted")"
       fi
+      if issue_assigned_to "$planning_view" "$operator_login_value"; then
+        checks_json="$(append_check "$checks_json" "bootstrap_planning_issue_assigned")"
+      else
+        failures_json="$(append_missing "$failures_json" "Bootstrap planning issue is not assigned to @$operator_login_value.")"
+      fi
     fi
   fi
 
   if [[ "$(printf '%s' "$failures_json" | jq 'length')" -eq 0 ]]; then
     smoke_log "injecting planning question comment"
-    runoq::gh issue comment "$planning_number" --repo "$repo" --body "Why this milestone order?" >/dev/null
+    operator_gh issue comment "$planning_number" --repo "$repo" --body "Why this milestone order?" >/dev/null
     comment_interactions=$((comment_interactions + 1))
     output="$(
       cd "$target_dir"
@@ -399,6 +412,11 @@ run_planning() {
         failures_json="$(append_missing "$failures_json" "Tick did not post a task proposal for the first milestone.")"
       else
         checks_json="$(append_check "$checks_json" "task_proposal_posted")"
+      fi
+      if issue_assigned_to "$milestone1_plan_view" "$operator_login_value"; then
+        checks_json="$(append_check "$checks_json" "milestone_planning_issue_assigned")"
+      else
+        failures_json="$(append_missing "$failures_json" "Milestone planning issue #$milestone1_plan_number is not assigned to @$operator_login_value.")"
       fi
     fi
   fi

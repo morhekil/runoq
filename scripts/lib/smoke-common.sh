@@ -106,6 +106,16 @@ smoke_gh_bin() {
   printf '%s\n' "${GH_BIN:-gh}"
 }
 
+operator_gh() {
+  local gh_bin
+  gh_bin="$(smoke_gh_bin)"
+  env -u GH_TOKEN "$gh_bin" "$@"
+}
+
+operator_login() {
+  operator_gh api user --jq '.login'
+}
+
 resolve_tool_bin() {
   local candidate="$1"
   local resolved=""
@@ -680,18 +690,18 @@ create_managed_repo() {
   visibility="$(smoke_repo_visibility)"
   repo_name="$(runoq::branch_slug "${prefix}-${run_id}")"
   repo="${owner}/${repo_name}"
-  gh_bin="${GH_BIN:-gh}"
-  if ! create_output="$(env -u GH_TOKEN "$gh_bin" repo create "$repo" "--${visibility}" --source "$target_dir" --remote origin --push 2>&1)"; then
+  gh_bin="$(smoke_gh_bin)"
+  if ! create_output="$(operator_gh repo create "$repo" "--${visibility}" --source "$target_dir" --remote origin --push 2>&1)"; then
     runoq::die "Failed to create managed repo ${repo}: ${create_output}"
   fi
   if printf '%s' "$create_output" | grep -Eiq '(^|[[:space:]])(GraphQL:|HTTP [0-9]{3}:|error:|failed)' ; then
     runoq::die "Failed to create managed repo ${repo}: ${create_output}"
   fi
-  if ! env -u GH_TOKEN "$gh_bin" repo view "$repo" --json name >/dev/null 2>&1; then
+  if ! operator_gh repo view "$repo" --json name >/dev/null 2>&1; then
     runoq::die "Failed to create managed repo ${repo}: ${create_output}"
   fi
   url="$(printf '%s\n' "$create_output" | tail -n1)"
-  env -u GH_TOKEN "$gh_bin" repo edit "$repo" --default-branch main --enable-auto-merge --enable-squash-merge --delete-branch-on-merge >/dev/null
+  operator_gh repo edit "$repo" --default-branch main --enable-auto-merge --enable-squash-merge --delete-branch-on-merge >/dev/null
   jq -n --arg repo "$repo" --arg url "$url" '{repo:$repo, url:$url}'
 }
 
@@ -1318,13 +1328,13 @@ run_lifecycle() {
       smoke_log "injecting mention-test comments on PR #${first_pr}"
 
       # Question comment (tagged @runoq)
-      runoq::gh pr comment "$first_pr" --repo "$repo" --body "@runoq Why did you choose this approach for the formatter?" >/dev/null 2>&1 || true
+      operator_gh pr comment "$first_pr" --repo "$repo" --body "@runoq Why did you choose this approach for the formatter?" >/dev/null 2>&1 || true
 
       # Change-request comment (tagged @runoq)
-      runoq::gh pr comment "$first_pr" --repo "$repo" --body "@runoq Please add an edge case test for empty input" >/dev/null 2>&1 || true
+      operator_gh pr comment "$first_pr" --repo "$repo" --body "@runoq Please add an edge case test for empty input" >/dev/null 2>&1 || true
 
       # Irrelevant comment (no tag)
-      runoq::gh pr comment "$first_pr" --repo "$repo" --body "This looks interesting, thanks for the contribution." >/dev/null 2>&1 || true
+      operator_gh pr comment "$first_pr" --repo "$repo" --body "This looks interesting, thanks for the contribution." >/dev/null 2>&1 || true
 
       checks_json="$(append_check "$checks_json" "mention_comments_injected")"
       smoke_log "injected mention-test comments; running mention triage"
