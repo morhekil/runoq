@@ -21,8 +21,16 @@ call_agent() {
   local agent="$1"
   local payload="$2"
   local claude_bin="${RUNOQ_CLAUDE_BIN:-claude}"
-  runoq::captured_exec claude "$(runoq::target_root)" "$claude_bin" --agent "$agent" --add-dir "$(runoq::root)" -- "$payload" >/dev/null
-  printf '%s\n' "$RUNOQ_LAST_CLAUDE_CAPTURE_DIR/response.txt"
+  local attempt response_path
+  for attempt in 1 2; do
+    runoq::captured_exec claude "$(runoq::target_root)" "$claude_bin" --agent "$agent" --add-dir "$(runoq::root)" -- "$payload" >/dev/null
+    response_path="$RUNOQ_LAST_CLAUDE_CAPTURE_DIR/response.txt"
+    if [[ -s "$response_path" ]]; then
+      printf '%s\n' "$response_path"
+      return 0
+    fi
+  done
+  printf '%s\n' "$response_path"
 }
 
 read_json_output() {

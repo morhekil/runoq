@@ -131,6 +131,13 @@ issue_type() {
   printf '%s\n' "${value:-task}"
 }
 
+issue_priority() {
+  local body="$1"
+  local value
+  value="$(metadata_value "$body" "priority")"
+  printf '%s\n' "${value:-999999}"
+}
+
 issue_parent_epic() {
   metadata_value "$1" "parent_epic"
 }
@@ -163,6 +170,25 @@ find_open_child_by_type() {
     fi
   done < <(printf '%s' "$issues_json" | jq -c '.[]')
   return 1
+}
+
+first_open_epic() {
+  local issues_json="$1"
+  local best="" best_priority=999999
+  while IFS= read -r issue; do
+    [[ -n "$issue" ]] || continue
+    local body state type priority
+    body="$(printf '%s' "$issue" | jq -r '.body // ""')"
+    state="$(printf '%s' "$issue" | jq -r '.state')"
+    type="$(issue_type "$body")"
+    [[ "$state" == "OPEN" && "$type" == "epic" ]] || continue
+    priority="$(issue_priority "$body")"
+    if (( priority < best_priority )); then
+      best_priority="$priority"
+      best="$issue"
+    fi
+  done < <(printf '%s' "$issues_json" | jq -c '.[]')
+  printf '%s\n' "$best"
 }
 
 issue_view_json() {
@@ -379,9 +405,7 @@ run_planning() {
     )"
     printf '%s\n' "$output" >"$artifacts_dir/tick-approve-milestones.log"
     issues_json="$(list_issues_json "$repo")"
-    milestone1="$(printf '%s' "$issues_json" | jq -c '
-      .[] | select(.state == "OPEN" and .title != "Project Planning" and (.body // "" | contains("type: epic")))
-    ' | head -n 1)"
+    milestone1="$(first_open_epic "$issues_json")"
     milestone1_number="$(printf '%s' "$milestone1" | jq -r '.number // empty')"
     milestone_count="$(printf '%s' "$issues_json" | jq '[.[] | select(.state == "OPEN" and .title != "Project Planning" and (.body // "" | contains("type: epic")))] | length')"
     has_discovery_milestone="$(printf '%s' "$issues_json" | jq '[.[] | select(.state == "OPEN" and (.body // "" | contains("milestone_type: discovery")))] | length > 0')"

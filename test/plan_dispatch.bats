@@ -267,3 +267,57 @@ EOF
   run grep -q 'task-decomposer' "$FAKE_CLAUDE_LOG"
   [ "$status" -eq 0 ]
 }
+
+@test "plan dispatch retries once when a reviewer returns an empty response" {
+  fixture_dir="$TEST_TMPDIR/fixtures"
+  write_plan_dispatch_fixture "$fixture_dir"
+  cat >"$fixture_dir/task-decomposer.json" <<'EOF'
+{"items":[
+  {"key":"t1","type":"task","title":"Implement formatter","body":"## Acceptance Criteria\n\n- [ ] Works.","priority":1,"estimated_complexity":"low","complexity_rationale":"single module","depends_on_keys":[]}
+],"warnings":[]}
+EOF
+  cat >"$fixture_dir/plan-reviewer-technical.txt" <<'EOF'
+<!-- runoq:payload:plan-review-technical -->
+REVIEW-TYPE: plan-technical
+VERDICT: PASS
+SCORE: 34/35
+CHECKLIST:
+- [ ] None.
+EOF
+  : >"$fixture_dir/plan-reviewer-product-1.txt"
+  cat >"$fixture_dir/plan-reviewer-product-2.txt" <<'EOF'
+<!-- runoq:payload:plan-review-product -->
+REVIEW-TYPE: plan-product
+VERDICT: PASS
+SCORE: 28/30
+CHECKLIST:
+- [ ] None.
+EOF
+
+  scenario="$TEST_TMPDIR/scenario.json"
+  write_fake_gh_scenario "$scenario" <<'EOF'
+[
+  {
+    "contains": ["issue", "comment", "77", "--repo", "owner/repo"],
+    "stdout": ""
+  }
+]
+EOF
+  use_fake_gh "$scenario" "$TEST_TMPDIR/gh.state" "$TEST_TMPDIR/gh.log" "$TEST_TMPDIR/capture"
+  export RUNOQ_CLAUDE_BIN="$RUNOQ_ROOT/test/helpers/fixture-claude"
+  export RUNOQ_TEST_AGENT_FIXTURE_DIR="$fixture_dir"
+  export RUNOQ_TEST_AGENT_STATE_DIR="$TEST_TMPDIR/agent-state"
+  export FAKE_CLAUDE_LOG="$TEST_TMPDIR/claude.log"
+  export RUNOQ_LOG_ROOT="$TEST_TMPDIR/log"
+  plan_file="$TEST_TMPDIR/plan.md"
+  milestone_file="$TEST_TMPDIR/milestone.json"
+  printf '%s\n' '# Plan' >"$plan_file"
+  printf '%s\n' '{"title":"M1"}' >"$milestone_file"
+
+  run "$RUNOQ_ROOT/scripts/plan-dispatch.sh" owner/repo 77 task "$plan_file" "$milestone_file"
+
+  [ "$status" -eq 0 ]
+  run grep -c 'plan-reviewer-product' "$FAKE_CLAUDE_LOG"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2" ]
+}
