@@ -174,6 +174,29 @@ push_managed_repo() {
   runoq::die "Failed to push seeded repo ${repo}: ${output}"
 }
 
+configure_managed_repo() {
+  local repo="$1"
+  local attempts="${RUNOQ_SMOKE_CREATE_REPO_ATTEMPTS:-10}"
+  local delay output status attempt
+  delay="$(smoke_retry_delay_seconds)"
+
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    set +e
+    output="$(operator_gh repo edit "$repo" --default-branch main --enable-auto-merge --enable-squash-merge --delete-branch-on-merge 2>&1)"
+    status="$?"
+    set -e
+    if [[ "$status" -eq 0 ]]; then
+      return 0
+    fi
+    smoke_log "repo edit for ${repo} failed on attempt ${attempt}/${attempts}: ${output}"
+    if (( attempt < attempts )); then
+      sleep "$delay"
+    fi
+  done
+
+  runoq::die "Failed to configure managed repo ${repo}: ${output}"
+}
+
 resolve_tool_bin() {
   local candidate="$1"
   local resolved=""
@@ -761,7 +784,7 @@ create_managed_repo() {
   push_managed_repo "$target_dir" "$repo"
   url="$(printf '%s\n' "$create_output" | grep -Eo 'https://github.com/[^[:space:]]+' | tail -n1)"
   [[ -n "$url" ]] || url="https://github.com/${repo}"
-  operator_gh repo edit "$repo" --default-branch main --enable-auto-merge --enable-squash-merge --delete-branch-on-merge >/dev/null
+  configure_managed_repo "$repo"
   jq -n --arg repo "$repo" --arg url "$url" '{repo:$repo, url:$url}'
 }
 

@@ -373,6 +373,71 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+@test "managed repo creation retries repo edit after transient timeout" {
+  scenario="$TEST_TMPDIR/scenario.json"
+  target_dir="$TEST_TMPDIR/target"
+  git_helper_dir="$TEST_TMPDIR/git-bin"
+  real_git="$(command -v git)"
+  make_git_repo "$target_dir"
+  mkdir -p "$git_helper_dir"
+  cat >"$git_helper_dir/git" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${1:-}" == "-C" && "\${3:-}" == "push" ]]; then
+  exit 0
+fi
+if [[ "\${1:-}" == "push" ]]; then
+  exit 0
+fi
+exec "$real_git" "\$@"
+EOF
+  chmod +x "$git_helper_dir/git"
+  write_fake_gh_scenario "$scenario" <<'EOF'
+[
+  {
+    "contains": ["repo", "create", "owner/runoq-live-eval-run-123"],
+    "stdout": "https://github.com/owner/runoq-live-eval-run-123"
+  },
+  {
+    "contains": ["repo", "view", "owner/runoq-live-eval-run-123"],
+    "stdout": "{\"name\":\"runoq-live-eval-run-123\"}"
+  },
+  {
+    "contains": ["auth", "token"],
+    "stdout": "test-token"
+  },
+  {
+    "contains": ["repo", "edit", "owner/runoq-live-eval-run-123"],
+    "stderr": "Patch \"https://api.github.com/repos/owner/runoq-live-eval-run-123\": read tcp 127.0.0.1:12345->4.237.22.34:443: read: operation timed out",
+    "exit_code": 1
+  },
+  {
+    "contains": ["repo", "edit", "owner/runoq-live-eval-run-123"],
+    "stdout": ""
+  }
+]
+EOF
+  use_fake_gh "$scenario"
+
+  run bash -lc '
+    set -euo pipefail
+    export PATH="'"$git_helper_dir"':$PATH"
+    export RUNOQ_ROOT="'"$RUNOQ_ROOT"'"
+    export RUNOQ_CONFIG="'"$RUNOQ_CONFIG"'"
+    export GH_BIN="'"$GH_BIN"'"
+    export RUNOQ_SMOKE_REPO_OWNER=owner
+    export RUNOQ_SMOKE_REPO_PREFIX=runoq-live-eval
+    export RUNOQ_SMOKE_RETRY_DELAY_SECONDS=0
+    source "'"$RUNOQ_ROOT"'/scripts/lib/smoke-common.sh"
+    create_managed_repo "'"$target_dir"'" run-123 >/dev/null
+  '
+
+  [ "$status" -eq 0 ]
+  run grep -c 'repo edit owner/runoq-live-eval-run-123' "$FAKE_GH_LOG"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2" ]
+}
+
 @test "operator_gh runs without inherited bot token" {
   helper="$TEST_TMPDIR/gh-env"
   cat >"$helper" <<'EOF'
