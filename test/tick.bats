@@ -232,7 +232,7 @@ EOF
 ```json
 {"items":[{"title":"Core formatter","type":"implementation","goal":"Goal 1","criteria":["A"],"scope":["core"],"sequencing_rationale":"s","priority":1}]}
 ```'
-  view_json="$(jq -cn --argjson number 2 --arg title 'Break plan into milestones' --arg body "$planning_body" --arg proposal "$proposal_comment" '{number:$number,title:$title,body:$body,comments:[{author:{login:"runoq"},body:$proposal}],labels:[],state:"OPEN"}')"
+  view_json="$(jq -cn --argjson number 2 --arg title 'Break plan into milestones' --arg body "$planning_body" --arg proposal "$proposal_comment" '{number:$number,title:$title,body:($body + "\n\n<!-- runoq:proposal-start -->\n" + $proposal),comments:[],labels:[],state:"OPEN"}')"
 
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<EOF
@@ -268,14 +268,12 @@ EOF
 ```json
 {"items":[{"title":"Core formatter","type":"implementation","goal":"Goal 1","criteria":["A"],"scope":["core"],"sequencing_rationale":"s","priority":1}]}
 ```'
-  view_json="$(jq -cn --argjson number 2 --arg title 'Break plan into milestones' --arg body "$planning_body" --arg proposal "$proposal_comment" '{number:$number,title:$title,body:$body,comments:[{author:{login:"runoq"},body:$proposal,id:"IC_bot"},{author:{login:"human"},body:"Why this order?",id:"IC_human123"}],labels:[],state:"OPEN"}')"
+  view_json="$(jq -cn --argjson number 2 --arg title 'Break plan into milestones' --arg body "$planning_body" --arg proposal "$proposal_comment" '{number:$number,title:$title,body:($body + "\n\n<!-- runoq:proposal-start -->\n" + $proposal),comments:[{author:{login:"human"},body:"Why this order?",id:"IC_human123"}],labels:[],state:"OPEN"}')"
 
   fixture_dir="$TEST_TMPDIR/fixtures"
   mkdir -p "$fixture_dir"
   cat >"$fixture_dir/plan-comment-responder.txt" <<'EOF'
-<!-- runoq:event -->
-
-The order is based on dependency reduction.
+{"action":"question","reply":"<!-- runoq:event -->\n\nThe order is based on dependency reduction."}
 EOF
   export RUNOQ_CLAUDE_BIN="$RUNOQ_ROOT/test/helpers/fixture-claude"
   export RUNOQ_TEST_AGENT_FIXTURE_DIR="$fixture_dir"
@@ -338,7 +336,7 @@ EOF
   {"title":"CLI wrapper","type":"implementation","goal":"Goal 3","criteria":["C"],"scope":["cli"],"sequencing_rationale":"s","priority":3}
 ]}
 ```'
-  view_json="$(jq -cn --argjson number 2 --arg title 'Break plan into milestones' --arg body "$planning_body" --arg proposal "$proposal_comment" '{number:$number,title:$title,body:$body,comments:[{author:{login:"runoq"},body:$proposal,id:"IC_bot"},{author:{login:"human"},body:"OK, approved with item 3 removed",id:"IC_approval"}],labels:[{name:"runoq:plan-approved"}],state:"OPEN"}')"
+  view_json="$(jq -cn --argjson number 2 --arg title 'Break plan into milestones' --arg body "$planning_body" --arg proposal "$proposal_comment" '{number:$number,title:$title,body:($body + "\n\n<!-- runoq:proposal-start -->\n" + $proposal),comments:[{author:{login:"human"},body:"OK, approved with item 3 removed",id:"IC_approval"}],labels:[{name:"runoq:plan-approved"}],state:"OPEN"}')"
 
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<EOF
@@ -397,7 +395,7 @@ EOF
   {"title":"Add tests","type":"task","body":"## Acceptance Criteria\n\n- [ ] Works.","priority":2,"estimated_complexity":"low","complexity_rationale":"single module","depends_on_keys":[]}
 ]}
 ```'
-  view_json="$(jq -cn --argjson number 11 --arg title 'Break down milestone into tasks' --arg body "$planning_body" --arg proposal "$proposal_comment" '{number:$number,title:$title,body:$body,comments:[{author:{login:"runoq"},body:$proposal},{author:{login:"human"},body:"Looks good"}],labels:[{name:"runoq:plan-approved"}],state:"OPEN"}')"
+  view_json="$(jq -cn --argjson number 11 --arg title 'Break down milestone into tasks' --arg body "$planning_body" --arg proposal "$proposal_comment" '{number:$number,title:$title,body:($body + "\n\n<!-- runoq:proposal-start -->\n" + $proposal),comments:[{author:{login:"human"},body:"Looks good"}],labels:[{name:"runoq:plan-approved"}],state:"OPEN"}')"
 
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<EOF
@@ -745,7 +743,7 @@ EOF
 ```json
 {"items":[{"title":"Core formatter","type":"implementation","goal":"Goal 1","criteria":["A"],"scope":["core"],"sequencing_rationale":"s","priority":1}]}
 ```'
-  view_json="$(jq -cn --argjson number 2 --arg title 'Break plan into milestones' --arg body "$planning_body" --arg proposal "$proposal_comment" '{number:$number,title:$title,body:$body,comments:[{author:{login:"runoq"},body:$proposal}],labels:[],state:"OPEN"}')"
+  view_json="$(jq -cn --argjson number 2 --arg title 'Break plan into milestones' --arg body "$planning_body" --arg proposal "$proposal_comment" '{number:$number,title:$title,body:($body + "\n\n<!-- runoq:proposal-start -->\n" + $proposal),comments:[],labels:[],state:"OPEN"}')"
 
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<EOF

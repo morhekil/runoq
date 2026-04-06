@@ -57,20 +57,6 @@ read_json_output() {
 proposal_json_from_issue_view() {
   local issue_view_json="$1"
   local body proposal
-  proposal="$(printf '%s' "$issue_view_json" | jq -r '
-    .comments // []
-    | map(.body // "")
-    | map(select(contains("runoq:payload:plan-proposal")))
-    | last // empty
-  ')"
-  if [[ -n "$proposal" ]]; then
-    body="$(extract_proposal_json_from_text "$proposal")"
-    if [[ -n "$body" ]]; then
-      printf '%s\n' "$body"
-      return 0
-    fi
-  fi
-
   body="$(printf '%s' "$issue_view_json" | jq -r '.body // ""')"
   proposal="$(extract_proposal_json_from_text "$body")"
   [[ -n "$proposal" ]] || return 1
@@ -203,7 +189,7 @@ planning_issue_needs_dispatch() {
   local issue_number issue_view
   issue_number="$(printf '%s' "$issue_json" | jq -r '.number')"
   issue_view="$(runoq::gh issue view "$issue_number" --repo "$repo" --json number,title,body,comments,labels,state)"
-  if printf '%s' "$issue_view" | jq -r '.comments // [] | map(.body // "") | join("\n")' | grep -q 'runoq:payload:plan-proposal'; then
+  if printf '%s' "$issue_view" | jq -r '.body // ""' | grep -q 'runoq:payload:plan-proposal'; then
     return 1
   fi
   return 0

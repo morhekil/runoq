@@ -191,15 +191,18 @@ main() {
     round=$((round + 1))
   done
 
-  runoq::step "Posting proposal comment on #$issue_number"
-  local body_file
-  body_file="$(mktemp "${TMPDIR:-/tmp}/runoq-plan-comment.XXXXXX")"
-  proposal_tmp="$(mktemp "${TMPDIR:-/tmp}/runoq-plan-proposal-final.XXXXXX")"
-  printf '%s\n' "$proposal_json" >"$proposal_tmp"
-  proposal_comment_body "$proposal_tmp" "$technical_json" "$product_json" "$warning" >"$body_file"
+  runoq::step "Writing proposal into issue body for #$issue_number"
+  local proposal_file proposal_body_file current_body new_body_file
+  proposal_file="$(mktemp "${TMPDIR:-/tmp}/runoq-plan-proposal-final.XXXXXX")"
+  printf '%s\n' "$proposal_json" >"$proposal_file"
+  proposal_body_file="$(mktemp "${TMPDIR:-/tmp}/runoq-plan-proposal-body.XXXXXX")"
+  proposal_comment_body "$proposal_file" "$technical_json" "$product_json" "$warning" >"$proposal_body_file"
 
-  runoq::gh issue comment "$issue_number" --repo "$repo" --body-file "$body_file" >/dev/null
-  runoq::success "Proposal posted on #$issue_number"
+  current_body="$(runoq::gh issue view "$issue_number" --repo "$repo" --json body --jq '.body // ""')"
+  new_body_file="$(mktemp "${TMPDIR:-/tmp}/runoq-plan-new-body.XXXXXX")"
+  printf '%s' "$current_body" | "$(runoq::root)/scripts/tick-fmt.sh" replace-proposal-in-body "$proposal_body_file" >"$new_body_file"
+  runoq::gh issue edit "$issue_number" --repo "$repo" --body-file "$new_body_file" >/dev/null
+  runoq::success "Proposal written to #$issue_number body"
   printf 'Proposal posted on #%s\n' "$issue_number"
 }
 

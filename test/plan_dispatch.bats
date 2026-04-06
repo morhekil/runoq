@@ -37,7 +37,11 @@ EOF
   write_fake_gh_scenario "$scenario" <<'EOF'
 [
   {
-    "contains": ["issue", "comment", "42", "--repo", "owner/repo"],
+    "contains": ["issue", "view", "42", "--repo", "owner/repo"],
+    "stdout": "{\"body\":\"existing body\"}"
+  },
+  {
+    "contains": ["issue", "edit", "42", "--repo", "owner/repo"],
     "stdout": ""
   }
 ]
@@ -64,11 +68,11 @@ EOF
   run grep -c 'plan-reviewer-product' "$FAKE_CLAUDE_LOG"
   [ "$status" -eq 0 ]
   [ "$output" = "1" ]
-  run grep -q 'runoq:payload:plan-proposal' "$TEST_TMPDIR/capture/0.body"
+  run grep -q 'runoq:payload:plan-proposal' "$TEST_TMPDIR/capture/1.body"
   [ "$status" -eq 0 ]
-  run grep -qE '^### 1\. ' "$TEST_TMPDIR/capture/0.body"
+  run grep -qE '^### 1\. ' "$TEST_TMPDIR/capture/1.body"
   [ "$status" -eq 0 ]
-  run grep -qE '^### 2\. ' "$TEST_TMPDIR/capture/0.body"
+  run grep -qE '^### 2\. ' "$TEST_TMPDIR/capture/1.body"
   [ "$status" -eq 0 ]
 }
 
@@ -101,7 +105,11 @@ EOF
   write_fake_gh_scenario "$scenario" <<'EOF'
 [
   {
-    "contains": ["issue", "comment", "42", "--repo", "owner/repo"],
+    "contains": ["issue", "view", "42", "--repo", "owner/repo"],
+    "stdout": "{\"body\":\"existing body\"}"
+  },
+  {
+    "contains": ["issue", "edit", "42", "--repo", "owner/repo"],
     "stdout": ""
   }
 ]
@@ -118,9 +126,9 @@ EOF
   run "$RUNOQ_ROOT/scripts/plan-dispatch.sh" owner/repo 42 milestone "$plan_file"
 
   [ "$status" -eq 0 ]
-  run grep -F 'M2 depends on external API availability' "$TEST_TMPDIR/capture/0.body"
+  run grep -F 'M2 depends on external API availability' "$TEST_TMPDIR/capture/1.body"
   [ "$status" -eq 0 ]
-  run grep -F 'M3 scope may grow' "$TEST_TMPDIR/capture/0.body"
+  run grep -F 'M3 scope may grow' "$TEST_TMPDIR/capture/1.body"
   [ "$status" -eq 0 ]
 }
 
@@ -170,7 +178,11 @@ EOF
   write_fake_gh_scenario "$scenario" <<'EOF'
 [
   {
-    "contains": ["issue", "comment", "42", "--repo", "owner/repo"],
+    "contains": ["issue", "view", "42", "--repo", "owner/repo"],
+    "stdout": "{\"body\":\"existing body\"}"
+  },
+  {
+    "contains": ["issue", "edit", "42", "--repo", "owner/repo"],
     "stdout": ""
   }
 ]
@@ -221,7 +233,11 @@ EOF
   write_fake_gh_scenario "$scenario" <<'EOF'
 [
   {
-    "contains": ["issue", "comment", "42", "--repo", "owner/repo"],
+    "contains": ["issue", "view", "42", "--repo", "owner/repo"],
+    "stdout": "{\"body\":\"existing body\"}"
+  },
+  {
+    "contains": ["issue", "edit", "42", "--repo", "owner/repo"],
     "stdout": ""
   }
 ]
@@ -238,7 +254,7 @@ EOF
   run "$RUNOQ_ROOT/scripts/plan-dispatch.sh" owner/repo 42 milestone "$plan_file"
 
   [ "$status" -eq 0 ]
-  run grep -q 'max review rounds reached' "$TEST_TMPDIR/capture/0.body"
+  run grep -q 'max review rounds reached' "$TEST_TMPDIR/capture/1.body"
   [ "$status" -eq 0 ]
 }
 
@@ -297,7 +313,11 @@ EOF
   write_fake_gh_scenario "$scenario" <<'EOF'
 [
   {
-    "contains": ["issue", "comment", "77", "--repo", "owner/repo"],
+    "contains": ["issue", "view", "77", "--repo", "owner/repo"],
+    "stdout": "{\"body\":\"existing body\"}"
+  },
+  {
+    "contains": ["issue", "edit", "77", "--repo", "owner/repo"],
     "stdout": ""
   }
 ]
@@ -352,7 +372,11 @@ EOF
   write_fake_gh_scenario "$scenario" <<'EOF'
 [
   {
-    "contains": ["issue", "comment", "77", "--repo", "owner/repo"],
+    "contains": ["issue", "view", "77", "--repo", "owner/repo"],
+    "stdout": "{\"body\":\"existing body\"}"
+  },
+  {
+    "contains": ["issue", "edit", "77", "--repo", "owner/repo"],
     "stdout": ""
   }
 ]
@@ -407,7 +431,11 @@ EOF
   write_fake_gh_scenario "$scenario" <<'EOF'
 [
   {
-    "contains": ["issue", "comment", "77", "--repo", "owner/repo"],
+    "contains": ["issue", "view", "77", "--repo", "owner/repo"],
+    "stdout": "{\"body\":\"existing body\"}"
+  },
+  {
+    "contains": ["issue", "edit", "77", "--repo", "owner/repo"],
     "stdout": ""
   }
 ]
@@ -461,7 +489,11 @@ EOF
   write_fake_gh_scenario "$scenario" <<'EOF'
 [
   {
-    "contains": ["issue", "comment", "77", "--repo", "owner/repo"],
+    "contains": ["issue", "view", "77", "--repo", "owner/repo"],
+    "stdout": "{\"body\":\"existing body\"}"
+  },
+  {
+    "contains": ["issue", "edit", "77", "--repo", "owner/repo"],
     "stdout": ""
   }
 ]
