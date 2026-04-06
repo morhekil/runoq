@@ -25,7 +25,7 @@ call_agent() {
   for attempt in 1 2; do
     runoq::captured_exec claude "$(runoq::target_root)" "$claude_bin" --agent "$agent" --add-dir "$(runoq::root)" -- "$payload" >/dev/null
     response_path="$RUNOQ_LAST_CLAUDE_CAPTURE_DIR/response.txt"
-    if [[ -s "$response_path" ]]; then
+    if grep -q '[^[:space:]]' "$response_path"; then
       printf '%s\n' "$response_path"
       return 0
     fi
