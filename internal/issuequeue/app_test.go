@@ -189,6 +189,44 @@ func TestSetStatusRemovesExistingRunoqLabels(t *testing.T) {
 	}
 }
 
+func TestSetStatusPreservesNonStateLabels(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t, []string{"set-status", "owner/repo", "42", "done"})
+	var editCommand string
+	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+		t.Helper()
+		command := req.Name + " " + strings.Join(req.Args, " ")
+		switch {
+		case strings.Contains(command, "issue view 42 --repo owner/repo --json labels"):
+			_, _ = req.Stdout.Write([]byte(`{"labels":[{"name":"runoq:ready"},{"name":"runoq:plan-approved"},{"name":"runoq:maintenance-review"}]}`))
+			return nil
+		case strings.Contains(command, "issue edit"):
+			editCommand = command
+			return nil
+		case strings.Contains(command, "issue close"):
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s", command)
+			return nil
+		}
+	})
+
+	code := app.Run(t.Context())
+	if code != 0 {
+		t.Fatalf("Run returned %d stderr=%q", code, app.stderr.(*bytes.Buffer).String())
+	}
+	if strings.Contains(editCommand, "runoq:plan-approved") {
+		t.Error("set-status should not remove runoq:plan-approved")
+	}
+	if strings.Contains(editCommand, "runoq:maintenance-review") {
+		t.Error("set-status should not remove runoq:maintenance-review")
+	}
+	if !strings.Contains(editCommand, "--remove-label runoq:ready") {
+		t.Error("set-status should remove state label runoq:ready")
+	}
+}
+
 func TestSetStatusDoneClosesIssue(t *testing.T) {
 	t.Parallel()
 

@@ -309,10 +309,17 @@ func (a *App) runSetStatus(ctx context.Context, repo string, issueNumber string,
 		return common.Failf(a.stderr, "issue view returned invalid JSON: %v", err)
 	}
 
+	stateLabels := map[string]bool{
+		cfg.Labels.Ready:       true,
+		cfg.Labels.InProgress:  true,
+		cfg.Labels.Done:        true,
+		cfg.Labels.NeedsReview: true,
+		cfg.Labels.Blocked:     true,
+	}
 	editArgs := []string{"issue", "edit", issueNumber, "--repo", repo}
 	removing := make([]string, 0, len(response.Labels))
 	for _, label := range response.Labels {
-		if strings.HasPrefix(label.Name, "runoq:") {
+		if stateLabels[label.Name] {
 			editArgs = append(editArgs, "--remove-label", label.Name)
 			removing = append(removing, label.Name)
 		}
