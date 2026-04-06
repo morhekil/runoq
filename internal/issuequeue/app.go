@@ -24,6 +24,7 @@ const usageText = `Usage:
   gh-issue-queue.sh next <repo> <ready-label>
   gh-issue-queue.sh set-status <repo> <issue-number> <status>
   gh-issue-queue.sh create <repo> <title> <body> [--depends-on N,M] [--priority N] [--estimated-complexity value] [--type task|epic|planning|adjustment] [--parent-epic N]
+  gh-issue-queue.sh assign <repo> <issue-number>
   gh-issue-queue.sh epic-status <repo> <issue-number>
 `
 
@@ -206,6 +207,12 @@ func (a *App) Run(ctx context.Context) int {
 			return 1
 		}
 		return a.runCreate(ctx, a.args[1], a.args[2], a.args[3], a.args[4:])
+	case "assign":
+		if len(a.args) != 3 {
+			a.printUsage(a.stderr)
+			return 1
+		}
+		return a.runAssign(ctx, a.args[1], a.args[2])
 	case "epic-status":
 		if len(a.args) != 3 {
 			a.printUsage(a.stderr)
@@ -369,13 +376,6 @@ func (a *App) runCreate(ctx context.Context, repo string, title string, body str
 	}()
 
 	createArgs := []string{"issue", "create", "--repo", repo, "--title", title, "--body-file", bodyFile, "--label", cfg.Labels.Ready}
-	if opts.IssueType == "planning" || opts.IssueType == "adjustment" {
-		operator, err := a.operatorLogin(ctx)
-		if err != nil {
-			return common.Failf(a.stderr, "Failed to resolve operator login for %s issue assignment: %v", opts.IssueType, err)
-		}
-		createArgs = append(createArgs, "--assignee", operator)
-	}
 
 	url, err := a.ghClient.Output(ctx, createArgs...)
 	if err != nil {
@@ -399,6 +399,18 @@ func (a *App) runCreate(ctx context.Context, repo string, title string, body str
 	}
 
 	return a.writeJSON(createResult{Title: title, URL: url})
+}
+
+func (a *App) runAssign(ctx context.Context, repo string, issueNumber string) int {
+	operator, err := a.operatorLogin(ctx)
+	if err != nil {
+		return common.Failf(a.stderr, "Failed to resolve operator login: %v", err)
+	}
+	if err := a.ghClient.Run(ctx, []string{"issue", "edit", issueNumber, "--repo", repo, "--add-assignee", operator}, io.Discard, a.stderr); err != nil {
+		return common.Failf(a.stderr, "%v", err)
+	}
+	a.log("issue-queue", fmt.Sprintf("assign: issue=#%s assignee=%s", issueNumber, operator))
+	return 0
 }
 
 func (a *App) operatorLogin(ctx context.Context) (string, error) {

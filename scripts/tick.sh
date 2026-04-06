@@ -242,6 +242,11 @@ create_planning_issue() {
   "$issue_queue_script" create "$repo" "$title" "$body" --type planning --priority 1 --estimated-complexity low --parent-epic "$parent_epic"
 }
 
+assign_issue() {
+  local issue_queue_script="$1" repo="$2" issue_number="$3"
+  "$issue_queue_script" assign "$repo" "$issue_number" >/dev/null 2>&1 || true
+}
+
 create_task_issue() {
   local issue_queue_script="$1" repo="$2" title="$3" body="$4" priority="$5" complexity="$6" rationale="$7" parent_epic="$8"
   local max_attempts pause attempt output
@@ -278,6 +283,7 @@ handle_bootstrap() {
 
   runoq::step "Running milestone decomposition on #$planning_number"
   "$plan_dispatch_script" "$repo" "$planning_number" milestone "$plan_file" >/dev/null
+  assign_issue "$issue_queue_script" "$repo" "$planning_number"
   runoq::success "Proposal posted on #$planning_number"
   printf 'Created planning milestone. Proposal posted on #%s\n' "$planning_number"
 }
@@ -436,6 +442,7 @@ handle_planning_dispatch() {
   else
     "$plan_dispatch_script" "$repo" "$planning_number" task "$plan_file" "$milestone_file" >/dev/null
   fi
+  assign_issue "$issue_queue_script" "$repo" "$planning_number"
   runoq::success "Proposal posted on #$planning_number"
   printf 'Proposal posted on #%s\n' "$planning_number"
 }
@@ -483,6 +490,7 @@ handle_milestone_complete() {
     create_output="$("$issue_queue_script" create "$repo" "Review milestone adjustments" "$body" --type adjustment --priority 1 --estimated-complexity low --parent-epic "$current_epic_number")"
     local adj_issue_number
     adj_issue_number="$(printf '%s' "$create_output" | jq -r '.url | capture("(?<n>[0-9]+)$").n')"
+    assign_issue "$issue_queue_script" "$repo" "$adj_issue_number"
     runoq::success "Milestone #$current_epic_number reviewed. Adjustments on #$adj_issue_number"
     printf 'Milestone #%s review complete. Adjustments proposed on #%s\n' "$current_epic_number" "$adj_issue_number"
     return 0

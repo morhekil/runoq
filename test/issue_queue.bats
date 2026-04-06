@@ -189,13 +189,12 @@ EOF
   [ "$status" -eq 0 ]
 }
 
-@test "issue queue create accepts planning and adjustment types" {
-  export RUNOQ_OPERATOR_LOGIN=test-user
+@test "issue queue create accepts planning and adjustment types without assigning" {
   planning_scenario="$TEST_TMPDIR/planning-scenario.json"
   write_fake_gh_scenario "$planning_scenario" <<EOF
 [
   {
-    "contains": ["issue", "create", "--repo owner/repo", "--title Plan milestone 1", "--label runoq:ready", "--assignee test-user"],
+    "contains": ["issue", "create", "--repo owner/repo", "--title Plan milestone 1", "--label runoq:ready"],
     "stdout": "https://github.com/owner/repo/issues/99"
   }
 ]
@@ -207,12 +206,15 @@ EOF
   [ "$status" -eq 0 ]
   run grep -n "type: planning" "$TEST_TMPDIR/planning-capture/0.body"
   [ "$status" -eq 0 ]
+  # Must not include --assignee
+  run grep -c "assignee" "$TEST_TMPDIR/planning.log"
+  [ "$output" = "0" ] || [ "$status" -ne 0 ]
 
   adjustment_scenario="$TEST_TMPDIR/adjustment-scenario.json"
   write_fake_gh_scenario "$adjustment_scenario" <<EOF
 [
   {
-    "contains": ["issue", "create", "--repo owner/repo", "--title Adjust milestones", "--label runoq:ready", "--assignee test-user"],
+    "contains": ["issue", "create", "--repo owner/repo", "--title Adjust milestones", "--label runoq:ready"],
     "stdout": "https://github.com/owner/repo/issues/100"
   }
 ]

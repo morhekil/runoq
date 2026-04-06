@@ -332,13 +332,9 @@ func TestCreatePlanningWritesPlanningType(t *testing.T) {
 	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
 		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
-		switch {
-		case strings.Contains(command, "api user --jq .login"):
-			_, _ = req.Stdout.Write([]byte("morhekil"))
-			return nil
-		case strings.Contains(command, "issue create --repo owner/repo --title Plan milestone 1 --body-file "):
-			if !strings.Contains(command, "--assignee morhekil") {
-				t.Fatalf("expected assignee on planning issue create, got %s", command)
+		if strings.Contains(command, "issue create --repo owner/repo --title Plan milestone 1 --body-file ") {
+			if strings.Contains(command, "--assignee") {
+				t.Fatal("create must not assign; assignment is a separate step")
 			}
 			for i := range len(req.Args) {
 				if req.Args[i] == "--body-file" {
@@ -352,10 +348,9 @@ func TestCreatePlanningWritesPlanningType(t *testing.T) {
 			}
 			_, _ = req.Stdout.Write([]byte("https://github.com/owner/repo/issues/99"))
 			return nil
-		default:
-			t.Fatalf("unexpected command: %s", command)
-			return nil
 		}
+		t.Fatalf("unexpected command: %s", command)
+		return nil
 	})
 
 	code := app.Run(t.Context())
@@ -380,13 +375,9 @@ func TestCreateAdjustmentWritesAdjustmentType(t *testing.T) {
 	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
 		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
-		switch {
-		case strings.Contains(command, "api user --jq .login"):
-			_, _ = req.Stdout.Write([]byte("morhekil"))
-			return nil
-		case strings.Contains(command, "issue create --repo owner/repo --title Adjust milestones --body-file "):
-			if !strings.Contains(command, "--assignee morhekil") {
-				t.Fatalf("expected assignee on adjustment issue create, got %s", command)
+		if strings.Contains(command, "issue create --repo owner/repo --title Adjust milestones --body-file ") {
+			if strings.Contains(command, "--assignee") {
+				t.Fatal("create must not assign; assignment is a separate step")
 			}
 			for i := range len(req.Args) {
 				if req.Args[i] == "--body-file" {
@@ -400,10 +391,9 @@ func TestCreateAdjustmentWritesAdjustmentType(t *testing.T) {
 			}
 			_, _ = req.Stdout.Write([]byte("https://github.com/owner/repo/issues/100"))
 			return nil
-		default:
-			t.Fatalf("unexpected command: %s", command)
-			return nil
 		}
+		t.Fatalf("unexpected command: %s", command)
+		return nil
 	})
 
 	code := app.Run(t.Context())
@@ -415,39 +405,21 @@ func TestCreateAdjustmentWritesAdjustmentType(t *testing.T) {
 	}
 }
 
-func TestCreatePlanningUsesOperatorLoginOverride(t *testing.T) {
+func TestAssignUsesOperatorLoginOverride(t *testing.T) {
 	t.Parallel()
 
-	app := newTestApp(t, []string{
-		"create", "owner/repo", "Plan milestone 1", "body",
-		"--type", "planning",
-		"--priority", "1",
-		"--estimated-complexity", "low",
-	})
+	app := newTestApp(t, []string{"assign", "owner/repo", "99"})
 	app.env = append(app.env, "RUNOQ_OPERATOR_LOGIN=override-user")
-	var bodyText string
+	var sawEdit bool
 	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
 		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
 		switch {
 		case strings.Contains(command, "api user --jq .login"):
-			t.Fatalf("unexpected operator login lookup command: %s", command)
+			t.Fatal("should use env override, not gh api user")
 			return nil
-		case strings.Contains(command, "issue create --repo owner/repo --title Plan milestone 1 --body-file "):
-			if !strings.Contains(command, "--assignee override-user") {
-				t.Fatalf("expected override assignee on planning issue create, got %s", command)
-			}
-			for i := range len(req.Args) {
-				if req.Args[i] == "--body-file" {
-					data, err := os.ReadFile(req.Args[i+1])
-					if err != nil {
-						t.Fatalf("read body file: %v", err)
-					}
-					bodyText = string(data)
-					break
-				}
-			}
-			_, _ = req.Stdout.Write([]byte("https://github.com/owner/repo/issues/99"))
+		case strings.Contains(command, "issue edit 99 --repo owner/repo --add-assignee override-user"):
+			sawEdit = true
 			return nil
 		default:
 			t.Fatalf("unexpected command: %s", command)
@@ -459,8 +431,8 @@ func TestCreatePlanningUsesOperatorLoginOverride(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run returned %d stderr=%q", code, app.stderr.(*bytes.Buffer).String())
 	}
-	if !strings.Contains(bodyText, "type: planning") {
-		t.Fatalf("unexpected body file:\n%s", bodyText)
+	if !sawEdit {
+		t.Fatal("expected issue edit with override-user assignee")
 	}
 }
 
@@ -495,17 +467,12 @@ func TestEpicStatusTracksPendingChildren(t *testing.T) {
 	}
 }
 
-func TestOperatorLoginFallsBackToGHWhenEnvEmpty(t *testing.T) {
+func TestAssignFallsBackToGHWhenEnvEmpty(t *testing.T) {
 	t.Parallel()
 
-	app := newTestApp(t, []string{
-		"create", "owner/repo", "Plan milestone 1", "body",
-		"--type", "planning",
-		"--priority", "1",
-		"--estimated-complexity", "low",
-	})
+	app := newTestApp(t, []string{"assign", "owner/repo", "99"})
 	app.env = append(app.env, "RUNOQ_OPERATOR_LOGIN=")
-	var sawAPICall bool
+	var sawAPICall, sawEdit bool
 	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
 		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
@@ -514,11 +481,8 @@ func TestOperatorLoginFallsBackToGHWhenEnvEmpty(t *testing.T) {
 			sawAPICall = true
 			_, _ = req.Stdout.Write([]byte("gh-user"))
 			return nil
-		case strings.Contains(command, "issue create --repo owner/repo --title Plan milestone 1 --body-file "):
-			if !strings.Contains(command, "--assignee gh-user") {
-				t.Fatalf("expected gh-user assignee, got %s", command)
-			}
-			_, _ = req.Stdout.Write([]byte("https://github.com/owner/repo/issues/99"))
+		case strings.Contains(command, "issue edit 99 --repo owner/repo --add-assignee gh-user"):
+			sawEdit = true
 			return nil
 		default:
 			t.Fatalf("unexpected command: %s", command)
@@ -533,17 +497,15 @@ func TestOperatorLoginFallsBackToGHWhenEnvEmpty(t *testing.T) {
 	if !sawAPICall {
 		t.Fatal("expected gh api user fallback when RUNOQ_OPERATOR_LOGIN is empty")
 	}
+	if !sawEdit {
+		t.Fatal("expected issue edit with --add-assignee")
+	}
 }
 
-func TestOperatorLoginFailsWhenGHReturnsEmpty(t *testing.T) {
+func TestAssignFailsWhenGHReturnsEmpty(t *testing.T) {
 	t.Parallel()
 
-	app := newTestApp(t, []string{
-		"create", "owner/repo", "Plan milestone 1", "body",
-		"--type", "planning",
-		"--priority", "1",
-		"--estimated-complexity", "low",
-	})
+	app := newTestApp(t, []string{"assign", "owner/repo", "42"})
 	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
 		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
@@ -563,6 +525,61 @@ func TestOperatorLoginFailsWhenGHReturnsEmpty(t *testing.T) {
 	}
 	if !strings.Contains(app.stderr.(*bytes.Buffer).String(), "empty login") {
 		t.Fatalf("expected empty login error, got %q", app.stderr.(*bytes.Buffer).String())
+	}
+}
+
+func TestCreatePlanningDoesNotAssign(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t, []string{
+		"create", "owner/repo", "Plan milestone 1", "body",
+		"--type", "planning",
+		"--priority", "1",
+		"--estimated-complexity", "low",
+	})
+	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+		t.Helper()
+		command := req.Name + " " + strings.Join(req.Args, " ")
+		if strings.Contains(command, "issue create") {
+			if strings.Contains(command, "--assignee") {
+				t.Fatal("planning issue create must not include --assignee")
+			}
+			_, _ = req.Stdout.Write([]byte("https://github.com/owner/repo/issues/99"))
+			return nil
+		}
+		t.Fatalf("unexpected command: %s", command)
+		return nil
+	})
+
+	code := app.Run(t.Context())
+	if code != 0 {
+		t.Fatalf("Run returned %d stderr=%q", code, app.stderr.(*bytes.Buffer).String())
+	}
+}
+
+func TestAssignSetsOperatorOnIssue(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t, []string{"assign", "owner/repo", "42"})
+	app.env = append(app.env, "RUNOQ_OPERATOR_LOGIN=the-human")
+	var sawEdit bool
+	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+		t.Helper()
+		command := req.Name + " " + strings.Join(req.Args, " ")
+		if strings.Contains(command, "issue edit 42 --repo owner/repo --add-assignee the-human") {
+			sawEdit = true
+			return nil
+		}
+		t.Fatalf("unexpected command: %s", command)
+		return nil
+	})
+
+	code := app.Run(t.Context())
+	if code != 0 {
+		t.Fatalf("Run returned %d stderr=%q", code, app.stderr.(*bytes.Buffer).String())
+	}
+	if !sawEdit {
+		t.Fatal("expected issue edit with --add-assignee")
 	}
 }
 
