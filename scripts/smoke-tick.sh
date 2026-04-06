@@ -385,6 +385,9 @@ run_tick_smoke() {
     "$( [[ -n "$milestone1_plan_number" ]] && printf true || printf false )" \
     "first_milestone_planning_issue_created" \
     "No planning issue was created under the first milestone."
+  output="$(tick_once "$root")"
+  add_step "milestone1_task_proposal" "$output"
+
   if [[ -n "$milestone1_plan_number" ]]; then
     planning_view="$(issue_view_json "$repo" "$milestone1_plan_number")"
     add_check_or_failure \
@@ -393,8 +396,6 @@ run_tick_smoke() {
       "Milestone planning issue #${milestone1_plan_number} is not assigned to @${operator_login_value}."
   fi
 
-  output="$(tick_once "$root")"
-  add_step "milestone1_task_proposal" "$output"
   local milestone1_plan_view
   milestone1_plan_view="$(issue_view_json "$repo" "$milestone1_plan_number")"
   add_check_or_failure \
@@ -459,6 +460,9 @@ run_tick_smoke() {
     "$( [[ -n "$milestone2_plan_number" ]] && printf true || printf false )" \
     "next_milestone_planning_issue_created" \
     "Expected planning issue under milestone 2 after adjustments."
+  output="$(tick_once "$root")"
+  add_step "discovery_task_proposal" "$output"
+
   if [[ -n "$milestone2_plan_number" ]]; then
     planning_view="$(issue_view_json "$repo" "$milestone2_plan_number")"
     add_check_or_failure \
@@ -466,9 +470,6 @@ run_tick_smoke() {
       "next_milestone_planning_issue_assigned" \
       "Next milestone planning issue #${milestone2_plan_number} is not assigned to @${operator_login_value}."
   fi
-
-  output="$(tick_once "$root")"
-  add_step "discovery_task_proposal" "$output"
   runoq::gh issue edit "$milestone2_plan_number" --repo "$repo" --add-label "$(runoq::config_get '.labels.planApproved')" >/dev/null
   output="$(tick_once "$root")"
   add_step "materialize_discovery_task" "$output"
