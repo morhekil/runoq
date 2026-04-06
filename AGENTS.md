@@ -26,6 +26,7 @@ This repository implements the deterministic runtime layer for GitHub-backed age
 - Use fake `gh` fixtures for integration-style coverage where possible.
 - Use live smoke lanes for real GitHub and real LLM validation, but keep them opt-in and credential-gated.
 - Validate both happy paths and recovery or failure paths.
+- Smoke test environment variables are in `.env.smoke-sandbox`. Source it before running live smoke tests. See `docs/live-smoke.md` for full setup.
 
 ## Go code
 

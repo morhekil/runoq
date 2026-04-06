@@ -4,13 +4,16 @@ The live smoke suite validates `runoq` against real GitHub resources. It remains
 
 Interactive smoke commands log progress to stderr automatically. Set `RUNOQ_SMOKE_VERBOSE=1` to force those logs in non-interactive contexts, or `RUNOQ_SMOKE_VERBOSE=0` to silence them.
 
-There are now three distinct live lanes:
+There are now four distinct live lanes:
 
 - sandbox smoke: a narrow GitHub/App/auth probe
 - lifecycle eval: a full end-to-end queue run fused with an LLM eval
-- planning smoke: plan decomposition and epic/task issue creation
+- planning smoke: plan decomposition and epic/task issue creation (tick-based workflow)
+- tick smoke: fixture-mode full tick lifecycle against real GitHub (deterministic agents)
 
 They intentionally serve different purposes and should not be conflated.
+
+All lanes use environment variables from `.env.smoke-sandbox` at the repo root. Source it before running any live smoke test.
 
 ## Lane Overview
 
@@ -59,7 +62,32 @@ It validates:
 
 It does not run the full `runoq run` workflow or exercise codex.
 
-## Why Three Lanes Exist
+### Tick smoke
+
+This lane lives in `scripts/smoke-tick.sh preflight`, `scripts/smoke-tick.sh run`, and `scripts/smoke-tick.sh cleanup`.
+
+It validates the full `runoq tick` lifecycle with deterministic agent fixtures against a real GitHub repo:
+
+- bootstrap: creates planning milestone + planning issue from plan file
+- milestone decomposition via fixture agents
+- comment handling: question, partial approval, rejection of proposal items
+- milestone materialization after approval
+- task decomposition and approval
+- implementation dispatch delegation to orchestrator
+- milestone review with proposed adjustments (partial approval/rejection)
+- discovery milestone forced-pause (adjustment always created)
+- project completion
+
+This is the primary acceptance gate for the tick system. It uses real GitHub API but replaces LLM agents with fixture files via `RUNOQ_TEST_AGENT_FIXTURE_DIR`.
+
+## Why Four Lanes Exist
+
+Keep the tick smoke lane because it is better for:
+
+- full tick state machine regression testing (every transition, deterministic)
+- comment handling, partial approvals, and rejection flows
+- adjustment and discovery milestone paths
+- fast iteration (no LLM cost, reproducible)
 
 Keep the narrow smoke lane because it is better for:
 
@@ -137,6 +165,35 @@ Commands:
 scripts/smoke-lifecycle.sh preflight
 scripts/smoke-lifecycle.sh run
 scripts/smoke-lifecycle.sh cleanup --repo OWNER/REPO
+```
+
+## Tick Smoke Setup
+
+Set all of the following:
+
+- `RUNOQ_SMOKE=1`
+- `RUNOQ_SMOKE_TICK=1` when using the Bats wrapper
+- `RUNOQ_SMOKE_REPO_OWNER=<owner-or-org-for-managed-repos>`
+- `RUNOQ_SMOKE_APP_ID=<github-app-id>`
+- `RUNOQ_SMOKE_APP_KEY=/absolute/path/to/app-key.pem`
+
+Optional:
+
+- `RUNOQ_SMOKE_REPO_PREFIX=runoq-live-eval`
+- `RUNOQ_SMOKE_REPO_VISIBILITY=private`
+- `RUNOQ_SMOKE_RUN_ID=<stable-id>`
+
+Additional prerequisites:
+
+- operator `gh` auth must be ready for repo creation, issue mutation, and cleanup
+- `codex` and `claude` are NOT required (agents are replaced by fixtures)
+
+Commands:
+
+```bash
+scripts/smoke-tick.sh preflight
+scripts/smoke-tick.sh run
+scripts/smoke-tick.sh cleanup --repo OWNER/REPO
 ```
 
 ## Planning Smoke Setup
