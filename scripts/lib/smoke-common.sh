@@ -197,6 +197,27 @@ configure_managed_repo() {
   runoq::die "Failed to configure managed repo ${repo}: ${output}"
 }
 
+smoke_runtime_bin() {
+  if [[ -n "${RUNOQ_RUNTIME_BIN:-}" && -x "${RUNOQ_RUNTIME_BIN}" ]]; then
+    printf '%s\n' "${RUNOQ_RUNTIME_BIN}"
+    return 0
+  fi
+
+  local go_bin root out
+  go_bin="${RUNOQ_GO_BIN:-go}"
+  root="$(runoq::root)"
+  out="${RUNOQ_SMOKE_RUNTIME_BIN_CACHE:-$(mktemp "${TMPDIR:-/tmp}/runoq-runtime-smoke.XXXXXX")}"
+
+  if [[ ! -x "$out" ]]; then
+    (
+      cd "$root"
+      "$go_bin" build -o "$out" ./cmd/runoq-runtime
+    )
+  fi
+
+  printf '%s\n' "$out"
+}
+
 rewrite_tick_adjustment_fixture() {
   local fixture_dir="$1"
   local target_milestone_number="$2"
@@ -1299,6 +1320,7 @@ run_lifecycle() {
   local summary_file report_file state_files_json issue_statuses_json pr_statuses_json report_summary_json
   local labels_json seeded_issues_json issue_numbers_json run_exit run_exit_json failures_json checks_json summary_json
   local claude_capture_dir claude_wrapper_path real_claude_bin codex_capture_dir codex_wrapper_path real_codex_bin
+  local runtime_bin
   root="$(runoq::root)"
   run_id="$(smoke_run_id)"
   tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/runoq-live-lifecycle.XXXXXX")"
@@ -1376,6 +1398,7 @@ run_lifecycle() {
   codex_wrapper_path="$tmpdir/codex"
   real_codex_bin="$(smoke_codex_bin)"
   create_codex_capture_wrapper "$codex_wrapper_path"
+  runtime_bin="$(smoke_runtime_bin)"
 
   smoke_log "running runoq init; log -> ${init_log}"
   set +e
@@ -1422,6 +1445,7 @@ run_lifecycle() {
       export RUNOQ_SMOKE_REAL_CODEX_BIN="$real_codex_bin"
       export RUNOQ_SMOKE_CODEX_CAPTURE_DIR="$codex_capture_dir"
       export RUNOQ_CLAUDE_BIN="$claude_wrapper_path"
+      export RUNOQ_RUNTIME_BIN="$runtime_bin"
       export PATH="$tmpdir:$PATH"
       "$root/bin/runoq" run
     ) >"$run_log" 2>&1

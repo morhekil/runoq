@@ -456,6 +456,42 @@ EOF
   [ "$output" = '{"target":4,"before":"before #4","after":"after #4"}' ]
 }
 
+@test "lifecycle smoke builds a runtime binary from the runoq repo root" {
+  fake_go="$TEST_TMPDIR/fake-go"
+  log_file="$TEST_TMPDIR/fake-go.log"
+  cat >"$fake_go" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'PWD=%s\n' "$PWD" >"${RUNOQ_TEST_FAKE_GO_LOG:?}"
+printf 'ARGS=%s\n' "$*" >>"${RUNOQ_TEST_FAKE_GO_LOG:?}"
+if [[ "${1:-}" == "build" && "${2:-}" == "-o" ]]; then
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$3"
+  chmod +x "$3"
+fi
+EOF
+  chmod +x "$fake_go"
+
+  run bash -lc '
+    set -euo pipefail
+    export RUNOQ_ROOT="'"$RUNOQ_ROOT"'"
+    export RUNOQ_CONFIG="'"$RUNOQ_CONFIG"'"
+    export RUNOQ_GO_BIN="'"$fake_go"'"
+    export RUNOQ_TEST_FAKE_GO_LOG="'"$log_file"'"
+    source "'"$RUNOQ_ROOT"'/scripts/lib/smoke-common.sh"
+    runtime_bin="$(smoke_runtime_bin)"
+    test -x "$runtime_bin"
+    printf "%s\n" "$runtime_bin"
+  '
+
+  [ "$status" -eq 0 ]
+  run grep -Fx "PWD=$RUNOQ_ROOT" "$log_file"
+  [ "$status" -eq 0 ]
+  run grep -F "ARGS=build -o " "$log_file"
+  [ "$status" -eq 0 ]
+  run grep -F "./cmd/runoq-runtime" "$log_file"
+  [ "$status" -eq 0 ]
+}
+
 @test "operator_gh runs without inherited bot token" {
   helper="$TEST_TMPDIR/gh-env"
   cat >"$helper" <<'EOF'
