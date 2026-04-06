@@ -118,8 +118,8 @@ func TestFormatProposalCommentBody(t *testing.T) {
 			},
 			Warnings: []string{"- M2 depends on external API", "M3 scope may grow"},
 		},
-		Technical: ReviewScore{Verdict: "PASS", Score: "32/35"},
-		Product:   ReviewScore{Verdict: "PASS", Score: "27/30"},
+		Technical: ReviewScore{Verdict: "PASS", Score: "32/35", Checklist: "- [ ] tighten scope on item 2"},
+		Product:   ReviewScore{Verdict: "PASS", Score: "27/30", Checklist: "- [ ] clarify acceptance criteria"},
 	}
 
 	got := FormatProposalCommentBody(input)
@@ -130,6 +130,14 @@ func TestFormatProposalCommentBody(t *testing.T) {
 	}
 	if !containsString(got, "| Product | 27/30 | PASS |") {
 		t.Error("missing product score row")
+	}
+
+	// Reviewer checklists should be shown when non-empty
+	if !containsString(got, "tighten scope on item 2") {
+		t.Error("missing technical reviewer checklist")
+	}
+	if !containsString(got, "clarify acceptance criteria") {
+		t.Error("missing product reviewer checklist")
 	}
 
 	// Warnings rendered with dash-prefixed text (the printf bug scenario)

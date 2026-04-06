@@ -133,6 +133,14 @@ func FormatProposalCommentBody(input ProposalCommentInput) string {
 		fmt.Fprintf(&b, "| Product | %s | %s |\n\n", input.Product.Score, input.Product.Verdict)
 	}
 
+	// Reviewer checklists (feedback explaining score deductions)
+	if input.Technical.Checklist != "" {
+		fmt.Fprintf(&b, "**Technical reviewer notes:**\n%s\n\n", input.Technical.Checklist)
+	}
+	if input.Product.Checklist != "" {
+		fmt.Fprintf(&b, "**Product reviewer notes:**\n%s\n\n", input.Product.Checklist)
+	}
+
 	// Process-level warning (e.g. max rounds reached)
 	if input.Warning != "" {
 		fmt.Fprintf(&b, "> **Warning:** %s\n\n", input.Warning)
