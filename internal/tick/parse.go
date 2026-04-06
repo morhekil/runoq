@@ -150,6 +150,52 @@ func stripCodeFence(text string) string {
 	return strings.TrimSpace(content[:end])
 }
 
+// FindUnrespondedCommentIDs returns the node IDs of human comments that have
+// not been marked as responded to (no THUMBS_UP reaction). Skips bot comments
+// and event-tagged comments.
+func FindUnrespondedCommentIDs(issueViewJSON string) ([]string, error) {
+	var view struct {
+		Comments []struct {
+			Author struct {
+				Login string `json:"login"`
+			} `json:"author"`
+			Body           string `json:"body"`
+			ID             string `json:"id"`
+			ReactionGroups []struct {
+				Content string `json:"content"`
+				Users   struct {
+					TotalCount int `json:"totalCount"`
+				} `json:"users"`
+			} `json:"reactionGroups"`
+		} `json:"comments"`
+	}
+	if err := json.Unmarshal([]byte(issueViewJSON), &view); err != nil {
+		return nil, fmt.Errorf("parse issue view: %w", err)
+	}
+
+	var ids []string
+	for _, c := range view.Comments {
+		if c.Author.Login == "runoq" {
+			continue
+		}
+		if strings.Contains(c.Body, "runoq:event") {
+			continue
+		}
+		hasThumbsUp := false
+		for _, rg := range c.ReactionGroups {
+			if rg.Content == "THUMBS_UP" && rg.Users.TotalCount > 0 {
+				hasThumbsUp = true
+				break
+			}
+		}
+		if hasThumbsUp {
+			continue
+		}
+		ids = append(ids, c.ID)
+	}
+	return ids, nil
+}
+
 func extractNumbers(s string) []int {
 	matches := numberPattern.FindAllString(s, -1)
 	nums := make([]int, 0, len(matches))

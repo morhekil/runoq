@@ -68,6 +68,8 @@ func (a *App) Run(_ context.Context) int {
 		return a.runMergeChecklists()
 	case "parse-agent-response":
 		return a.runParseAgentResponse()
+	case "find-unresponded-comments":
+		return a.runFindUnrespondedComments()
 	case "replace-proposal-in-body":
 		return a.runReplaceProposalInBody()
 	default:
@@ -229,6 +231,22 @@ func (a *App) runMergeChecklists() int {
 		right = a.args[2]
 	}
 	fmt.Fprintln(a.stdout, MergeChecklists(left, right))
+	return 0
+}
+
+func (a *App) runFindUnrespondedComments() int {
+	data, err := a.readStdin()
+	if err != nil {
+		return a.fail("read stdin: %v", err)
+	}
+	ids, err := FindUnrespondedCommentIDs(string(data))
+	if err != nil {
+		return a.fail("%v", err)
+	}
+	enc := json.NewEncoder(a.stdout)
+	if err := enc.Encode(ids); err != nil {
+		return a.fail("encode: %v", err)
+	}
 	return 0
 }
 

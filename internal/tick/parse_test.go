@@ -229,6 +229,65 @@ func TestParseAgentResponseInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestFindUnrespondedCommentIDs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		issueViewJSON string
+		wantIDs       []string
+	}{
+		{
+			name:          "no comments",
+			issueViewJSON: `{"comments":[]}`,
+		},
+		{
+			name:          "bot comment only",
+			issueViewJSON: `{"comments":[{"author":{"login":"runoq"},"body":"reply","id":"IC1"}]}`,
+		},
+		{
+			name:          "human comment without +1",
+			issueViewJSON: `{"comments":[{"author":{"login":"human"},"body":"question?","id":"IC1","reactionGroups":[]}]}`,
+			wantIDs:       []string{"IC1"},
+		},
+		{
+			name:          "human comment with +1 is skipped",
+			issueViewJSON: `{"comments":[{"author":{"login":"human"},"body":"done","id":"IC1","reactionGroups":[{"content":"THUMBS_UP","users":{"totalCount":1}}]}]}`,
+		},
+		{
+			name:          "human comment with eyes only is not skipped",
+			issueViewJSON: `{"comments":[{"author":{"login":"human"},"body":"q?","id":"IC1","reactionGroups":[{"content":"EYES","users":{"totalCount":1}}]}]}`,
+			wantIDs:       []string{"IC1"},
+		},
+		{
+			name:          "event-tagged comment skipped",
+			issueViewJSON: `{"comments":[{"author":{"login":"human"},"body":"runoq:event done","id":"IC1","reactionGroups":[]}]}`,
+		},
+		{
+			name: "multiple: one responded one not",
+			issueViewJSON: `{"comments":[
+				{"author":{"login":"human"},"body":"first","id":"IC1","reactionGroups":[{"content":"THUMBS_UP","users":{"totalCount":1}}]},
+				{"author":{"login":"runoq"},"body":"<!-- runoq:event -->\nreply","id":"IC2","reactionGroups":[]},
+				{"author":{"login":"human"},"body":"second","id":"IC3","reactionGroups":[]}
+			]}`,
+			wantIDs: []string{"IC3"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ids, err := FindUnrespondedCommentIDs(tt.issueViewJSON)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !stringSliceEqual(ids, tt.wantIDs) {
+				t.Errorf("got %v, want %v", ids, tt.wantIDs)
+			}
+		})
+	}
+}
+
 func intSliceEqual(a, b []int) bool {
 	if len(a) == 0 && len(b) == 0 {
 		return true
