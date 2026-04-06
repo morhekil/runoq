@@ -62,6 +62,11 @@ extract_proposal_json_from_text() {
   runoq::extract_marked_json_block "$tmp" 'runoq:payload:plan-proposal' 2>/dev/null || true
 }
 
+extract_fenced_json_from_text() {
+  local text="$1"
+  printf '%s' "$text" | perl -0ne 'if (/```json\s*(\{.*?\})\s*```/s) { print $1 }'
+}
+
 read_json_output() {
   local path="$1"
   local marker="$2"
@@ -110,6 +115,9 @@ adjustment_json_from_issue_view() {
   tmp="$(mktemp "${TMPDIR:-/tmp}/runoq-adjustment-text.XXXXXX")"
   printf '%s' "$text" >"$tmp"
   extracted="$(runoq::extract_marked_json_block "$tmp" 'runoq:payload:milestone-reviewer' 2>/dev/null || true)"
+  if [[ -z "$extracted" ]]; then
+    extracted="$(extract_fenced_json_from_text "$text")"
+  fi
   [[ -n "$extracted" ]] || return 1
   printf '%s\n' "$extracted"
 }

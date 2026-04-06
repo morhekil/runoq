@@ -581,6 +581,75 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+@test "tick applies approved adjustment issue from its fenced JSON body" {
+  project_dir="$TEST_TMPDIR/project"
+  make_git_repo "$project_dir" "git@github.com:owner/repo.git"
+  cat >"$project_dir/runoq.json" <<'EOF'
+{"plan":"docs/prd.md"}
+EOF
+  mkdir -p "$project_dir/docs"
+  printf '# Plan\n' >"$project_dir/docs/prd.md"
+  export TARGET_ROOT="$project_dir"
+
+  issue_queue_bin="$TEST_TMPDIR/fake-issue-queue"
+  write_fake_issue_queue_bin "$issue_queue_bin"
+  export TICK_ISSUE_QUEUE_LOG="$TEST_TMPDIR/issue-queue.log"
+  export TICK_ISSUE_QUEUE_STATE_FILE="$TEST_TMPDIR/issue-queue.state"
+  export TICK_ISSUE_QUEUE_CAPTURE_DIR="$TEST_TMPDIR/issue-queue-capture"
+
+  epic1_body="$(meta_body epic 1 '' implementation)"
+  epic2_body="$(meta_body epic 2 '' discovery)"
+  adjustment_labels='[{"name":"runoq:plan-approved"}]'
+  adjustment_body="$(cat <<'EOF'
+<!-- runoq:meta
+depends_on: []
+priority: 1
+estimated_complexity: low
+type: adjustment
+parent_epic: 10
+-->
+
+## Acceptance Criteria
+
+- [ ] Review proposed adjustments.
+
+1. modify: Add validation
+2. new_milestone: Debt cleanup
+
+```json
+{"milestone_number":10,"status":"complete","delivered_criteria":["A"],"missed_criteria":[],"learnings":["L"],"proposed_adjustments":[{"type":"modify","target_milestone_number":20,"title":"Add validation","description":"Add validation scope.","reason":"Needed"},{"type":"new_milestone","title":"Debt cleanup","description":"Clean up shortcuts","reason":"Debt"}]}
+```
+EOF
+)"
+  initial_list_json="$(jq -cn --argjson a "$(tick_issue_json 10 'Core formatter' OPEN "$epic1_body")" --argjson b "$(tick_issue_json 20 'Caching strategy' OPEN "$epic2_body")" --argjson c "$(tick_issue_json 11 'Review milestone adjustments' OPEN "$adjustment_body" "$adjustment_labels")" '[$a,$b,$c]')"
+  refreshed_list_json="$(jq -cn --argjson a "$(tick_issue_json 10 'Core formatter' CLOSED "$epic1_body")" --argjson b "$(tick_issue_json 20 'Caching strategy' OPEN "$epic2_body")" --argjson c "$(tick_issue_json 11 'Review milestone adjustments' OPEN "$adjustment_body" "$adjustment_labels")" '[$a,$b,$c]')"
+  adjustment_view_json="$(jq -cn --argjson number 11 --arg title 'Review milestone adjustments' --arg body "$adjustment_body" '{number:$number,title:$title,body:$body,comments:[{author:{login:"human"},body:"Approve item 1, reject item 2"}],labels:[{name:"runoq:plan-approved"}],state:"OPEN"}')"
+
+  scenario="$TEST_TMPDIR/scenario.json"
+  write_fake_gh_scenario "$scenario" <<EOF
+[
+  {"contains":["issue","list","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$initial_list_json" '$json')},
+  {"contains":["issue","view","11","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$adjustment_view_json" '$json')},
+  {"contains":["issue","edit","20","--repo","owner/repo"],"stdout":""},
+  {"contains":["issue","list","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$refreshed_list_json" '$json')}
+]
+EOF
+  use_fake_gh "$scenario" "$TEST_TMPDIR/gh.state" "$TEST_TMPDIR/gh.log" "$TEST_TMPDIR/gh-capture"
+
+  run env RUNOQ_TICK_ISSUE_QUEUE_SCRIPT="$issue_queue_bin" "$RUNOQ_ROOT/scripts/tick.sh"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Applied approvals from #11"* ]]
+  run grep -q 'set-status owner/repo 11 done' "$TICK_ISSUE_QUEUE_LOG"
+  [ "$status" -eq 0 ]
+  run grep -q 'set-status owner/repo 10 done' "$TICK_ISSUE_QUEUE_LOG"
+  [ "$status" -eq 0 ]
+  run grep -q 'create owner/repo Break down milestone into tasks' "$TICK_ISSUE_QUEUE_LOG"
+  [ "$status" -eq 0 ]
+  run grep -q 'Add validation scope.' "$TEST_TMPDIR/gh-capture/2.body"
+  [ "$status" -eq 0 ]
+}
+
 @test "tick forces adjustment issue for discovery milestones even with clean review" {
   project_dir="$TEST_TMPDIR/project"
   make_git_repo "$project_dir" "git@github.com:owner/repo.git"
