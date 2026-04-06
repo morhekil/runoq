@@ -354,6 +354,13 @@ run_tick_smoke() {
     "$(printf '%s' "$planning_view" | jq -e '(.comments // []) | any(.body // "" | contains("runoq:event"))' >/dev/null && printf true || printf false)" \
     "comment_reply_posted" \
     "Planning comment response was not posted."
+  add_check_or_failure \
+    "$(printf '%s' "$planning_view" | jq -e '
+      [.comments // [] | .[] | select((.author.login // "") != "runoq" and ((.body // "") | contains("runoq:event") | not))]
+      | last | .reactionGroups // [] | any(.content == "EYES" and (.users.totalCount // 0) > 0)
+    ' >/dev/null 2>&1 && printf true || printf false)" \
+    "comment_reaction_added" \
+    "No eyes reaction was added to the human comment on #${planning_number}."
 
   output="$(tick_once "$root")"
   add_step "awaiting_human_decision" "$output"
