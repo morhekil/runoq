@@ -3,6 +3,7 @@ package tick
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 )
@@ -148,6 +149,48 @@ func TestMergeChecklistsSubcommand(t *testing.T) {
 	}
 	if strings.TrimSpace(stdout.String()) != "- [ ] A\n- [ ] B" {
 		t.Errorf("output = %q", stdout.String())
+	}
+}
+
+func TestParseAgentResponseSubcommand(t *testing.T) {
+	t.Parallel()
+
+	input := `{"action":"approve","reply":"Ship it."}`
+	var stdout, stderr bytes.Buffer
+	app := New([]string{"parse-agent-response"}, strings.NewReader(input), &stdout, &stderr)
+
+	code := app.Run(t.Context())
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	var resp AgentResponse
+	if err := json.Unmarshal(stdout.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Action != ActionApprove {
+		t.Errorf("action = %q", resp.Action)
+	}
+}
+
+func TestReplaceProposalInBodySubcommand(t *testing.T) {
+	t.Parallel()
+
+	existingBody := "metadata\n\n<!-- runoq:proposal-start -->\nold proposal"
+	proposalFile := t.TempDir() + "/proposal.md"
+	os.WriteFile(proposalFile, []byte("new proposal"), 0o644)
+
+	var stdout, stderr bytes.Buffer
+	app := New([]string{"replace-proposal-in-body", proposalFile}, strings.NewReader(existingBody), &stdout, &stderr)
+
+	code := app.Run(t.Context())
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "new proposal") {
+		t.Errorf("output missing new proposal: %s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "old proposal") {
+		t.Error("output still contains old proposal")
 	}
 }
 

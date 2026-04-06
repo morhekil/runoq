@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 )
 
 const usageText = `Usage:
@@ -17,6 +18,8 @@ const usageText = `Usage:
   tick-fmt human-comment-selection      < issue-view.json
   tick-fmt select-items --selection JSON < proposal.json
   tick-fmt merge-checklists <left> <right>
+  tick-fmt parse-agent-response         < response.json
+  tick-fmt replace-proposal-in-body <proposal-file> < body
 `
 
 // App is the tick-fmt CLI application.
@@ -63,6 +66,10 @@ func (a *App) Run(_ context.Context) int {
 		return a.runSelectItems()
 	case "merge-checklists":
 		return a.runMergeChecklists()
+	case "parse-agent-response":
+		return a.runParseAgentResponse()
+	case "replace-proposal-in-body":
+		return a.runReplaceProposalInBody()
 	default:
 		fmt.Fprintf(a.stderr, "unknown subcommand: %s\n", a.args[0])
 		fmt.Fprint(a.stderr, usageText)
@@ -222,5 +229,39 @@ func (a *App) runMergeChecklists() int {
 		right = a.args[2]
 	}
 	fmt.Fprintln(a.stdout, MergeChecklists(left, right))
+	return 0
+}
+
+func (a *App) runParseAgentResponse() int {
+	data, err := a.readStdin()
+	if err != nil {
+		return a.fail("read stdin: %v", err)
+	}
+	resp, err := ParseAgentResponse(string(data))
+	if err != nil {
+		return a.fail("%v", err)
+	}
+	enc := json.NewEncoder(a.stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(resp); err != nil {
+		return a.fail("encode: %v", err)
+	}
+	return 0
+}
+
+func (a *App) runReplaceProposalInBody() int {
+	if len(a.args) < 2 {
+		return a.fail("replace-proposal-in-body requires a proposal file argument")
+	}
+	proposalData, err := os.ReadFile(a.args[1])
+	if err != nil {
+		return a.fail("read proposal file: %v", err)
+	}
+	bodyData, err := a.readStdin()
+	if err != nil {
+		return a.fail("read stdin: %v", err)
+	}
+	result := ReplaceProposalInBody(string(bodyData), string(proposalData))
+	fmt.Fprint(a.stdout, result)
 	return 0
 }
