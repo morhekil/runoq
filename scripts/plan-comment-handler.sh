@@ -61,12 +61,19 @@ main() {
   # Dispatch side effects based on action
   case "$action" in
     change-request)
-      local revised_proposal_json proposal_file proposal_body_file current_body new_body_file
+      local revised_proposal_json proposal_body_file current_body new_body_file review_type
       revised_proposal_json="$(printf '%s' "$action_json" | jq -c '.revised_proposal')"
-      proposal_file="$(mktemp "${TMPDIR:-/tmp}/runoq-revised-proposal.XXXXXX")"
-      printf '%s\n' "$revised_proposal_json" >"$proposal_file"
+      # Determine review type from the issue body context
+      review_type="milestone"
+      if printf '%s' "$issue_json" | jq -r '.body // ""' | grep -q 'Proposed tasks'; then
+        review_type="task"
+      fi
       proposal_body_file="$(mktemp "${TMPDIR:-/tmp}/runoq-revised-body.XXXXXX")"
-      "$(runoq::root)/scripts/tick-fmt.sh" format-proposal < "$proposal_file" >"$proposal_body_file"
+      jq -cn \
+        --argjson proposal "$revised_proposal_json" \
+        --arg review_type "$review_type" \
+        '{proposal:$proposal, technical:{verdict:"",score:"",checklist:""}, product:{verdict:"",score:"",checklist:""}, review_type:$review_type}' \
+        | "$(runoq::root)/scripts/tick-fmt.sh" proposal-comment-body >"$proposal_body_file"
       current_body="$(runoq::gh issue view "$issue_number" --repo "$repo" --json body --jq '.body // ""')"
       new_body_file="$(mktemp "${TMPDIR:-/tmp}/runoq-new-body.XXXXXX")"
       printf '%s' "$current_body" | "$(runoq::root)/scripts/tick-fmt.sh" replace-proposal-in-body "$proposal_body_file" >"$new_body_file"

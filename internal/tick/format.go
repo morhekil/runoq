@@ -124,12 +124,14 @@ func FormatPlanProposal(p Proposal) string {
 func FormatProposalCommentBody(input ProposalCommentInput) string {
 	var b strings.Builder
 
-	// Review scores table
-	b.WriteString("## Review scores\n\n")
-	b.WriteString("| Reviewer | Score | Verdict |\n")
-	b.WriteString("|----------|-------|---------|\n")
-	fmt.Fprintf(&b, "| Technical | %s | %s |\n", input.Technical.Score, input.Technical.Verdict)
-	fmt.Fprintf(&b, "| Product | %s | %s |\n\n", input.Product.Score, input.Product.Verdict)
+	// Review scores table (omitted when scores are empty, e.g. revised proposals)
+	if input.Technical.Score != "" || input.Product.Score != "" {
+		b.WriteString("## Review scores\n\n")
+		b.WriteString("| Reviewer | Score | Verdict |\n")
+		b.WriteString("|----------|-------|---------|\n")
+		fmt.Fprintf(&b, "| Technical | %s | %s |\n", input.Technical.Score, input.Technical.Verdict)
+		fmt.Fprintf(&b, "| Product | %s | %s |\n\n", input.Product.Score, input.Product.Verdict)
+	}
 
 	// Process-level warning (e.g. max rounds reached)
 	if input.Warning != "" {
