@@ -294,11 +294,12 @@ handle_approved_planning() {
       runoq::info "created epic #$created_number: $title"
       if [[ -z "$first_milestone" ]]; then
         first_milestone="$created_number"
+        first_milestone_title="$title"
       fi
     done < <(printf '%s' "$filtered_json" | jq -c '.items[]')
     if [[ -n "$first_milestone" ]]; then
       runoq::info "creating planning issue for first milestone #$first_milestone"
-      create_planning_issue "$issue_queue_script" "$repo" "$first_milestone" "Break down milestone into tasks" "## Acceptance Criteria\n\n- [ ] Tasks proposed." >/dev/null
+      create_planning_issue "$issue_queue_script" "$repo" "$first_milestone" "Break down ${first_milestone_title} into tasks" "## Acceptance Criteria\n\n- [ ] Tasks proposed." >/dev/null
     fi
     runoq::info "closing review #$review_number and parent #$review_parent"
     "$issue_queue_script" set-status "$repo" "$review_number" done >/dev/null
@@ -377,8 +378,10 @@ handle_approved_adjustment() {
   if [[ -n "$next_epic" ]]; then
     local next_number
     next_number="$(printf '%s' "$next_epic" | jq -r '.number')"
+    local next_title
+    next_title="$(printf '%s' "$next_epic" | jq -r '.title')"
     runoq::info "seeding planning issue for next epic #$next_number"
-    create_planning_issue "$issue_queue_script" "$repo" "$next_number" "Break down milestone into tasks" "## Acceptance Criteria\n\n- [ ] Tasks proposed." >/dev/null
+    create_planning_issue "$issue_queue_script" "$repo" "$next_number" "Break down ${next_title} into tasks" "## Acceptance Criteria\n\n- [ ] Tasks proposed." >/dev/null
   fi
 
   runoq::success "Applied adjustments from #$review_number"
