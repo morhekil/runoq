@@ -3,6 +3,7 @@ package tick
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -178,7 +179,7 @@ func TestFormatProposalCommentBodyTaskMode(t *testing.T) {
 				{
 					Title:               "Implement formatter",
 					Type:                "task",
-					Body:                "## Context\nBuild the core formatter.",
+					Body:                "## Context\n\nAdd the base `formatProgress(complete, total)` function.\n\n## Acceptance Criteria\n\n- [ ] formatProgress returns a human-readable string",
 					EstimatedComplexity: "medium",
 					ComplexityRationale: "touches two modules",
 					Priority:            new(1),
@@ -203,6 +204,14 @@ func TestFormatProposalCommentBodyTaskMode(t *testing.T) {
 	}
 	if !containsString(got, "touches two modules") {
 		t.Error("missing complexity rationale")
+	}
+	// Body content should be rendered (not just in the JSON details block)
+	bodyIdx := strings.Index(got, "formatProgress(complete, total)")
+	detailsIdx := strings.Index(got, "<details>")
+	if bodyIdx < 0 {
+		t.Error("missing task body content")
+	} else if detailsIdx >= 0 && bodyIdx > detailsIdx {
+		t.Error("task body content only appears inside details block, should be rendered in main content")
 	}
 }
 

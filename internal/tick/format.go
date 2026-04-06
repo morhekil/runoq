@@ -108,6 +108,12 @@ func FormatPlanProposal(p Proposal) string {
 			}
 			b.WriteString("\n")
 		}
+
+		if item.Body != "" {
+			b.WriteString("\n")
+			b.WriteString(item.Body)
+			b.WriteString("\n")
+		}
 	}
 
 	return b.String()
