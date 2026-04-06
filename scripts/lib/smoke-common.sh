@@ -116,6 +116,10 @@ operator_login() {
   operator_gh api user --jq '.login'
 }
 
+operator_token() {
+  operator_gh auth token
+}
+
 smoke_retry_delay_seconds() {
   printf '%s\n' "${RUNOQ_SMOKE_RETRY_DELAY_SECONDS:-3}"
 }
@@ -140,9 +144,12 @@ push_managed_repo() {
   local target_dir="$1"
   local repo="$2"
   local attempts="${RUNOQ_SMOKE_CREATE_REPO_ATTEMPTS:-10}"
-  local delay remote_url output status attempt
+  local delay remote_url push_url token output status attempt
   delay="$(smoke_retry_delay_seconds)"
   remote_url="https://github.com/${repo}.git"
+  token="$(operator_token)"
+  [[ -n "$token" ]] || runoq::die "Failed to resolve operator gh auth token for managed repo push."
+  push_url="https://x-access-token:${token}@github.com/${repo}.git"
 
   if git -C "$target_dir" remote get-url origin >/dev/null 2>&1; then
     git -C "$target_dir" remote set-url origin "$remote_url"
@@ -152,7 +159,7 @@ push_managed_repo() {
 
   for ((attempt = 1; attempt <= attempts; attempt++)); do
     set +e
-    output="$(GIT_TERMINAL_PROMPT=0 git -C "$target_dir" push -u origin HEAD:main 2>&1)"
+    output="$(GIT_TERMINAL_PROMPT=0 git -C "$target_dir" push "$push_url" HEAD:main 2>&1)"
     status="$?"
     set -e
     if [[ "$status" -eq 0 ]]; then

@@ -278,6 +278,10 @@ EOF
     "stdout": "{\"name\":\"runoq-live-eval-run-123\"}"
   },
   {
+    "contains": ["auth", "token"],
+    "stdout": "test-token"
+  },
+  {
     "contains": ["repo", "edit", "owner/runoq-live-eval-run-123"],
     "stdout": ""
   }
@@ -302,6 +306,71 @@ EOF
   run cat "$push_count_file"
   [ "$status" -eq 0 ]
   [ "$output" = "2" ]
+}
+
+@test "managed repo creation uses the operator token for git push" {
+  scenario="$TEST_TMPDIR/scenario.json"
+  target_dir="$TEST_TMPDIR/target"
+  git_helper_dir="$TEST_TMPDIR/git-bin"
+  git_log="$TEST_TMPDIR/git.log"
+  real_git="$(command -v git)"
+  make_git_repo "$target_dir"
+  mkdir -p "$git_helper_dir"
+  cat >"$git_helper_dir/git" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+log_file="$git_log"
+if [[ "\${1:-}" == "-C" && "\${3:-}" == "push" ]]; then
+  printf '%s\n' "\$*" >>"\$log_file"
+  exit 0
+fi
+if [[ "\${1:-}" == "push" ]]; then
+  printf '%s\n' "\$*" >>"\$log_file"
+  exit 0
+fi
+exec "$real_git" "\$@"
+EOF
+  chmod +x "$git_helper_dir/git"
+  write_fake_gh_scenario "$scenario" <<'EOF'
+[
+  {
+    "contains": ["repo", "create", "owner/runoq-live-eval-run-123"],
+    "stdout": "https://github.com/owner/runoq-live-eval-run-123"
+  },
+  {
+    "contains": ["repo", "view", "owner/runoq-live-eval-run-123"],
+    "stdout": "{\"name\":\"runoq-live-eval-run-123\"}"
+  },
+  {
+    "contains": ["auth", "token"],
+    "stdout": "test-token"
+  },
+  {
+    "contains": ["repo", "edit", "owner/runoq-live-eval-run-123"],
+    "stdout": ""
+  }
+]
+EOF
+  use_fake_gh "$scenario"
+
+  run bash -lc '
+    set -euo pipefail
+    export PATH="'"$git_helper_dir"':$PATH"
+    export RUNOQ_ROOT="'"$RUNOQ_ROOT"'"
+    export RUNOQ_CONFIG="'"$RUNOQ_CONFIG"'"
+    export GH_BIN="'"$GH_BIN"'"
+    export RUNOQ_SMOKE_REPO_OWNER=owner
+    export RUNOQ_SMOKE_REPO_PREFIX=runoq-live-eval
+    export RUNOQ_SMOKE_RETRY_DELAY_SECONDS=0
+    source "'"$RUNOQ_ROOT"'/scripts/lib/smoke-common.sh"
+    create_managed_repo "'"$target_dir"'" run-123 >/dev/null
+    git -C "'"$target_dir"'" remote get-url origin
+  '
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "https://github.com/owner/runoq-live-eval-run-123.git" ]
+  run grep -q 'https://x-access-token:test-token@github.com/owner/runoq-live-eval-run-123.git' "$git_log"
+  [ "$status" -eq 0 ]
 }
 
 @test "operator_gh runs without inherited bot token" {

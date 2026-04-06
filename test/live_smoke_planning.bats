@@ -68,6 +68,10 @@ EOF
     "stdout": "{\"name\":\"runoq-live-eval-test\"}"
   },
   {
+    "contains": ["auth", "token"],
+    "stdout": "test-token"
+  },
+  {
     "contains": ["repo", "edit", "owner/runoq-live-eval-"],
     "stdout": ""
   },
