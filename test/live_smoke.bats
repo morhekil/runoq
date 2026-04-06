@@ -701,6 +701,44 @@ EOF
   grep -F "[smoke-lifecycle] deleted managed repo owner/repo-one" "$stderr_file"
 }
 
+@test "live lifecycle cleanup deletes repos via operator auth not app token" {
+  manifest_path="$TEST_TMPDIR/managed-repos.json"
+  printf '%s\n' '[
+    {
+      "repo": "owner/repo-one",
+      "run_id": "run-1",
+      "cleanup_state": "active",
+      "deleted_at": null
+    }
+  ]' >"$manifest_path"
+
+  gh_wrapper="$TEST_TMPDIR/gh-wrapper"
+  cat >"$gh_wrapper" <<'WRAPPER'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "repo" && "${2:-}" == "delete" ]]; then
+  if [[ -n "${GH_TOKEN:-}" ]]; then
+    echo "FAIL: repo delete called with GH_TOKEN set (app token leak)" >&2
+    exit 1
+  fi
+  exit 0
+fi
+# auth status
+exit 0
+WRAPPER
+  chmod +x "$gh_wrapper"
+  export GH_BIN="$gh_wrapper"
+  export GH_TOKEN="app-token-should-be-stripped"
+  export RUNOQ_SMOKE_MANIFEST_PATH="$manifest_path"
+  export RUNOQ_NO_AUTO_TOKEN=1
+
+  run "$RUNOQ_ROOT/scripts/smoke-lifecycle.sh" cleanup --repo owner/repo-one
+
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | jq -r '.status')" = "ok" ]
+  [ "$(printf '%s' "$output" | jq -r '.deleted[0]')" = "owner/repo-one" ]
+}
+
 @test "lifecycle Claude capture wrapper records invocation artifacts" {
   wrapper_path="$TEST_TMPDIR/claude-capture"
   capture_dir="$TEST_TMPDIR/claude-artifacts"

@@ -1590,7 +1590,7 @@ cleanup_lifecycle() {
     [[ -n "$entry" ]] || continue
     repo="$(printf '%s' "$entry" | jq -r '.repo')"
     smoke_log "deleting managed repo ${repo}"
-    if runoq::gh repo delete "$repo" --yes >/dev/null 2>&1; then
+    if operator_gh repo delete "$repo" --yes >/dev/null 2>&1; then
       manifest_mark_deleted "$repo"
       deleted_json="$(jq -n --argjson deleted "$deleted_json" --arg repo "$repo" '$deleted + [$repo]')"
       smoke_log "deleted managed repo ${repo}"
