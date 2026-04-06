@@ -260,6 +260,47 @@ load test_helper
   [ "$status" -eq 0 ]
 }
 
+@test "milestone decomposer prompt documents milestone-only output contract" {
+  run test -f "$RUNOQ_ROOT/.claude/agents/plan-decomposer.md"
+  [ "$status" -ne 0 ]
+  run test -f "$RUNOQ_ROOT/.claude/agents/milestone-decomposer.md"
+  [ "$status" -eq 0 ]
+  run grep -n '^name: milestone-decomposer$' "$RUNOQ_ROOT/.claude/agents/milestone-decomposer.md"
+  [ "$status" -eq 0 ]
+  run grep -n '^model: claude-opus-4-6$' "$RUNOQ_ROOT/.claude/agents/milestone-decomposer.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'runoq:payload:milestone-decomposer' "$RUNOQ_ROOT/.claude/agents/milestone-decomposer.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'runoq:payload:plan-decomposer' "$RUNOQ_ROOT/.claude/agents/milestone-decomposer.md"
+  [ "$status" -ne 0 ]
+  run grep -n '"key"' "$RUNOQ_ROOT/.claude/agents/milestone-decomposer.md"
+  [ "$status" -eq 0 ]
+  run grep -n '"type"' "$RUNOQ_ROOT/.claude/agents/milestone-decomposer.md"
+  [ "$status" -eq 0 ]
+  run grep -n '"goal"' "$RUNOQ_ROOT/.claude/agents/milestone-decomposer.md"
+  [ "$status" -eq 0 ]
+  run grep -n '"criteria"' "$RUNOQ_ROOT/.claude/agents/milestone-decomposer.md"
+  [ "$status" -eq 0 ]
+  run grep -n '"scope"' "$RUNOQ_ROOT/.claude/agents/milestone-decomposer.md"
+  [ "$status" -eq 0 ]
+  run grep -n '"sequencing_rationale"' "$RUNOQ_ROOT/.claude/agents/milestone-decomposer.md"
+  [ "$status" -eq 0 ]
+  run grep -n '"priority"' "$RUNOQ_ROOT/.claude/agents/milestone-decomposer.md"
+  [ "$status" -eq 0 ]
+  run grep -n '"estimated_complexity"' "$RUNOQ_ROOT/.claude/agents/milestone-decomposer.md"
+  [ "$status" -ne 0 ]
+  run grep -n '"complexity_rationale"' "$RUNOQ_ROOT/.claude/agents/milestone-decomposer.md"
+  [ "$status" -ne 0 ]
+  run grep -n '"parent_epic_key"' "$RUNOQ_ROOT/.claude/agents/milestone-decomposer.md"
+  [ "$status" -ne 0 ]
+  run grep -n 'implementation.*discovery.*migration.*cleanup' "$RUNOQ_ROOT/.claude/agents/milestone-decomposer.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'Do NOT create issues' "$RUNOQ_ROOT/.claude/agents/milestone-decomposer.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'Do NOT read source code' "$RUNOQ_ROOT/.claude/agents/milestone-decomposer.md"
+  [ "$status" -eq 0 ]
+}
+
 @test "task decomposer prompt documents single-milestone task output" {
   run grep -n '^name: task-decomposer$' "$RUNOQ_ROOT/.claude/agents/task-decomposer.md"
   [ "$status" -eq 0 ]

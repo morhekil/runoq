@@ -52,7 +52,9 @@ EOF
 }
 
 normalize_runtime_stderr() {
-  printf '%s' "$1" | sed -E 's/plan-decomposer-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}-[0-9]+/plan-decomposer-NORMALIZED/g'
+  printf '%s' "$1" | sed -E \
+    -e 's/milestone-decomposer-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}-[0-9]+/milestone-decomposer-NORMALIZED/g' \
+    -e 's/task-decomposer-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}-[0-9]+/task-decomposer-NORMALIZED/g'
 }
 
 @test "CLI wrapper defaults to runtime, accepts explicit runtime, and rejects shell override" {

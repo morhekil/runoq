@@ -16,7 +16,7 @@ usage() {
 Usage:
   plan.sh <repo> <plan-file> [--auto-confirm] [--dry-run]
 
-Decomposes a plan document into GitHub issues using the plan-decomposer agent.
+Decomposes a plan document into GitHub issues using the milestone and task decomposer agents.
 
 Options:
   --auto-confirm   Skip interactive confirmation and create issues immediately.
@@ -72,42 +72,125 @@ log_error() {
 # Phase 1: Call Claude to decompose the plan
 ###############################################################################
 
-decompose_plan() {
-  local plan_file="$1"
+call_decomposer() {
+  local agent="$1"
+  local marker="$2"
+  local payload="$3"
   local output_file
-
-  local payload
-  payload="$(jq -n \
-    --arg planPath "$plan_file" \
-    --arg templatePath "$RUNOQ_ROOT/templates/issue-template.md" \
-    '{
-      planPath: $planPath,
-      templatePath: $templatePath,
-      examplePlans: {
-        broad: ($planPath | split("/")[:-1] | join("/") + "/../broad-example.md"),
-        narrow: ($planPath | split("/")[:-1] | join("/") + "/../narrow-example.md"),
-        untestable: ($planPath | split("/")[:-1] | join("/") + "/../untestable-example.md")
-      }
-    }')"
-
   output_file="$(mktemp "${TMPDIR:-/tmp}/runoq-plan-decompose.XXXXXX")"
-  log_info "calling plan-decomposer agent"
+  log_info "calling ${agent} agent"
   runoq::claude_stream "$output_file" \
     --permission-mode bypassPermissions \
-    --agent plan-decomposer --add-dir "$RUNOQ_ROOT" \
+    --agent "$agent" --add-dir "$RUNOQ_ROOT" \
     -- "$payload"
 
   local decomposition
-  decomposition="$(extract_marked_block "$output_file" 'runoq:payload:plan-decomposer' 2>/dev/null || printf '')"
+  decomposition="$(extract_marked_block "$output_file" "$marker" 2>/dev/null || printf '')"
 
   if [[ -z "$decomposition" ]] || ! printf '%s' "$decomposition" | jq -e '.items' >/dev/null 2>&1; then
-    log_error "plan-decomposer did not return valid JSON"
+    log_error "${agent} did not return valid JSON"
     log_error "output file: $output_file"
     rm -f "$output_file"
     return 1
   fi
 
   rm -f "$output_file"
+  printf '%s\n' "$decomposition"
+}
+
+build_milestone_epic_body() {
+  local milestone_json="$1"
+  printf '%s' "$milestone_json" | jq -r '
+    "## Context\n\n" +
+    "Goal: " + (.goal // "") + "\n\n" +
+    "Scope: " + ((.scope // []) | join(", ")) + "\n\n" +
+    "Sequencing rationale: " + (.sequencing_rationale // "") + "\n\n" +
+    "## Acceptance Criteria\n\n" +
+    (((.criteria // []) | map("- [ ] " + .)) | join("\n"))
+  '
+}
+
+prefix_task_keys() {
+  local milestone_key="$1"
+  local tasks_json="$2"
+  printf '%s' "$tasks_json" | jq --arg milestone_key "$milestone_key" '
+    .items |= map(
+      (.key) as $original_key
+      | .key = ($milestone_key + "::" + $original_key)
+      | .depends_on_keys = ((.depends_on_keys // []) | map($milestone_key + "::" + .))
+      | .parent_epic_key = $milestone_key
+    )
+  '
+}
+
+decompose_plan() {
+  local plan_file="$1"
+  local milestone_payload milestones_json decomposition warnings_json
+
+  milestone_payload="$(jq -n \
+    --arg planPath "$plan_file" \
+    --arg templatePath "$RUNOQ_ROOT/templates/issue-template.md" \
+    '{
+      planPath: $planPath,
+      templatePath: $templatePath
+    }')"
+  milestones_json="$(call_decomposer "milestone-decomposer" 'runoq:payload:milestone-decomposer' "$milestone_payload")" ||
+    return 1
+
+  decomposition='{"items":[],"warnings":[]}'
+  warnings_json="$(printf '%s' "$milestones_json" | jq '.warnings // []')"
+  decomposition="$(printf '%s' "$decomposition" | jq --argjson warnings "$warnings_json" '.warnings = $warnings')"
+
+  while IFS= read -r milestone; do
+    [[ -n "$milestone" ]] || continue
+    local milestone_key milestone_tmp task_payload tasks_json prefixed_tasks epic_item children_json task_warnings
+    milestone_key="$(printf '%s' "$milestone" | jq -r '.key')"
+    milestone_tmp="$(mktemp "${TMPDIR:-/tmp}/runoq-milestone.XXXXXX")"
+    printf '%s\n' "$milestone" >"$milestone_tmp"
+
+    task_payload="$(jq -n \
+      --arg milestonePath "$milestone_tmp" \
+      --arg planPath "$plan_file" \
+      --arg priorFindingsPath "" \
+      --arg templatePath "$RUNOQ_ROOT/templates/issue-template.md" '
+      {
+        milestonePath: $milestonePath,
+        planPath: $planPath,
+        priorFindingsPath: $priorFindingsPath,
+        templatePath: $templatePath
+      }')"
+    tasks_json="$(call_decomposer "task-decomposer" 'runoq:payload:task-decomposer' "$task_payload")" ||
+      return 1
+    prefixed_tasks="$(prefix_task_keys "$milestone_key" "$tasks_json")"
+    children_json="$(printf '%s' "$prefixed_tasks" | jq '[.items[] | .key]')"
+    epic_item="$(jq -n \
+      --argjson milestone "$milestone" \
+      --arg body "$(build_milestone_epic_body "$milestone")" \
+      --argjson children "$children_json" '
+      {
+        key: $milestone.key,
+        type: "epic",
+        title: $milestone.title,
+        body: $body,
+        priority: ($milestone.priority // 1),
+        estimated_complexity: null,
+        complexity_rationale: null,
+        depends_on_keys: [],
+        children_keys: $children,
+        milestone_type: $milestone.type
+      }')"
+    decomposition="$(printf '%s' "$decomposition" | jq \
+      --argjson epic "$epic_item" \
+      --argjson tasks "$(printf '%s' "$prefixed_tasks" | jq '.items')" '
+      .items += [$epic] + $tasks
+    ')"
+
+    task_warnings="$(printf '%s' "$tasks_json" | jq --arg title "$(printf '%s' "$milestone" | jq -r '.title')" '
+      (.warnings // []) | map($title + ": " + .)
+    ')"
+    decomposition="$(printf '%s' "$decomposition" | jq --argjson warnings "$task_warnings" '.warnings += $warnings')"
+  done < <(printf '%s' "$milestones_json" | jq -c '.items[]')
+
   printf '%s\n' "$decomposition"
 }
 
@@ -221,20 +304,27 @@ create_issues() {
     item_type="$(printf '%s' "$item" | jq -r '.type')"
     [[ "$item_type" == "epic" ]] || continue
 
-    local key title body priority complexity
+    local key title body priority complexity milestone_type
     key="$(printf '%s' "$item" | jq -r '.key')"
     title="$(printf '%s' "$item" | jq -r '.title')"
     body="$(printf '%s' "$item" | jq -r '.body')"
     priority="$(printf '%s' "$item" | jq -r '.priority // 1')"
     complexity="$(printf '%s' "$item" | jq -r '.estimated_complexity // "high"')"
+    milestone_type="$(printf '%s' "$item" | jq -r '.milestone_type // empty')"
 
     log_info "creating epic: ${title}"
+    local args=(
+      "$SCRIPTS_DIR/gh-issue-queue.sh" create "$repo" "$title" "$body"
+      --priority "$priority"
+      --estimated-complexity "$complexity"
+      --type epic
+    )
+    if [[ -n "$milestone_type" ]]; then
+      args+=(--milestone-type "$milestone_type")
+    fi
+
     local create_output issue_url issue_number
-    create_output="$(runoq::retry 3 5 \
-      "$SCRIPTS_DIR/gh-issue-queue.sh" create "$repo" "$title" "$body" \
-        --priority "$priority" \
-        --estimated-complexity "$complexity" \
-        --type epic)" || runoq::die "Failed to create epic: ${title}"
+    create_output="$(runoq::retry 3 5 "${args[@]}")" || runoq::die "Failed to create epic: ${title}"
 
     issue_url="$(printf '%s' "$create_output" | jq -r '.url')"
     issue_number="$(printf '%s' "$issue_url" | grep -oE '[0-9]+$')"

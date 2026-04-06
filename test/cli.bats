@@ -134,7 +134,7 @@ EOF
   export GH_TOKEN="existing-token"
   resolved_project_dir="$(cd "$project_dir" && pwd -P)"
 
-  # Fake claude must return a valid plan-decomposer payload so plan.sh can parse it
+  # Fake claude must return valid milestone and task decomposer payloads so plan.sh can parse them
   local fake_claude_script="$TEST_TMPDIR/fake-claude"
   cat >"$fake_claude_script" <<'FAKECLAUDE'
 #!/usr/bin/env bash
@@ -142,10 +142,24 @@ set -euo pipefail
 if [[ -n "${FAKE_CLAUDE_LOG:-}" ]]; then
   printf '%s\n' "$*" >>"$FAKE_CLAUDE_LOG"
 fi
-cat <<'EOF'
-{"type":"assistant","message":{"content":[{"type":"text","text":"<!-- runoq:payload:plan-decomposer -->\n```json\n{\"items\":[],\"warnings\":[]}\n```"}]}}
-{"type":"result","result":"<!-- runoq:payload:plan-decomposer -->\n```json\n{\"items\":[],\"warnings\":[]}\n```"}
+case " $* " in
+  *" --agent milestone-decomposer "*)
+    cat <<'EOF'
+{"type":"assistant","message":{"content":[{"type":"text","text":"<!-- runoq:payload:milestone-decomposer -->\n```json\n{\"items\":[{\"key\":\"m1\",\"type\":\"implementation\",\"title\":\"Milestone 1\",\"goal\":\"Goal\",\"criteria\":[\"Done\"],\"scope\":[\"core\"],\"sequencing_rationale\":\"First step\",\"priority\":1}],\"warnings\":[]}\n```"}]}}
+{"type":"result","result":"<!-- runoq:payload:milestone-decomposer -->\n```json\n{\"items\":[{\"key\":\"m1\",\"type\":\"implementation\",\"title\":\"Milestone 1\",\"goal\":\"Goal\",\"criteria\":[\"Done\"],\"scope\":[\"core\"],\"sequencing_rationale\":\"First step\",\"priority\":1}],\"warnings\":[]}\n```"}
 EOF
+    ;;
+  *" --agent task-decomposer "*)
+    cat <<'EOF'
+{"type":"assistant","message":{"content":[{"type":"text","text":"<!-- runoq:payload:task-decomposer -->\n```json\n{\"items\":[{\"key\":\"task-1\",\"type\":\"task\",\"title\":\"Ship task\",\"body\":\"Body\",\"priority\":1,\"estimated_complexity\":\"medium\",\"complexity_rationale\":\"Touches multiple steps.\",\"depends_on_keys\":[]}],\"warnings\":[]}\n```"}]}}
+{"type":"result","result":"<!-- runoq:payload:task-decomposer -->\n```json\n{\"items\":[{\"key\":\"task-1\",\"type\":\"task\",\"title\":\"Ship task\",\"body\":\"Body\",\"priority\":1,\"estimated_complexity\":\"medium\",\"complexity_rationale\":\"Touches multiple steps.\",\"depends_on_keys\":[]}],\"warnings\":[]}\n```"}
+EOF
+    ;;
+  *)
+    echo "unexpected agent invocation: $*" >&2
+    exit 1
+    ;;
+esac
 FAKECLAUDE
   chmod +x "$fake_claude_script"
   export RUNOQ_CLAUDE_BIN="$fake_claude_script"
@@ -155,7 +169,8 @@ FAKECLAUDE
   [ "$status" -eq 0 ]
   run cat "$FAKE_CLAUDE_LOG"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--agent plan-decomposer --add-dir $RUNOQ_ROOT"* ]]
+  [[ "$output" == *"--agent milestone-decomposer --add-dir $RUNOQ_ROOT"* ]]
+  [[ "$output" == *"--agent task-decomposer --add-dir $RUNOQ_ROOT"* ]]
   # Verify the payload contains an absolute path to the plan file (not a relative one)
   [[ "$output" == *'"planPath": "/'* ]]
   [[ "$output" == *"/docs/plan.md"* ]]
@@ -169,7 +184,7 @@ FAKECLAUDE
   [ -f "$project_dir/$capture_dir/response.txt" ]
   run grep -F -- '"planPath": "' "$project_dir/$capture_dir/request.txt"
   [ "$status" -eq 0 ]
-  run grep -F -- 'runoq:payload:plan-decomposer' "$project_dir/$capture_dir/response.txt"
+  run bash -lc 'cd "'"$project_dir"'" && grep -R -F -- "runoq:payload:milestone-decomposer" log/claude/*/response.txt'
   [ "$status" -eq 0 ]
 }
 
@@ -190,10 +205,24 @@ EOF
   cat >"$fake_claude_script" <<'FAKECLAUDE'
 #!/usr/bin/env bash
 set -euo pipefail
-cat <<'EOF'
-{"type":"assistant","message":{"content":[{"type":"text","text":"<!-- runoq:payload:plan-decomposer -->\n```json\n{\"items\":[],\"warnings\":[]}\n```"}]}}
-{"type":"result","result":"<!-- runoq:payload:plan-decomposer -->\n```json\n{\"items\":[],\"warnings\":[]}\n```"}
+case " $* " in
+  *" --agent milestone-decomposer "*)
+    cat <<'EOF'
+{"type":"assistant","message":{"content":[{"type":"text","text":"<!-- runoq:payload:milestone-decomposer -->\n```json\n{\"items\":[{\"key\":\"m1\",\"type\":\"implementation\",\"title\":\"Milestone 1\",\"goal\":\"Goal\",\"criteria\":[\"Done\"],\"scope\":[\"core\"],\"sequencing_rationale\":\"First step\",\"priority\":1}],\"warnings\":[]}\n```"}]}}
+{"type":"result","result":"<!-- runoq:payload:milestone-decomposer -->\n```json\n{\"items\":[{\"key\":\"m1\",\"type\":\"implementation\",\"title\":\"Milestone 1\",\"goal\":\"Goal\",\"criteria\":[\"Done\"],\"scope\":[\"core\"],\"sequencing_rationale\":\"First step\",\"priority\":1}],\"warnings\":[]}\n```"}
 EOF
+    ;;
+  *" --agent task-decomposer "*)
+    cat <<'EOF'
+{"type":"assistant","message":{"content":[{"type":"text","text":"<!-- runoq:payload:task-decomposer -->\n```json\n{\"items\":[],\"warnings\":[]}\n```"}]}}
+{"type":"result","result":"<!-- runoq:payload:task-decomposer -->\n```json\n{\"items\":[],\"warnings\":[]}\n```"}
+EOF
+    ;;
+  *)
+    echo "unexpected agent invocation: $*" >&2
+    exit 1
+    ;;
+esac
 FAKECLAUDE
   chmod +x "$fake_claude_script"
   export RUNOQ_CLAUDE_BIN="$fake_claude_script"
@@ -222,10 +251,24 @@ FAKECLAUDE
   cat >"$fake_claude_script" <<'FAKECLAUDE'
 #!/usr/bin/env bash
 set -euo pipefail
-cat <<'EOF'
-{"type":"assistant","message":{"content":[{"type":"text","text":"<!-- runoq:payload:plan-decomposer -->\n```json\n{\"items\":[{\"key\":\"task-1\",\"type\":\"task\",\"title\":\"Ship task\",\"body\":\"Body\",\"priority\":1,\"estimated_complexity\":\"medium\",\"complexity_rationale\":\"Touches multiple steps.\",\"depends_on_keys\":[]}],\"warnings\":[]}\n```"}]}}
+case " $* " in
+  *" --agent milestone-decomposer "*)
+    cat <<'EOF'
+{"type":"assistant","message":{"content":[{"type":"text","text":"<!-- runoq:payload:milestone-decomposer -->\n```json\n{\"items\":[{\"key\":\"m1\",\"type\":\"implementation\",\"title\":\"Milestone 1\",\"goal\":\"Goal\",\"criteria\":[\"Done\"],\"scope\":[\"core\"],\"sequencing_rationale\":\"First step\",\"priority\":1}],\"warnings\":[]}\n```"}]}}
 {"type":"result","result":"done"}
 EOF
+    ;;
+  *" --agent task-decomposer "*)
+    cat <<'EOF'
+{"type":"assistant","message":{"content":[{"type":"text","text":"<!-- runoq:payload:task-decomposer -->\n```json\n{\"items\":[{\"key\":\"task-1\",\"type\":\"task\",\"title\":\"Ship task\",\"body\":\"Body\",\"priority\":1,\"estimated_complexity\":\"medium\",\"complexity_rationale\":\"Touches multiple steps.\",\"depends_on_keys\":[]}],\"warnings\":[]}\n```"}]}}
+{"type":"result","result":"done"}
+EOF
+    ;;
+  *)
+    echo "unexpected agent invocation: $*" >&2
+    exit 1
+    ;;
+esac
 FAKECLAUDE
   chmod +x "$fake_claude_script"
   export RUNOQ_CLAUDE_BIN="$fake_claude_script"
@@ -234,7 +277,7 @@ FAKECLAUDE
 
   [ "$status" -eq 0 ]
   [[ "$output" == *'"items"'* ]]
-  [[ "$output" == *'"task-1"'* ]]
+  [[ "$output" == *'"Ship task"'* ]]
 }
 
 @test "runoq runtime implementation supports plan dry-run routing" {
@@ -250,10 +293,11 @@ FAKECLAUDE
   run bash -lc 'cd "'"$project_dir"'" && "'"$RUNOQ_ROOT"'/bin/runoq" plan docs/plan.md --dry-run'
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *'"runtime-task"'* ]]
+  [[ "$output" == *'"Runtime task"'* ]]
   run cat "$FAKE_RUNTIME_PLAN_CLAUDE_LOG"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--agent plan-decomposer --add-dir $RUNOQ_ROOT"* ]]
+  [[ "$output" == *"--agent milestone-decomposer --add-dir $RUNOQ_ROOT"* ]]
+  [[ "$output" == *"--agent task-decomposer --add-dir $RUNOQ_ROOT"* ]]
 }
 
 @test "runoq maintenance routes to the maintenance reviewer" {
