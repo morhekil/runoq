@@ -223,14 +223,24 @@ func TestFormatAdjustmentReviewBody(t *testing.T) {
 	if !containsString(got, "## Acceptance Criteria") {
 		t.Error("missing acceptance criteria section")
 	}
-	if !containsString(got, "1. modify: Add validation scope") {
-		t.Error("missing enumerated adjustment 1")
+	// Each adjustment should have type, title, description, and reason
+	if !containsString(got, "### 1. Add validation scope") {
+		t.Error("missing adjustment 1 heading")
 	}
-	if !containsString(got, "2. new_milestone: Debt cleanup from formatter shortcuts") {
-		t.Error("missing enumerated adjustment 2")
+	if !containsString(got, "**Type:** modify") {
+		t.Error("missing adjustment 1 type")
 	}
-	if !containsString(got, "```json") {
-		t.Error("missing json code block")
+	if !containsString(got, "Expand the caching discovery milestone") {
+		t.Error("missing adjustment 1 description")
+	}
+	if !containsString(got, "Formatter implementation exposed input-shape risks") {
+		t.Error("missing adjustment 1 reason")
+	}
+	if !containsString(got, "### 2. Debt cleanup from formatter shortcuts") {
+		t.Error("missing adjustment 2 heading")
+	}
+	if !containsString(got, "<details>") {
+		t.Error("missing collapsed JSON")
 	}
 }
 

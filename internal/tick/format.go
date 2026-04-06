@@ -160,17 +160,33 @@ func FormatMilestoneBody(item ProposalItem) string {
 func FormatAdjustmentReviewBody(input AdjustmentReviewInput) string {
 	var b strings.Builder
 	b.WriteString("## Acceptance Criteria\n\n- [ ] Review proposed adjustments.\n\n")
+
 	for i, adj := range input.ProposedAdjustments {
+		if i > 0 {
+			b.WriteString("\n---\n\n")
+		}
 		title := adj.Title
 		if title == "" {
 			title = adj.Description
 		}
-		fmt.Fprintf(&b, "%d. %s: %s\n", i+1, adj.Type, title)
+		fmt.Fprintf(&b, "### %d. %s\n", i+1, title)
+		fmt.Fprintf(&b, "**Type:** %s", adj.Type)
+		if adj.TargetMilestoneNumber != nil {
+			fmt.Fprintf(&b, " · **Target:** #%d", *adj.TargetMilestoneNumber)
+		}
+		b.WriteString("\n\n")
+		if adj.Description != "" {
+			fmt.Fprintf(&b, "> %s\n\n", adj.Description)
+		}
+		if adj.Reason != "" {
+			fmt.Fprintf(&b, "**Reason:** %s\n", adj.Reason)
+		}
 	}
-	b.WriteString("\n```json\n")
-	data, _ := json.Marshal(input)
+
+	b.WriteString("\n<details>\n<summary>Raw JSON payload</summary>\n\n```json\n")
+	data, _ := json.MarshalIndent(input, "", "  ")
 	b.Write(data)
-	b.WriteString("\n```\n")
+	b.WriteString("\n```\n\n</details>\n")
 	return b.String()
 }
 
