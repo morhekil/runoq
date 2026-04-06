@@ -189,3 +189,16 @@ func MergeChecklists(left, right string) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+const proposalStartMarker = "<!-- runoq:proposal-start -->"
+
+// ReplaceProposalInBody replaces the proposal section in an issue body with
+// new proposal content. The proposal section starts at the
+// <!-- runoq:proposal-start --> marker. If no marker exists, the new content
+// is appended with the marker.
+func ReplaceProposalInBody(existingBody string, newProposal string) string {
+	if idx := strings.Index(existingBody, proposalStartMarker); idx >= 0 {
+		return existingBody[:idx] + proposalStartMarker + "\n" + newProposal
+	}
+	return existingBody + "\n\n" + proposalStartMarker + "\n" + newProposal
+}

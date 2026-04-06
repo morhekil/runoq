@@ -260,6 +260,54 @@ func TestMergeChecklists(t *testing.T) {
 	}
 }
 
+func TestReplaceProposalInBody(t *testing.T) {
+	t.Parallel()
+
+	existingBody := "<!-- runoq:meta\ntype: planning\n-->\n\n## Acceptance Criteria\n- [ ] Done.\n\n<!-- runoq:proposal-start -->\n## Review scores\nold content"
+	newProposal := "## Review scores\nnew content"
+
+	got := ReplaceProposalInBody(existingBody, newProposal)
+
+	// Metadata preserved
+	if !containsString(got, "<!-- runoq:meta") {
+		t.Error("metadata block lost")
+	}
+	if !containsString(got, "## Acceptance Criteria") {
+		t.Error("acceptance criteria lost")
+	}
+	// Old proposal replaced
+	if containsString(got, "old content") {
+		t.Error("old proposal content not replaced")
+	}
+	// New proposal present
+	if !containsString(got, "new content") {
+		t.Error("new proposal content missing")
+	}
+	// Marker preserved
+	if !containsString(got, "<!-- runoq:proposal-start -->") {
+		t.Error("proposal-start marker missing")
+	}
+}
+
+func TestReplaceProposalInBodyNoExistingMarker(t *testing.T) {
+	t.Parallel()
+
+	existingBody := "<!-- runoq:meta\ntype: planning\n-->\n\n## Acceptance Criteria\n- [ ] Done."
+	newProposal := "## Review scores\nnew content"
+
+	got := ReplaceProposalInBody(existingBody, newProposal)
+
+	if !containsString(got, "## Acceptance Criteria") {
+		t.Error("acceptance criteria lost")
+	}
+	if !containsString(got, "<!-- runoq:proposal-start -->") {
+		t.Error("proposal-start marker missing")
+	}
+	if !containsString(got, "new content") {
+		t.Error("new proposal content missing")
+	}
+}
+
 func containsString(s, substr string) bool {
 	return len(s) >= len(substr) && searchString(s, substr)
 }
