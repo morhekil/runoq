@@ -252,7 +252,7 @@ handle_pending_review() {
   pending_number="$(printf '%s' "$pending_review" | jq -r '.number')"
   runoq::step "Loading review #$pending_number"
   issue_view="$(runoq::gh issue view "$pending_number" --repo "$repo" --json number,title,body,comments,labels,state)"
-  if [[ "$(issue_type "$(printf '%s' "$pending_review" | jq -r '.body // ""')")" == "planning" ]] && ! proposal_json_from_issue_view "$issue_view" >/dev/null 2>&1; then
+  if [[ "$(issue_type "$(printf '%s' "$pending_review" | jq -r '.body // ""')")" == "planning" ]] && ! printf '%s' "$issue_view" | jq -r '.body // ""' | grep -q 'runoq:payload:plan-proposal'; then
     runoq::info "planning issue #$pending_number has no proposal yet"
     return 1
   elif latest_human_comment_unanswered "$issue_view"; then
