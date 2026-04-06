@@ -15,13 +15,73 @@ import (
 )
 
 const usageText = `Usage:
-  runoq init
-  runoq plan [file]
+  runoq init [--plan <path>]
+  runoq plan [file] [--auto-confirm] [--dry-run]
   runoq tick
   runoq run [--issue N] [--dry-run]
   runoq report <summary|issue|cost> [...]
   runoq maintenance
 `
+
+var subcommandHelp = map[string]string{
+	"init": `Usage: runoq init [--plan <path>]
+
+Bootstrap a target repository for runoq.
+
+Steps performed:
+  1. Create .runoq/identity.json with GitHub App credentials
+  2. Ensure managed labels exist on the repository
+  3. Create a minimal package.json if none exists
+  4. Symlink Claude agents and skills into the target repo
+  5. Add .runoq/ to .gitignore
+  6. Optionally write the plan path to runoq.json (--plan)
+  7. Symlink the runoq binary into PATH
+
+Options:
+  --plan <path>   Set the plan file path in runoq.json and stage it
+
+Environment:
+  RUNOQ_APP_KEY          Path to GitHub App private key (default: ~/.runoq/app-key.pem)
+  RUNOQ_APP_ID           GitHub App ID (required for private apps)
+  RUNOQ_SYMLINK_DIR      Directory for the runoq symlink (default: /usr/local/bin)
+`,
+	"plan": `Usage: runoq plan [file] [--auto-confirm] [--dry-run]
+
+Decompose a plan document into GitHub issues. (Deprecated: prefer runoq tick)
+
+Arguments:
+  file              Path to the plan markdown file (reads from runoq.json if omitted)
+
+Options:
+  --auto-confirm    Skip confirmation prompt
+  --dry-run         Show decomposition without creating issues
+`,
+	"tick": `Usage: runoq tick
+
+Run one iteration of the planning lifecycle.
+`,
+	"run": `Usage: runoq run [--issue N] [--dry-run]
+
+Execute the next issue from the queue.
+
+Options:
+  --issue N     Run a specific issue number instead of the next in queue
+  --dry-run     Show what would be executed without running it
+`,
+	"report": `Usage: runoq report <summary|issue|cost> [...]
+
+Generate reports from runoq state.
+
+Subcommands:
+  summary       Aggregate status across all tracked issues
+  issue <N>     Show details for a specific issue
+  cost          Summarise token usage
+`,
+	"maintenance": `Usage: runoq maintenance
+
+Run a maintenance review of the target repository.
+`,
+}
 
 type App struct {
 	args           []string
@@ -66,6 +126,14 @@ func (a *App) Run(ctx context.Context) int {
 	args := a.args
 	if len(args) > 0 {
 		args = args[1:]
+	}
+
+	switch subcommand {
+	case "init", "plan", "tick", "run", "report", "maintenance":
+		if hasHelpFlag(args) {
+			_, _ = io.WriteString(a.stdout, subcommandHelp[subcommand])
+			return 0
+		}
 	}
 
 	switch subcommand {
@@ -289,26 +357,26 @@ func (a *App) resolvePlanArgs(targetRoot string, args []string) ([]string, error
 
 func readProjectPlanFile(targetRoot string) (string, error) {
 	if strings.TrimSpace(targetRoot) == "" {
-		return "", errors.New("Plan file not configured: target repository root is unknown")
+		return "", errors.New("plan file not configured: target repository root is unknown")
 	}
 
 	configPath := filepath.Join(targetRoot, "runoq.json")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("Plan file not configured: missing %s. Run `runoq init --plan <path>` or pass a plan file explicitly.", configPath)
+			return "", fmt.Errorf("plan file not configured: missing %s, run `runoq init --plan <path>` or pass a plan file explicitly", configPath)
 		}
-		return "", fmt.Errorf("Plan file not configured: failed to read %s: %w", configPath, err)
+		return "", fmt.Errorf("plan file not configured: failed to read %s: %w", configPath, err)
 	}
 
 	var cfg struct {
 		Plan string `json:"plan"`
 	}
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return "", fmt.Errorf("Plan file not configured: invalid JSON in %s: %w", configPath, err)
+		return "", fmt.Errorf("plan file not configured: invalid JSON in %s: %w", configPath, err)
 	}
 	if strings.TrimSpace(cfg.Plan) == "" {
-		return "", fmt.Errorf("Plan file not configured: %s is missing a non-empty `plan` value.", configPath)
+		return "", fmt.Errorf("plan file not configured: %s is missing a non-empty `plan` value", configPath)
 	}
 	return cfg.Plan, nil
 }
@@ -350,6 +418,15 @@ func (a *App) runMaintenance(ctx context.Context, env []string, runoqRoot string
 
 func (a *App) printUsage(w io.Writer) {
 	_, _ = io.WriteString(w, usageText)
+}
+
+func hasHelpFlag(args []string) bool {
+	for _, a := range args {
+		if a == "-h" || a == "--help" {
+			return true
+		}
+	}
+	return false
 }
 
 func prependPath(env []string, head string) []string {

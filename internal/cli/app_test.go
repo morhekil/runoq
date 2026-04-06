@@ -419,7 +419,7 @@ func TestPlanRequiresPath(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("expected exit code 1, got %d", code)
 	}
-	if !strings.Contains(stderr.String(), "Plan file not configured") {
+	if !strings.Contains(stderr.String(), "plan file not configured") {
 		t.Fatalf("expected missing plan config error, got %q", stderr.String())
 	}
 }
@@ -521,6 +521,41 @@ func TestParseRepoFromRemote(t *testing.T) {
 				t.Fatalf("expected %q, got %q", tc.want, got)
 			}
 		})
+	}
+}
+
+func TestSubcommandHelpPrintsUsageAndExitsZero(t *testing.T) {
+	t.Parallel()
+
+	for _, cmd := range []string{"init", "plan", "tick", "run", "report", "maintenance"} {
+		for _, flag := range []string{"-h", "--help"} {
+			t.Run(cmd+"/"+flag, func(t *testing.T) {
+				t.Parallel()
+
+				var stdout strings.Builder
+				var stderr strings.Builder
+				app := New(
+					[]string{cmd, flag},
+					[]string{"RUNOQ_ROOT=/runoq"},
+					"/tmp/project",
+					&stdout,
+					&stderr,
+					"",
+				)
+				app.SetCommandExecutor(func(_ context.Context, req common.CommandRequest) error {
+					t.Fatalf("unexpected command: %s %v", req.Name, req.Args)
+					return nil
+				})
+
+				code := app.Run(context.Background())
+				if code != 0 {
+					t.Fatalf("expected exit code 0, got %d", code)
+				}
+				if !strings.Contains(stdout.String(), "Usage:") {
+					t.Fatalf("expected usage text for %s, got %q", cmd, stdout.String())
+				}
+			})
+		}
 	}
 }
 
