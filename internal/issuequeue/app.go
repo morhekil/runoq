@@ -23,7 +23,7 @@ const usageText = `Usage:
   gh-issue-queue.sh list <repo> <ready-label>
   gh-issue-queue.sh next <repo> <ready-label>
   gh-issue-queue.sh set-status <repo> <issue-number> <status>
-  gh-issue-queue.sh create <repo> <title> <body> [--depends-on N,M] [--priority N] [--estimated-complexity value] [--type task|epic] [--parent-epic N]
+  gh-issue-queue.sh create <repo> <title> <body> [--depends-on N,M] [--priority N] [--estimated-complexity value] [--type task|epic|planning|adjustment] [--parent-epic N]
   gh-issue-queue.sh epic-status <repo> <issue-number>
 `
 
@@ -81,6 +81,7 @@ type metadata struct {
 	EstimatedComplexity *string
 	ComplexityRationale *string
 	Type                string
+	MilestoneType       *string
 	ParentEpic          *int
 	MetadataPresent     bool
 	MetadataValid       bool
@@ -109,6 +110,7 @@ type createOptions struct {
 	EstimatedComplexity string
 	ComplexityRationale string
 	IssueType           string
+	MilestoneType       string
 	ParentEpic          string
 }
 
@@ -315,6 +317,12 @@ func (a *App) runSetStatus(ctx context.Context, repo string, issueNumber string,
 		return common.Failf(a.stderr, "%v", err)
 	}
 
+	if status == "done" {
+		if err := a.ghClient.Run(ctx, []string{"issue", "close", issueNumber, "--repo", repo}, io.Discard, io.Discard); err != nil {
+			return common.Failf(a.stderr, "%v", err)
+		}
+	}
+
 	issueID, err := strconv.Atoi(issueNumber)
 	if err != nil {
 		return common.Failf(a.stderr, "invalid issue number: %s", issueNumber)
@@ -512,6 +520,10 @@ func parseMetadata(body string) metadata {
 				values[strings.TrimSuffix(key, ":")] = strings.TrimSpace(rest)
 				break
 			}
+			if rest, found := strings.CutPrefix(line, "milestone_type:"); found {
+				values["milestone_type"] = strings.TrimSpace(rest)
+				break
+			}
 		}
 	}
 
@@ -546,8 +558,13 @@ func parseMetadata(body string) metadata {
 		meta.ComplexityRationale = &value
 	}
 
-	if raw := values["type"]; raw == "task" || raw == "epic" {
+	if raw := values["type"]; isAllowedIssueType(raw) {
 		meta.Type = raw
+	}
+
+	if raw := values["milestone_type"]; raw != "" {
+		value := raw
+		meta.MilestoneType = &value
 	}
 
 	if raw := values["parent_epic"]; raw != "" {
@@ -626,6 +643,9 @@ func parseCreateOptions(args []string) (createOptions, error) {
 			if i+1 >= len(args) {
 				return createOptions{}, errors.New("missing type value")
 			}
+			if !isAllowedIssueType(args[i+1]) {
+				return createOptions{}, fmt.Errorf("invalid type: %s", args[i+1])
+			}
 			opts.IssueType = args[i+1]
 			i += 2
 		case "--parent-epic":
@@ -634,12 +654,27 @@ func parseCreateOptions(args []string) (createOptions, error) {
 			}
 			opts.ParentEpic = args[i+1]
 			i += 2
+		case "--milestone-type":
+			if i+1 >= len(args) {
+				return createOptions{}, errors.New("missing milestone type value")
+			}
+			opts.MilestoneType = args[i+1]
+			i += 2
 		default:
 			return createOptions{}, fmt.Errorf("unknown option: %s", args[i])
 		}
 	}
 
 	return opts, nil
+}
+
+func isAllowedIssueType(value string) bool {
+	switch value {
+	case "task", "epic", "planning", "adjustment":
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *App) writeCreateBody(body string, opts createOptions) (string, error) {
@@ -680,6 +715,11 @@ func (a *App) writeCreateBody(body string, opts createOptions) (string, error) {
 	}
 	if _, err := fmt.Fprintf(file, "type: %s\n", opts.IssueType); err != nil {
 		return "", err
+	}
+	if opts.MilestoneType != "" {
+		if _, err := fmt.Fprintf(file, "milestone_type: %s\n", opts.MilestoneType); err != nil {
+			return "", err
+		}
 	}
 	if opts.ParentEpic != "" {
 		if _, err := fmt.Fprintf(file, "parent_epic: %s\n", opts.ParentEpic); err != nil {

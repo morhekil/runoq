@@ -199,6 +199,24 @@ ensure_gitignore() {
   done
 }
 
+write_project_config() {
+  local plan_path="$1"
+  local target_root config_path tmp
+  target_root="$(runoq::target_root)"
+  config_path="$target_root/runoq.json"
+  tmp="$(mktemp "${TMPDIR:-/tmp}/runoq-project-config.XXXXXX")"
+
+  if [[ -f "$config_path" ]]; then
+    jq --arg plan "$plan_path" '.plan = $plan' "$config_path" >"$tmp" ||
+      runoq::die "Failed to update ${config_path}; expected valid JSON."
+  else
+    jq -n --arg plan "$plan_path" '{plan: $plan}' >"$tmp"
+  fi
+
+  mv "$tmp" "$config_path"
+  git -C "$target_root" add runoq.json
+}
+
 ensure_symlink() {
   local link_dir link_path target
   link_dir="${RUNOQ_SYMLINK_DIR:-/usr/local/bin}"
@@ -219,12 +237,29 @@ ensure_symlink() {
 }
 
 main() {
+  local plan_path=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --plan)
+        [[ $# -ge 2 ]] || runoq::die "Missing value for --plan."
+        plan_path="$2"
+        shift 2
+        ;;
+      *)
+        runoq::die "Unknown option: $1"
+        ;;
+    esac
+  done
+
   mkdir -p "$(runoq::target_root)/.runoq" "$(runoq::state_dir)"
   ensure_identity
   ensure_labels
   ensure_package_json
   ensure_claude_managed_files
   ensure_gitignore
+  if [[ -n "$plan_path" ]]; then
+    write_project_config "$plan_path"
+  fi
   ensure_symlink
 }
 

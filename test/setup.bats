@@ -48,6 +48,10 @@ write_empty_key() {
     "stdout": ""
   },
   {
+    "contains": ["label", "create", "runoq:plan-approved", "--repo owner/repo"],
+    "stdout": ""
+  },
+  {
     "contains": ["label", "create", "runoq:maintenance-review", "--repo owner/repo"],
     "stdout": ""
   }
@@ -211,11 +215,11 @@ EOF
 [
   {
     "contains": ["label", "list", "--repo owner/repo"],
-    "stdout": "[{\"name\":\"runoq:ready\"},{\"name\":\"runoq:in-progress\"},{\"name\":\"runoq:done\"},{\"name\":\"runoq:needs-human-review\"},{\"name\":\"runoq:blocked\"},{\"name\":\"runoq:maintenance-review\"}]"
+    "stdout": "[{\"name\":\"runoq:ready\"},{\"name\":\"runoq:in-progress\"},{\"name\":\"runoq:done\"},{\"name\":\"runoq:needs-human-review\"},{\"name\":\"runoq:blocked\"},{\"name\":\"runoq:plan-approved\"},{\"name\":\"runoq:maintenance-review\"}]"
   },
   {
     "contains": ["label", "list", "--repo owner/repo"],
-    "stdout": "[{\"name\":\"runoq:ready\"},{\"name\":\"runoq:in-progress\"},{\"name\":\"runoq:done\"},{\"name\":\"runoq:needs-human-review\"},{\"name\":\"runoq:blocked\"},{\"name\":\"runoq:maintenance-review\"}]"
+    "stdout": "[{\"name\":\"runoq:ready\"},{\"name\":\"runoq:in-progress\"},{\"name\":\"runoq:done\"},{\"name\":\"runoq:needs-human-review\"},{\"name\":\"runoq:blocked\"},{\"name\":\"runoq:plan-approved\"},{\"name\":\"runoq:maintenance-review\"}]"
   }
 ]
 EOF
@@ -253,7 +257,7 @@ EOF
 [
   {
     "contains": ["label", "list", "--repo owner/repo"],
-    "stdout": "[{\"name\":\"runoq:ready\"},{\"name\":\"runoq:in-progress\"},{\"name\":\"runoq:done\"},{\"name\":\"runoq:needs-human-review\"},{\"name\":\"runoq:blocked\"},{\"name\":\"runoq:maintenance-review\"}]"
+    "stdout": "[{\"name\":\"runoq:ready\"},{\"name\":\"runoq:in-progress\"},{\"name\":\"runoq:done\"},{\"name\":\"runoq:needs-human-review\"},{\"name\":\"runoq:blocked\"},{\"name\":\"runoq:plan-approved\"},{\"name\":\"runoq:maintenance-review\"}]"
   }
 ]
 EOF
@@ -265,4 +269,69 @@ EOF
   [ -L "$project_dir/.claude/agents/github-orchestrator.md" ]
   [ "$(readlink "$project_dir/.claude/agents/github-orchestrator.md")" = "$RUNOQ_ROOT/.claude/agents/github-orchestrator.md" ]
   [ "$(readlink "$project_dir/.claude/skills/plan-to-issues/SKILL.md")" = "$RUNOQ_ROOT/.claude/skills/plan-to-issues/SKILL.md" ]
+}
+
+@test "setup init --plan writes and stages runoq.json at the project root" {
+  project_dir="$TEST_TMPDIR/project"
+  make_git_repo "$project_dir" "git@github.com:owner/repo.git"
+  export TARGET_ROOT="$project_dir"
+  export RUNOQ_SYMLINK_DIR="$TEST_TMPDIR/bin"
+  export RUNOQ_APP_KEY="$TEST_TMPDIR/app-key.pem"
+  export RUNOQ_APP_ID="123"
+  write_empty_key "$RUNOQ_APP_KEY"
+
+  scenario="$TEST_TMPDIR/scenario.json"
+  write_fake_gh_scenario "$scenario" <<EOF
+[
+  {
+    "contains": ["api", "/repos/owner/repo/installation"],
+    "stdout": "{\"id\":789,\"app_id\":123,\"app_slug\":\"runoq\"}"
+  },
+  {
+    "contains": ["label", "list", "--repo owner/repo"],
+    "stdout": "[]"
+  },
+  {
+    "contains": ["label", "create", "runoq:ready", "--repo owner/repo"],
+    "stdout": ""
+  },
+  {
+    "contains": ["label", "create", "runoq:in-progress", "--repo owner/repo"],
+    "stdout": ""
+  },
+  {
+    "contains": ["label", "create", "runoq:done", "--repo owner/repo"],
+    "stdout": ""
+  },
+  {
+    "contains": ["label", "create", "runoq:needs-human-review", "--repo owner/repo"],
+    "stdout": ""
+  },
+  {
+    "contains": ["label", "create", "runoq:blocked", "--repo owner/repo"],
+    "stdout": ""
+  },
+  {
+    "contains": ["label", "create", "runoq:plan-approved", "--repo owner/repo"],
+    "stdout": ""
+  },
+  {
+    "contains": ["label", "create", "runoq:maintenance-review", "--repo owner/repo"],
+    "stdout": ""
+  }
+]
+EOF
+  use_fake_gh "$scenario"
+
+  run "$RUNOQ_ROOT/scripts/setup.sh" --plan docs/prd.md
+
+  [ "$status" -eq 0 ]
+  [ -f "$project_dir/runoq.json" ]
+  [ ! -f "$project_dir/.runoq/runoq.json" ]
+  [ "$(jq -r '.plan' "$project_dir/runoq.json")" = "docs/prd.md" ]
+  run git -C "$project_dir" diff --cached --name-only
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"runoq.json"* ]]
+  run grep -q 'runoq\.json' "$project_dir/.gitignore"
+  [ "$status" -ne 0 ]
 }

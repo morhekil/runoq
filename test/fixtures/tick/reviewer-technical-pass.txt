@@ -1,0 +1,6 @@
+<!-- runoq:payload:plan-review-technical -->
+REVIEW-TYPE: plan-technical
+VERDICT: PASS
+SCORE: 31/35
+CHECKLIST:
+- [ ] No blocking technical concerns.

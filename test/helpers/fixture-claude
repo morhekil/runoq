@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+fixture_dir="${RUNOQ_TEST_AGENT_FIXTURE_DIR:-}"
+log_file="${FAKE_CLAUDE_LOG:-}"
+state_dir="${RUNOQ_TEST_AGENT_STATE_DIR:-${TMPDIR:-/tmp}/runoq-agent-state}"
+
+[[ -n "$fixture_dir" ]] || { echo "fixture-claude: RUNOQ_TEST_AGENT_FIXTURE_DIR is required" >&2; exit 1; }
+mkdir -p "$state_dir"
+
+agent=""
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+  if [[ "${args[$i]}" == "--agent" && $((i + 1)) -lt ${#args[@]} ]]; then
+    agent="${args[$((i + 1))]}"
+    break
+  fi
+done
+[[ -n "$agent" ]] || { echo "fixture-claude: --agent is required" >&2; exit 1; }
+
+if [[ -n "$log_file" ]]; then
+  printf '%s\n' "$*" >>"$log_file"
+fi
+
+count_file="$state_dir/${agent}.count"
+count=1
+if [[ -f "$count_file" ]]; then
+  count="$(( $(cat "$count_file") + 1 ))"
+fi
+printf '%s\n' "$count" >"$count_file"
+
+mapped_candidate=""
+case "${agent}:${count}" in
+  milestone-decomposer:1)
+    mapped_candidate="$fixture_dir/milestone-decomposer-output.json"
+    ;;
+  milestone-decomposer:2)
+    mapped_candidate="$fixture_dir/milestone-decomposer-revised-output.json"
+    ;;
+  task-decomposer:1)
+    mapped_candidate="$fixture_dir/task-decomposer-milestone-1-output.json"
+    ;;
+  task-decomposer:2)
+    mapped_candidate="$fixture_dir/task-decomposer-milestone-2-output.json"
+    ;;
+  plan-reviewer-technical:*)
+    mapped_candidate="$fixture_dir/reviewer-technical-pass.txt"
+    ;;
+  plan-reviewer-product:*)
+    mapped_candidate="$fixture_dir/reviewer-product-pass.txt"
+    ;;
+  milestone-reviewer:1)
+    mapped_candidate="$fixture_dir/milestone-reviewer-adjustment.json"
+    ;;
+  milestone-reviewer:2)
+    mapped_candidate="$fixture_dir/milestone-reviewer-clean.json"
+    ;;
+  plan-comment-responder:1)
+    mapped_candidate="$fixture_dir/comment-response-question.md"
+    ;;
+  plan-comment-responder:2)
+    mapped_candidate="$fixture_dir/comment-response-partial-approve.md"
+    ;;
+  plan-comment-responder:3)
+    mapped_candidate="$fixture_dir/comment-response-adjustment-partial.md"
+    ;;
+esac
+
+if [[ -n "$mapped_candidate" && -f "$mapped_candidate" ]]; then
+  cat "$mapped_candidate"
+  exit 0
+fi
+
+for candidate in \
+  "$fixture_dir/${agent}-${count}.txt" \
+  "$fixture_dir/${agent}-${count}.json" \
+  "$fixture_dir/${agent}.txt" \
+  "$fixture_dir/${agent}.json"
+do
+  if [[ -f "$candidate" ]]; then
+    cat "$candidate"
+    exit 0
+  fi
+done
+
+echo "fixture-claude: no fixture for ${agent} invocation ${count}" >&2
+exit 1

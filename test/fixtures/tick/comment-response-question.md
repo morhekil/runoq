@@ -1,0 +1,3 @@
+<!-- runoq:event -->
+
+Caching is before the CLI because the discovery milestone decides whether the CLI should expose any cache-related behavior at all. Keeping that uncertainty ahead of the CLI avoids baking a questionable interface into a later milestone.

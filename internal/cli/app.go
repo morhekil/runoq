@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,7 +16,8 @@ import (
 
 const usageText = `Usage:
   runoq init
-  runoq plan <file>
+  runoq plan [file]
+  runoq tick
   runoq run [--issue N] [--dry-run]
   runoq report <summary|issue|cost> [...]
   runoq maintenance
@@ -74,16 +76,25 @@ func (a *App) Run(ctx context.Context) int {
 		}
 		return a.runScript(ctx, targetEnv, runoqRoot, "setup.sh", args)
 	case "plan":
-		if len(args) == 0 {
-			return common.Fail(a.stderr, "Usage: runoq plan <file> [--auto-confirm] [--dry-run]")
-		}
 		targetEnv, code := a.prepareTargetContext(ctx, runoqRoot, env)
 		if code != 0 {
 			return code
 		}
+		fmt.Fprintln(a.stderr, "runoq plan is deprecated; prefer `runoq tick` for the iterative planning workflow.")
 		repo, _ := common.EnvLookup(targetEnv, "REPO")
-		planArgs := append([]string{repo}, args...)
+		targetRoot, _ := common.EnvLookup(targetEnv, "TARGET_ROOT")
+		planArgs, err := a.resolvePlanArgs(targetRoot, args)
+		if err != nil {
+			return common.Fail(a.stderr, err.Error())
+		}
+		planArgs = append([]string{repo}, planArgs...)
 		return a.runScript(ctx, targetEnv, runoqRoot, "plan.sh", planArgs)
+	case "tick":
+		targetEnv, code := a.prepareTargetContext(ctx, runoqRoot, env)
+		if code != 0 {
+			return code
+		}
+		return a.runScript(ctx, targetEnv, runoqRoot, "tick.sh", args)
 	case "run":
 		targetEnv, code := a.prepareTargetContext(ctx, runoqRoot, env)
 		if code != 0 {
@@ -259,6 +270,47 @@ func parseRepoFromRemote(remote string) (string, error) {
 	default:
 		return "", fmt.Errorf("origin remote is not a GitHub URL: %s", remote)
 	}
+}
+
+func (a *App) resolvePlanArgs(targetRoot string, args []string) ([]string, error) {
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		return append([]string(nil), args...), nil
+	}
+
+	planFile, err := readProjectPlanFile(targetRoot)
+	if err != nil {
+		return nil, err
+	}
+
+	resolved := []string{planFile}
+	resolved = append(resolved, args...)
+	return resolved, nil
+}
+
+func readProjectPlanFile(targetRoot string) (string, error) {
+	if strings.TrimSpace(targetRoot) == "" {
+		return "", errors.New("Plan file not configured: target repository root is unknown")
+	}
+
+	configPath := filepath.Join(targetRoot, "runoq.json")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("Plan file not configured: missing %s. Run `runoq init --plan <path>` or pass a plan file explicitly.", configPath)
+		}
+		return "", fmt.Errorf("Plan file not configured: failed to read %s: %w", configPath, err)
+	}
+
+	var cfg struct {
+		Plan string `json:"plan"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return "", fmt.Errorf("Plan file not configured: invalid JSON in %s: %w", configPath, err)
+	}
+	if strings.TrimSpace(cfg.Plan) == "" {
+		return "", fmt.Errorf("Plan file not configured: %s is missing a non-empty `plan` value.", configPath)
+	}
+	return cfg.Plan, nil
 }
 
 func (a *App) runScript(ctx context.Context, env []string, runoqRoot string, script string, args []string) int {

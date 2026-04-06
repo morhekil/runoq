@@ -177,12 +177,17 @@ func (a *App) runEligibility(ctx context.Context, repo string, issueArg string) 
 		return common.Failf(a.stderr, "%v", err)
 	}
 
+	metadata := parseIssueMetadata(issue.Body)
+	branch := ""
+	if !isPlanningType(metadata.Type) {
+		branch = branchName(cfg.BranchPrefix, issue.Number, issue.Title)
+	}
+
 	reasons := make([]string, 0, 4)
-	if strings.TrimSpace(issue.Title) == "" || !hasAcceptanceCriteria(issue.Body) {
+	if strings.TrimSpace(issue.Title) == "" || (!isPlanningType(metadata.Type) && !hasAcceptanceCriteria(issue.Body)) {
 		reasons = append(reasons, "missing acceptance criteria")
 	}
 
-	metadata := parseIssueMetadata(issue.Body)
 	for _, dependency := range metadata.DependsOn {
 		reason, blocked, err := a.dependencyReason(ctx, repo, dependency, cfg.Labels.Done)
 		if err != nil {
@@ -196,28 +201,28 @@ func (a *App) runEligibility(ctx context.Context, repo string, issueArg string) 
 		}
 	}
 
-	branch := branchName(cfg.BranchPrefix, issue.Number, issue.Title)
-
-	openPRReason, err := a.openPRReason(ctx, repo, branch)
-	if err != nil {
-		if isExitError(err) {
-			return 1
+	if !isPlanningType(metadata.Type) {
+		openPRReason, err := a.openPRReason(ctx, repo, branch)
+		if err != nil {
+			if isExitError(err) {
+				return 1
+			}
+			return common.Failf(a.stderr, "%v", err)
 		}
-		return common.Failf(a.stderr, "%v", err)
-	}
-	if openPRReason != "" {
-		reasons = append(reasons, openPRReason)
-	}
-
-	hasConflicts, err := a.branchHasConflicts(ctx, branch)
-	if err != nil {
-		if isExitError(err) {
-			return 1
+		if openPRReason != "" {
+			reasons = append(reasons, openPRReason)
 		}
-		return common.Failf(a.stderr, "%v", err)
-	}
-	if hasConflicts {
-		reasons = append(reasons, "branch "+branch+" has unresolved conflicts with origin/main")
+
+		hasConflicts, err := a.branchHasConflicts(ctx, branch)
+		if err != nil {
+			if isExitError(err) {
+				return 1
+			}
+			return common.Failf(a.stderr, "%v", err)
+		}
+		if hasConflicts {
+			reasons = append(reasons, "branch "+branch+" has unresolved conflicts with origin/main")
+		}
 	}
 
 	result := eligibilityResult{
@@ -746,28 +751,36 @@ func (a *App) printUsage() {
 
 type issueMetadata struct {
 	DependsOn []string
+	Type      string
 }
 
 func parseIssueMetadata(body string) issueMetadata {
 	block := extractMetadataBlock(body)
 	if block == "" {
-		return issueMetadata{DependsOn: []string{}}
+		return issueMetadata{DependsOn: []string{}, Type: "task"}
 	}
 
 	dependsLine := ""
+	issueType := "task"
 	for line := range strings.SplitSeq(block, "\n") {
 		if rest, ok := strings.CutPrefix(line, "depends_on:"); ok {
 			dependsLine = strings.TrimSpace(rest)
-			break
+			continue
+		}
+		if rest, ok := strings.CutPrefix(line, "type:"); ok {
+			value := strings.TrimSpace(rest)
+			if isPlanningType(value) || value == "task" || value == "epic" {
+				issueType = value
+			}
 		}
 	}
 	if dependsLine == "" || !json.Valid([]byte(dependsLine)) {
-		return issueMetadata{DependsOn: []string{}}
+		return issueMetadata{DependsOn: []string{}, Type: issueType}
 	}
 
 	var raw []any
 	if err := json.Unmarshal([]byte(dependsLine), &raw); err != nil {
-		return issueMetadata{DependsOn: []string{}}
+		return issueMetadata{DependsOn: []string{}, Type: issueType}
 	}
 
 	dependencies := make([]string, 0, len(raw))
@@ -777,7 +790,7 @@ func parseIssueMetadata(body string) issueMetadata {
 			dependencies = append(dependencies, value)
 		}
 	}
-	return issueMetadata{DependsOn: dependencies}
+	return issueMetadata{DependsOn: dependencies, Type: issueType}
 }
 
 func extractMetadataBlock(body string) string {
@@ -806,6 +819,10 @@ func hasAcceptanceCriteria(body string) bool {
 		}
 	}
 	return false
+}
+
+func isPlanningType(issueType string) bool {
+	return issueType == "planning" || issueType == "adjustment"
 }
 
 func branchName(prefix string, issue int, title string) string {
@@ -925,4 +942,3 @@ func isExitError(err error) bool {
 	var exitErr *exec.ExitError
 	return errors.As(err, &exitErr)
 }
-

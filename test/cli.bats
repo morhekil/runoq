@@ -54,6 +54,10 @@ write_empty_key() {
     "stdout": ""
   },
   {
+    "contains": ["label", "create", "runoq:plan-approved", "--repo owner/repo"],
+    "stdout": ""
+  },
+  {
     "contains": ["label", "create", "runoq:maintenance-review", "--repo owner/repo"],
     "stdout": ""
   }
@@ -167,6 +171,43 @@ FAKECLAUDE
   [ "$status" -eq 0 ]
   run grep -F -- 'runoq:payload:plan-decomposer' "$project_dir/$capture_dir/response.txt"
   [ "$status" -eq 0 ]
+}
+
+@test "runoq plan uses target runoq.json when the file argument is omitted" {
+  project_dir="$TEST_TMPDIR/project"
+  setup_cli_project "$project_dir"
+  mkdir -p "$project_dir/docs"
+  echo "# Plan" >"$project_dir/docs/plan.md"
+  cat >"$project_dir/runoq.json" <<'EOF'
+{
+  "plan": "docs/plan.md"
+}
+EOF
+  export PATH="$RUNOQ_ROOT/test/helpers:$PATH"
+  export GH_TOKEN="existing-token"
+
+  local fake_claude_script="$TEST_TMPDIR/fake-claude-config"
+  cat >"$fake_claude_script" <<'FAKECLAUDE'
+#!/usr/bin/env bash
+set -euo pipefail
+cat <<'EOF'
+{"type":"assistant","message":{"content":[{"type":"text","text":"<!-- runoq:payload:plan-decomposer -->\n```json\n{\"items\":[],\"warnings\":[]}\n```"}]}}
+{"type":"result","result":"<!-- runoq:payload:plan-decomposer -->\n```json\n{\"items\":[],\"warnings\":[]}\n```"}
+EOF
+FAKECLAUDE
+  chmod +x "$fake_claude_script"
+  export RUNOQ_CLAUDE_BIN="$fake_claude_script"
+
+  run bash -lc 'cd "'"$project_dir"'" && "'"$RUNOQ_ROOT"'/bin/runoq" plan --dry-run'
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"items"'* ]]
+  run bash -lc 'cd "'"$project_dir"'" && find log/claude -mindepth 1 -maxdepth 1 -type d | head -n 1'
+  [ "$status" -eq 0 ]
+  capture_dir="$output"
+  run grep -F -- '"planPath": "' "$project_dir/$capture_dir/request.txt"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"/docs/plan.md"* ]]
 }
 
 @test "runoq plan dry-run uses assistant payload when stream result is only done" {

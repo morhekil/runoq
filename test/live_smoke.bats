@@ -249,6 +249,52 @@ EOF
   [ "$(printf '%s' "$output" | jq -r '.repo_prefix')" = "runoq-live-eval" ]
 }
 
+@test "live tick smoke preflight requires explicit managed repo configuration" {
+  scenario="$TEST_TMPDIR/scenario.json"
+  write_fake_gh_scenario "$scenario" <<'EOF'
+[
+  {
+    "contains": ["auth", "status"],
+    "stdout": ""
+  }
+]
+EOF
+  use_fake_gh "$scenario"
+
+  run "$RUNOQ_ROOT/scripts/smoke-tick.sh" preflight
+
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | jq -r '.ready')" = "false" ]
+  [ "$(printf '%s' "$output" | jq -r '.gh_authenticated')" = "true" ]
+  [ "$(printf '%s' "$output" | jq -r '.missing | length')" -ge 4 ]
+}
+
+@test "live tick smoke preflight accepts explicit managed repo configuration" {
+  key_path="$TEST_TMPDIR/app-key.pem"
+  printf 'not-a-real-key\n' >"$key_path"
+  scenario="$TEST_TMPDIR/scenario.json"
+  write_fake_gh_scenario "$scenario" <<'EOF'
+[
+  {
+    "contains": ["auth", "status"],
+    "stdout": ""
+  }
+]
+EOF
+  use_fake_gh "$scenario"
+  export RUNOQ_SMOKE=1
+  export RUNOQ_SMOKE_REPO_OWNER="owner"
+  export RUNOQ_SMOKE_APP_ID="123"
+  export RUNOQ_SMOKE_APP_KEY="$key_path"
+
+  run "$RUNOQ_ROOT/scripts/smoke-tick.sh" preflight
+
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | jq -r '.ready')" = "true" ]
+  [ "$(printf '%s' "$output" | jq -r '.repo_owner')" = "owner" ]
+  [ "$(printf '%s' "$output" | jq -r '.repo_prefix')" = "runoq-live-eval" ]
+}
+
 @test "live lifecycle run preflight failure does not trip cleanup on unset locals" {
   run "$RUNOQ_ROOT/scripts/smoke-lifecycle.sh" run
 

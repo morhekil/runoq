@@ -8,7 +8,7 @@ export RUNOQ_CLAUDE_BIN
 
 load test_helper
 
-@test "live planning smoke validates plan-to-issues decomposition" {
+@test "live planning smoke validates the tick-based planning workflow" {
   if [[ "${RUNOQ_SMOKE_PLANNING:-0}" != "1" ]]; then
     skip "Set RUNOQ_SMOKE_PLANNING=1 plus the required RUNOQ_SMOKE_* variables to run live planning smoke."
   fi
@@ -23,6 +23,8 @@ load test_helper
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.status')" = "ok" ]
-  [ "$(printf '%s' "$output" | jq -r '.planning.epics')" -ge 1 ]
-  [ "$(printf '%s' "$output" | jq -r '.planning.tasks')" -ge 2 ]
+  [ "$(printf '%s' "$output" | jq -r '.planning.milestones')" -ge 1 ]
+  [ "$(printf '%s' "$output" | jq -r '.planning.tasks')" -ge 1 ]
+  [ "$(printf '%s' "$output" | jq -r '.planning.has_discovery_milestone')" = "true" ]
+  [ "$(printf '%s' "$output" | jq -r '.comment_interactions')" -ge 1 ]
 }

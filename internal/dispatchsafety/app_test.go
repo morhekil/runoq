@@ -241,6 +241,63 @@ func TestEligibilityAllowsIssueWhenNoBlockingReasonsExist(t *testing.T) {
 	}
 }
 
+func TestPlanningEligibilityAllowsMissingAcceptanceCriteria(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := findRepoRoot(t)
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	writeDispatchConfig(t, configPath)
+
+	_, localDir := newRemoteBackedRepo(t)
+	stateDir := filepath.Join(localDir, ".runoq", "state")
+	scenarioPath := filepath.Join(t.TempDir(), "scenario.json")
+	body := strings.Join([]string{
+		"<!-- runoq:meta",
+		"depends_on: []",
+		"priority: 1",
+		"estimated_complexity: low",
+		"type: planning",
+		"-->",
+		"",
+		"Plan body.",
+	}, "\n")
+	issueJSON, err := json.Marshal(map[string]any{
+		"number": 99,
+		"title":  "Plan milestone 1",
+		"body":   body,
+		"labels": []map[string]string{{"name": "runoq:ready"}},
+		"url":    "https://example.test/issues/99",
+	})
+	if err != nil {
+		t.Fatalf("marshal issue json: %v", err)
+	}
+	writeFakeGHScenario(t, scenarioPath, fmt.Sprintf(`[
+  {
+    "contains": ["issue", "view", "99", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
+    "stdout": %q
+  }
+]`, string(issueJSON)))
+
+	logPath := filepath.Join(t.TempDir(), "fake-gh.log")
+	env := dispatchTestEnv(repoRoot, configPath, localDir, stateDir, scenarioPath, logPath)
+
+	code, stdout, stderr := runApp(t, []string{"eligibility", "owner/repo", "99"}, env, localDir)
+	if code != 0 {
+		t.Fatalf("eligibility code=%d stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stdout, `"allowed": true`) {
+		t.Fatalf("unexpected eligibility output: %q", stdout)
+	}
+
+	logOutput, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read fake gh log: %v", err)
+	}
+	if strings.Contains(string(logOutput), "issue comment 99") {
+		t.Fatalf("unexpected skip comment log: %q", string(logOutput))
+	}
+}
+
 func runApp(t *testing.T, args []string, env []string, cwd string) (int, string, string) {
 	t.Helper()
 

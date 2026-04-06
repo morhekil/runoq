@@ -1,6 +1,6 @@
 # Operator Workflow
 
-This guide walks through the day-to-day operator workflow for using `runoq` against a target repository, from initialization through a successful run and a maintenance review launch.
+This guide walks through the day-to-day operator workflow for using `runoq` against a target repository, from initialization through iterative planning, milestone execution, and a maintenance review launch.
 
 ## Before You Start
 
@@ -45,35 +45,44 @@ Run initialization from inside the target repository:
 After this step you can usually call `runoq` directly if the symlink directory is on `PATH`.
 The `.claude/` install is intentionally narrow: project-specific agents, skills, and settings can still live alongside the runoq-managed files, while `runoq init` refreshes only the managed filenames it owns.
 
-## Creating Queue Issues From A Plan
+## Starting Iterative Planning
 
-Prepare a local plan document in the target repository, then run:
-
-```bash
-runoq plan docs/plan.md
-```
-
-The plan pipeline uses the `plan-decomposer` agent to break the document into an epic/task hierarchy. The decomposer proposes epics (grouping units) and tasks (implementable units), each with an estimated complexity (`low`, `medium`, or `high`) and a rationale for the complexity assessment. It then presents the proposal for interactive confirmation before creating anything in GitHub.
-
-Additional flags:
+Prepare a local plan document in the target repository, commit or stage it in the target repository, then initialize `runoq` with the committed plan path:
 
 ```bash
-runoq plan docs/plan.md --auto-confirm   # skip confirmation prompt
-runoq plan docs/plan.md --dry-run        # show proposal without creating issues
+"$RUNOQ_RUNTIME/scripts/setup.sh" --plan docs/plan.md
 ```
 
-After confirmation, the pipeline creates issues in two passes:
+Once `runoq.json` exists at the repository root, the primary workflow is:
 
-1. **Epics** — created first, labeled `runoq:ready`, with `type: epic` in the metadata block
-2. **Tasks** — created in dependency order, linked to their parent epic via the GitHub sub-issues API, with `type: task` in the metadata block
+```bash
+runoq tick
+```
 
-Each issue includes:
+`runoq tick` advances the project by exactly one step:
 
-- The `runoq:ready` label
-- An `<!-- runoq:meta -->` block containing dependencies, priority, estimated complexity, complexity rationale, and type
-- Acceptance criteria in the issue body
+1. Bootstraps the top-level planning epic and planning issue when the repo has no milestone epics yet
+2. Posts proposal comments for planning issues through the decomposer plus technical/product review loop
+3. Waits for human review on GitHub issues, or answers review comments when needed
+4. Materializes approved milestone/task proposals into real GitHub issues
+5. Dispatches implementation work once a milestone has task issues
+6. Reviews completed milestones and creates adjustment issues when the plan should change
 
-At this point GitHub becomes the queue surface. Operators can inspect issue titles, labels, and metadata without reading local state files.
+The operator control surface is GitHub:
+
+- planning proposals arrive as comments on `type: planning` issues
+- humans ask questions or request changes with normal issue comments
+- approval is signaled by applying the configured `runoq:plan-approved` label
+- milestone adjustments use `type: adjustment` issues and the same approval model
+
+### Legacy full-plan mode
+
+`runoq plan` still exists during the transition, but it is deprecated and should only be used when you explicitly want the older one-shot plan-to-issues flow.
+
+```bash
+runoq plan docs/plan.md --auto-confirm
+runoq plan docs/plan.md --dry-run
+```
 
 ## Running A Single Issue
 
@@ -108,7 +117,7 @@ Queue selection is based on open issues labeled `runoq:ready`. The runtime skips
 
 After the task queue drains, the orchestrator performs an **epic sweep**: it checks all `runoq:ready` epics to see whether all of their child tasks are `runoq:done`. For each completed epic, it runs the **INTEGRATE** phase — which verifies acceptance criteria against the combined work of all child tasks — and marks the epic `runoq:done` if integration passes.
 
-Use queue mode after the plan has been converted into issues and you want the runtime to keep draining ready work without naming each issue manually.
+Use queue mode after `runoq tick` has already materialized task issues for the current milestone and you want the runtime to keep draining ready work without naming each issue manually.
 
 ## Inspecting Outputs And Reports
 

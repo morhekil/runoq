@@ -9,6 +9,7 @@ load test_helper
     .labels.done and
     .labels.needsReview and
     .labels.blocked and
+    .labels.planApproved and
     .identity.appSlug and
     .identity.handle and
     .authorization.minimumPermission and
@@ -160,4 +161,47 @@ load test_helper
 
   [ "$status" -eq 0 ]
   [ "$output" = "$override_dir" ]
+}
+
+@test "plan file resolution reads plan from target runoq.json" {
+  project_dir="$TEST_TMPDIR/project"
+  mkdir -p "$project_dir"
+  cat >"$project_dir/runoq.json" <<'EOF'
+{
+  "plan": "docs/prd.md"
+}
+EOF
+
+  run_bash '
+    export TARGET_ROOT="'"$project_dir"'"
+    source "'"$RUNOQ_ROOT"'/scripts/lib/common.sh"
+    runoq::plan_file
+  '
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "docs/prd.md" ]
+}
+
+@test "plan file resolution fails clearly when target runoq.json is missing" {
+  project_dir="$TEST_TMPDIR/project-missing"
+  mkdir -p "$project_dir"
+
+  run_bash '
+    export TARGET_ROOT="'"$project_dir"'"
+    source "'"$RUNOQ_ROOT"'/scripts/lib/common.sh"
+    runoq::plan_file
+  '
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"runoq.json"* ]]
+}
+
+@test "all state labels include plan approval" {
+  run_bash '
+    source "'"$RUNOQ_ROOT"'/scripts/lib/common.sh"
+    runoq::all_state_labels
+  '
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"runoq:plan-approved"* ]]
 }

@@ -103,22 +103,129 @@ planning_preflight_json() {
 }
 
 ###############################################################################
+# Tick-planning helpers
+###############################################################################
+
+metadata_value() {
+  local body="$1"
+  local key="$2"
+  printf '%s\n' "$body" | awk -v key="$key" '
+    /<!-- runoq:meta/ {in_meta=1; next}
+    in_meta && /-->/ {exit}
+    in_meta && index($0, key ":") == 1 {
+      sub("^" key ":[[:space:]]*", "", $0)
+      print $0
+      exit
+    }
+  '
+}
+
+issue_type() {
+  local body="$1"
+  local value
+  value="$(metadata_value "$body" "type")"
+  printf '%s\n' "${value:-task}"
+}
+
+issue_parent_epic() {
+  metadata_value "$1" "parent_epic"
+}
+
+list_issues_json() {
+  local repo="$1"
+  runoq::gh issue list --repo "$repo" --state all --limit 200 --json number,title,body,labels,state,url
+}
+
+find_issue_by_title() {
+  local issues_json="$1"
+  local title="$2"
+  printf '%s' "$issues_json" | jq -c --arg title "$title" '.[] | select(.title == $title) | .'
+}
+
+find_open_child_by_type() {
+  local issues_json="$1"
+  local parent_epic="$2"
+  local wanted_type="$3"
+  while IFS= read -r issue; do
+    [[ -n "$issue" ]] || continue
+    local body parent type state
+    body="$(printf '%s' "$issue" | jq -r '.body // ""')"
+    parent="$(issue_parent_epic "$body")"
+    type="$(issue_type "$body")"
+    state="$(printf '%s' "$issue" | jq -r '.state')"
+    if [[ "$parent" == "$parent_epic" && "$type" == "$wanted_type" && "$state" == "OPEN" ]]; then
+      printf '%s\n' "$issue"
+      return 0
+    fi
+  done < <(printf '%s' "$issues_json" | jq -c '.[]')
+  return 1
+}
+
+issue_view_json() {
+  local repo="$1"
+  local issue_number="$2"
+  runoq::gh issue view "$issue_number" --repo "$repo" --json number,title,body,comments,labels,state,url
+}
+
+extract_marked_json_from_text() {
+  local text="$1"
+  local marker="$2"
+  local tmp
+  tmp="$(mktemp "${TMPDIR:-/tmp}/runoq-smoke-plan.XXXXXX")"
+  printf '%s' "$text" >"$tmp"
+  awk -v marker="$marker" '
+    $0 ~ marker {
+      saw_marker = 1
+      next
+    }
+    saw_marker && /^```/ {
+      if (!in_block) {
+        in_block = 1
+        block = ""
+        next
+      }
+      printf "%s", block
+      exit
+    }
+    in_block {
+      block = block $0 "\n"
+    }
+  ' "$tmp"
+}
+
+proposal_json_from_issue_view() {
+  local issue_view_json="$1"
+  local proposal body
+  proposal="$(printf '%s' "$issue_view_json" | jq -r '
+    .comments // []
+    | map(.body // "")
+    | map(select(contains("runoq:payload:plan-proposal")))
+    | last // empty
+  ')"
+  [[ -n "$proposal" ]] || return 1
+  body="$(extract_marked_json_from_text "$proposal" 'runoq:payload:plan-proposal')"
+  [[ -n "$body" ]] || return 1
+  printf '%s\n' "$body"
+}
+
+###############################################################################
 # Run planning smoke
 ###############################################################################
 
 run_planning() {
   local root run_id tmpdir target_dir artifacts_dir repo repo_url repo_json
-  local plan_log plan_output_file failures_json checks_json summary_json
+  local failures_json checks_json summary_json
   local claude_capture_dir claude_wrapper_path real_claude_bin
+  local plan_fixture rel_plan_path
   root="$(runoq::root)"
   run_id="$(smoke_run_id)"
   tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/runoq-live-planning.XXXXXX")"
   target_dir="$tmpdir/target"
   artifacts_dir="$(smoke_run_artifacts_dir "$run_id")"
-  plan_log="$artifacts_dir/plan.log"
-  plan_output_file="$artifacts_dir/plan-output.json"
   failures_json='[]'
   checks_json='[]'
+  plan_fixture="$root/test/fixtures/plans/progress-library-discovery.md"
+  rel_plan_path="docs/progress-library-discovery.md"
 
   # shellcheck disable=SC2329
   cleanup() {
@@ -144,6 +251,10 @@ run_planning() {
   # Create managed repo
   smoke_log "seeding local target repo into ${target_dir}"
   seed_lifecycle_repo "$target_dir"
+  mkdir -p "$target_dir/docs"
+  cp "$plan_fixture" "$target_dir/$rel_plan_path"
+  git -C "$target_dir" add "$rel_plan_path"
+  git -C "$target_dir" commit -m "Add planning smoke discovery fixture" >/dev/null
   smoke_log "creating managed repo from seeded target"
   repo_json="$(create_managed_repo "$target_dir" "$run_id")"
   repo="$(printf '%s' "$repo_json" | jq -r '.repo')"
@@ -178,13 +289,16 @@ run_planning() {
   claude_wrapper_path="$tmpdir/claude-capture"
   real_claude_bin="$(smoke_claude_bin)"
   create_claude_capture_wrapper "$claude_wrapper_path"
+  export RUNOQ_CLAUDE_BIN="$claude_wrapper_path"
+  export RUNOQ_SMOKE_REAL_CLAUDE_BIN="$real_claude_bin"
+  export RUNOQ_SMOKE_CLAUDE_CAPTURE_DIR="$claude_capture_dir"
 
   # Run runoq init
   smoke_log "running runoq init"
   local init_exit=0
   (
     cd "$target_dir"
-    "$root/bin/runoq" init
+    "$root/scripts/setup.sh" --plan "$rel_plan_path"
   ) >"$artifacts_dir/init.log" 2>&1 || init_exit=$?
 
   if [[ "$init_exit" -ne 0 ]]; then
@@ -193,109 +307,116 @@ run_planning() {
     checks_json="$(append_check "$checks_json" "repo_bootstrapped")"
   fi
 
-  # Run plan decomposition
-  local plan_exit=0
+  local output issues_json planning_issue planning_number planning_view proposal_json milestone1 milestone1_number
+  local milestone1_plan milestone1_plan_number milestone1_plan_view created_tasks task_count milestone_count has_discovery_milestone comment_interactions
+  comment_interactions=0
+
   if [[ "$(printf '%s' "$failures_json" | jq 'length')" -eq 0 ]]; then
-    local plan_file="$root/test/fixtures/plans/progress-library.md"
-    smoke_log "running runoq plan (auto-confirm) against ${plan_file}"
-    smoke_log "log -> ${plan_log}"
-    set +e
-    (
+    smoke_log "running tick bootstrap"
+    output="$(
       cd "$target_dir"
-      export RUNOQ_AUTO_CONFIRM=1
-      export RUNOQ_CLAUDE_BIN="$claude_wrapper_path"
-      export RUNOQ_SMOKE_REAL_CLAUDE_BIN="$real_claude_bin"
-      export RUNOQ_SMOKE_CLAUDE_CAPTURE_DIR="$claude_capture_dir"
-      "$root/scripts/plan.sh" "$repo" "$plan_file" --auto-confirm
-    ) >"$plan_output_file" 2>"$plan_log"
-    plan_exit="$?"
-    set -e
-    smoke_log "plan.sh exited with code ${plan_exit}"
+      "$root/scripts/tick.sh"
+    )"
+    printf '%s\n' "$output" >"$artifacts_dir/tick-bootstrap.log"
 
-    if [[ "$plan_exit" -ne 0 ]]; then
-      failures_json="$(append_missing "$failures_json" "plan.sh failed (exit ${plan_exit}). See ${plan_log}.")"
+    issues_json="$(list_issues_json "$repo")"
+    planning_issue="$(find_issue_by_title "$issues_json" "Break plan into milestones")"
+    planning_number="$(printf '%s' "$planning_issue" | jq -r '.number // empty')"
+    if [[ -z "$planning_number" ]]; then
+      failures_json="$(append_missing "$failures_json" "Bootstrap tick did not create the initial planning issue.")"
     else
-      checks_json="$(append_check "$checks_json" "plan_decomposed")"
-    fi
-  fi
-
-  # Evaluate results
-  local created_issues='[]'
-  if [[ -f "$plan_output_file" ]] && jq -e '.issues' "$plan_output_file" >/dev/null 2>&1; then
-    created_issues="$(jq '.issues' "$plan_output_file")"
-    checks_json="$(append_check "$checks_json" "issues_created")"
-  fi
-
-  local epic_count task_count total_count
-  total_count="$(printf '%s' "$created_issues" | jq 'length')"
-  epic_count="$(printf '%s' "$created_issues" | jq '[.[] | select(.type == "epic")] | length')"
-  task_count="$(printf '%s' "$created_issues" | jq '[.[] | select(.type == "task")] | length')"
-  smoke_log "created ${total_count} issues: ${epic_count} epics, ${task_count} tasks"
-
-  # Structural assertions
-  if [[ "$total_count" -eq 0 ]]; then
-    failures_json="$(append_missing "$failures_json" "No issues were created.")"
-  fi
-
-  if [[ "$epic_count" -eq 0 ]]; then
-    failures_json="$(append_missing "$failures_json" "No epics were created (expected at least 1).")"
-  fi
-
-  if [[ "$task_count" -lt 2 ]]; then
-    failures_json="$(append_missing "$failures_json" "Expected at least 2 tasks, got ${task_count}.")"
-  fi
-
-  # Check that all tasks have complexity_rationale
-  local tasks_without_rationale
-  tasks_without_rationale="$(printf '%s' "$created_issues" | jq '[.[] | select(.type == "task" and (.complexity_rationale == null or .complexity_rationale == ""))] | length')"
-  if [[ "$tasks_without_rationale" -gt 0 ]]; then
-    failures_json="$(append_missing "$failures_json" "${tasks_without_rationale} task(s) missing complexity_rationale.")"
-  fi
-
-  # Check that tasks with parent_epic_key reference a valid epic
-  local orphaned_tasks
-  orphaned_tasks="$(printf '%s' "$created_issues" | jq '[.[] | select(.type == "task" and .parent_epic_key != null)] | length')"
-  if [[ "$epic_count" -gt 0 && "$orphaned_tasks" -eq 0 && "$task_count" -gt 0 ]]; then
-    failures_json="$(append_missing "$failures_json" "Tasks exist but none are linked to an epic.")"
-  fi
-
-  # Verify issues actually exist on GitHub
-  if [[ "$total_count" -gt 0 ]]; then
-    local verified_count=0
-    while IFS= read -r issue; do
-      [[ -n "$issue" ]] || continue
-      local issue_number
-      issue_number="$(printf '%s' "$issue" | jq -r '.number')"
-      if runoq::gh issue view "$issue_number" --repo "$repo" --json number >/dev/null 2>&1; then
-        verified_count=$((verified_count + 1))
+      checks_json="$(append_check "$checks_json" "bootstrap_planning_issue_created")"
+      planning_view="$(issue_view_json "$repo" "$planning_number")"
+      proposal_json="$(proposal_json_from_issue_view "$planning_view" || true)"
+      if [[ -z "$proposal_json" ]]; then
+        failures_json="$(append_missing "$failures_json" "Bootstrap tick did not post a parseable milestone proposal.")"
       else
-        failures_json="$(append_missing "$failures_json" "Issue #${issue_number} not found on GitHub.")"
+        checks_json="$(append_check "$checks_json" "bootstrap_proposal_posted")"
       fi
-    done < <(printf '%s' "$created_issues" | jq -c '.[]')
-    smoke_log "verified ${verified_count}/${total_count} issues exist on GitHub"
-    if [[ "$verified_count" -eq "$total_count" ]]; then
-      checks_json="$(append_check "$checks_json" "issues_verified_on_github")"
     fi
   fi
 
-  # Verify issue metadata on GitHub (complexity_rationale in body)
-  if [[ "$task_count" -gt 0 ]]; then
-    local rationale_verified=0
-    while IFS= read -r issue; do
-      [[ -n "$issue" ]] || continue
-      local issue_number issue_body
-      issue_number="$(printf '%s' "$issue" | jq -r '.number')"
-      issue_body="$(runoq::gh issue view "$issue_number" --repo "$repo" --json body | jq -r '.body // ""')"
-      if printf '%s' "$issue_body" | grep -q 'complexity_rationale:'; then
-        rationale_verified=$((rationale_verified + 1))
-      fi
-    done < <(printf '%s' "$created_issues" | jq -c '.[] | select(.type == "task")')
-    smoke_log "verified complexity_rationale in ${rationale_verified}/${task_count} task issue bodies"
-    if [[ "$rationale_verified" -eq "$task_count" ]]; then
-      checks_json="$(append_check "$checks_json" "complexity_rationale_in_metadata")"
+  if [[ "$(printf '%s' "$failures_json" | jq 'length')" -eq 0 ]]; then
+    smoke_log "injecting planning question comment"
+    runoq::gh issue comment "$planning_number" --repo "$repo" --body "Why this milestone order?" >/dev/null
+    comment_interactions=$((comment_interactions + 1))
+    output="$(
+      cd "$target_dir"
+      "$root/scripts/tick.sh"
+    )"
+    printf '%s\n' "$output" >"$artifacts_dir/tick-comment.log"
+    planning_view="$(issue_view_json "$repo" "$planning_number")"
+    if printf '%s' "$planning_view" | jq -e '(.comments // []) | any(.body // "" | contains("runoq:event"))' >/dev/null; then
+      checks_json="$(append_check "$checks_json" "planning_comment_answered")"
     else
-      failures_json="$(append_missing "$failures_json" "Only ${rationale_verified}/${task_count} tasks have complexity_rationale in issue body metadata.")"
+      failures_json="$(append_missing "$failures_json" "Tick did not answer the planning question with a runoq:event comment.")"
     fi
+  fi
+
+  if [[ "$(printf '%s' "$failures_json" | jq 'length')" -eq 0 ]]; then
+    runoq::gh issue edit "$planning_number" --repo "$repo" --add-label "$(runoq::config_get '.labels.planApproved')" >/dev/null
+    output="$(
+      cd "$target_dir"
+      "$root/scripts/tick.sh"
+    )"
+    printf '%s\n' "$output" >"$artifacts_dir/tick-approve-milestones.log"
+    issues_json="$(list_issues_json "$repo")"
+    milestone1="$(printf '%s' "$issues_json" | jq -c '
+      .[] | select(.state == "OPEN" and .title != "Project Planning" and (.body // "" | contains("type: epic")))
+    ' | head -n 1)"
+    milestone1_number="$(printf '%s' "$milestone1" | jq -r '.number // empty')"
+    milestone_count="$(printf '%s' "$issues_json" | jq '[.[] | select(.state == "OPEN" and .title != "Project Planning" and (.body // "" | contains("type: epic")))] | length')"
+    has_discovery_milestone="$(printf '%s' "$issues_json" | jq '[.[] | select(.state == "OPEN" and (.body // "" | contains("milestone_type: discovery")))] | length > 0')"
+    if [[ -z "$milestone1_number" || "$milestone_count" -lt 1 ]]; then
+      failures_json="$(append_missing "$failures_json" "Approved milestone review did not materialize milestone epics.")"
+    else
+      checks_json="$(append_check "$checks_json" "milestones_materialized")"
+    fi
+  else
+    milestone_count=0
+    has_discovery_milestone=false
+  fi
+
+  if [[ "$(printf '%s' "$failures_json" | jq 'length')" -eq 0 ]]; then
+    milestone1_plan="$(find_open_child_by_type "$issues_json" "$milestone1_number" planning || true)"
+    milestone1_plan_number="$(printf '%s' "$milestone1_plan" | jq -r '.number // empty')"
+    if [[ -z "$milestone1_plan_number" ]]; then
+      failures_json="$(append_missing "$failures_json" "No planning issue exists under the first milestone.")"
+    else
+      output="$(
+        cd "$target_dir"
+        "$root/scripts/tick.sh"
+      )"
+      printf '%s\n' "$output" >"$artifacts_dir/tick-task-proposal.log"
+      milestone1_plan_view="$(issue_view_json "$repo" "$milestone1_plan_number")"
+      proposal_json="$(proposal_json_from_issue_view "$milestone1_plan_view" || true)"
+      if [[ -z "$proposal_json" ]]; then
+        failures_json="$(append_missing "$failures_json" "Tick did not post a task proposal for the first milestone.")"
+      else
+        checks_json="$(append_check "$checks_json" "task_proposal_posted")"
+      fi
+    fi
+  fi
+
+  if [[ "$(printf '%s' "$failures_json" | jq 'length')" -eq 0 ]]; then
+    runoq::gh issue edit "$milestone1_plan_number" --repo "$repo" --add-label "$(runoq::config_get '.labels.planApproved')" >/dev/null
+    output="$(
+      cd "$target_dir"
+      "$root/scripts/tick.sh"
+    )"
+    printf '%s\n' "$output" >"$artifacts_dir/tick-approve-tasks.log"
+    issues_json="$(list_issues_json "$repo")"
+    created_tasks="$(printf '%s' "$issues_json" | jq -c --argjson parent "$milestone1_number" '
+      [.[] | select(.state == "OPEN" and (.body // "" | contains("type: task")) and (.body // "" | contains("parent_epic: " + ($parent|tostring))))]
+    ')"
+    task_count="$(printf '%s' "$created_tasks" | jq 'length')"
+    if [[ "$task_count" -lt 1 ]]; then
+      failures_json="$(append_missing "$failures_json" "Approved task proposal did not create task issues.")"
+    else
+      checks_json="$(append_check "$checks_json" "tasks_materialized")"
+    fi
+  else
+    task_count=0
   fi
 
   # Build summary
@@ -312,25 +433,24 @@ run_planning() {
     --arg repo "$repo" \
     --arg run_id "$run_id" \
     --arg artifacts_dir "$artifacts_dir" \
-    --argjson plan_exit "$plan_exit" \
     --argjson checks "$checks_json" \
     --argjson failures "$failures_json" \
-    --argjson created_issues "$created_issues" \
-    --argjson epic_count "$epic_count" \
-    --argjson task_count "$task_count" '{
+    --argjson milestone_count "$milestone_count" \
+    --argjson task_count "$task_count" \
+    --argjson has_discovery_milestone "$has_discovery_milestone" \
+    --argjson comment_interactions "$comment_interactions" '{
     status: $status,
     mode: $mode,
     repo: $repo,
     run_id: $run_id,
     artifacts_dir: $artifacts_dir,
-    plan_exit_code: $plan_exit,
     checks: $checks,
     failures: $failures,
+    comment_interactions: $comment_interactions,
     planning: {
-      total_issues: ($created_issues | length),
-      epics: $epic_count,
+      milestones: $milestone_count,
       tasks: $task_count,
-      issues: $created_issues
+      has_discovery_milestone: $has_discovery_milestone
     }
   }')"
 

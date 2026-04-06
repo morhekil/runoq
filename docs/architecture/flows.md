@@ -1,12 +1,86 @@
 # Execution And Maintenance Flows
 
-This document describes the major runtime sequences in `runoq`: planning, execution, reconciliation, mention handling, and maintenance review.
+This document describes the major runtime sequences in `runoq`: iterative planning, execution, reconciliation, mention handling, and maintenance review.
 
 For `runoq run`, the orchestrator and issue-runner are now shell scripts (`orchestrator.sh` and `issue-runner.sh`), not agents. The orchestrator drives phase transitions (INIT, CRITERIA, DEVELOP, REVIEW, DECIDE, FINALIZE, INTEGRATE), spawns agents for bounded reasoning tasks, and handles mention triage. The issue-runner drives codex rounds within the DEVELOP phase.
 
+## `runoq tick`
+
+`runoq tick` is the iterative planning and coordination entrypoint. It reads the committed `runoq.json` in the target repository, inspects GitHub issue state, executes exactly one state transition, and exits with a single-line status.
+
+The tick flow unifies:
+
+- bootstrap planning for a brand-new project
+- plan proposal dispatch and adversarial review
+- human comment handling on planning and adjustment issues
+- approved proposal materialization into milestone or task issues
+- implementation dispatch when milestone tasks are ready
+- milestone review and discovery-driven adjustment pauses
+
+```mermaid
+sequenceDiagram
+  actor Operator
+  participant CLI as bin/runoq
+  participant Tick as tick.sh
+  participant Dispatch as plan-dispatch.sh
+  participant Comment as plan-comment-handler.sh
+  participant Queue as gh-issue-queue.sh
+  participant GH as GitHub
+  participant Claude as planning agents
+
+  Operator->>CLI: runoq tick
+  CLI->>Tick: invoke tick.sh
+  Tick->>GH: list issues and labels
+  alt no open milestone epics exist
+    Tick->>Queue: create Project Planning epic
+    Tick->>Queue: create planning issue
+    Tick->>Dispatch: bootstrap proposal
+    Dispatch->>Claude: decomposer + technical reviewer + product reviewer
+    Dispatch->>GH: post proposal comment
+  else pending planning or adjustment review exists
+    Tick->>GH: inspect latest comments
+    alt unanswered human comment exists
+      Tick->>Comment: answer plan-review comment
+      Comment->>Claude: plan-comment-responder
+      Comment->>GH: post runoq:event reply
+    else awaiting human decision
+      Tick-->>Operator: single-line awaiting status
+    end
+  else approved planning or adjustment review exists
+    Tick->>GH: read approved proposal
+    Tick->>Queue: create milestone/task issues
+    Tick->>Queue: close review issue via set-status done
+  else current milestone has open planning child without proposal
+    Tick->>Dispatch: generate proposal
+    Dispatch->>GH: post proposal comment
+  else current milestone has open tasks
+    Tick->>GH: reconcile and dispatch implementation
+  else milestone is complete
+    Tick->>Claude: milestone-reviewer
+    alt adjustments required or milestone_type is discovery
+      Tick->>Queue: create adjustment issue
+    else clean completion
+      Tick->>Queue: close milestone epic
+      Tick->>Queue: create planning issue under next milestone
+    end
+  end
+```
+
+### Tick state order
+
+| State check | Tick behavior |
+| --- | --- |
+| No milestone epics exist | Bootstrap `Project Planning`, create planning issue, dispatch proposal |
+| Pending review exists without approval label | Either answer comments or report `Awaiting human decision` |
+| Approved review exists | Materialize proposal into GitHub issues and close review issue |
+| Current milestone has undispatched planning child | Run `plan-dispatch.sh` |
+| Current milestone has open tasks | Reconcile and dispatch implementation work |
+| Current milestone is complete | Run milestone review, then either create adjustment issue or advance |
+| No open milestone epics remain | Report `Project complete` |
+
 ## `runoq plan`
 
-`runoq plan <file>` is the plan-decomposition entrypoint. The CLI resolves context, then `scripts/plan.sh` invokes the `plan-decomposer` agent to produce an epic/task hierarchy. Each item receives an `estimated_complexity` and `complexity_rationale`. Issue creation is handled deterministically by `plan.sh` itself (not by the agent), using `gh-issue-queue.sh create`. Epics are created first, then tasks are created and linked as sub-issues via the GitHub sub-issues API.
+`runoq plan <file>` remains available as a transitional compatibility path, but it is deprecated in favor of `runoq tick`. The legacy flow still decomposes a full plan document into an epic/task hierarchy in one pass.
 
 ```mermaid
 sequenceDiagram

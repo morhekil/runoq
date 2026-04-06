@@ -186,6 +186,156 @@ load test_helper
   [ "$status" -eq 0 ]
 }
 
+@test "plan reviewer technical prompt includes review dimensions and verdict contract" {
+  run grep -n '^name: plan-reviewer-technical$' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-technical.md"
+  [ "$status" -eq 0 ]
+  run grep -n '^model: claude-opus-4-6$' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-technical.md"
+  [ "$status" -eq 0 ]
+  run grep -n '^description:' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-technical.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'Feasibility' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-technical.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'Scope' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-technical.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'Technical risk' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-technical.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'Dependency sanity' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-technical.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'Complexity honesty' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-technical.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'KISS/YAGNI' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-technical.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'Tech debt' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-technical.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'runoq:payload:plan-review-technical' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-technical.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'REVIEW-TYPE: plan-technical' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-technical.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'VERDICT: PASS | ITERATE' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-technical.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'SCORE:' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-technical.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'CHECKLIST:' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-technical.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'Do NOT read source code' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-technical.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'Do NOT create issues' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-technical.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'Output ONLY the verdict block' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-technical.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'reviewType' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-technical.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "plan reviewer product prompt includes review dimensions and distinct marker" {
+  run grep -n '^name: plan-reviewer-product$' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-product.md"
+  [ "$status" -eq 0 ]
+  run grep -n '^model: claude-opus-4-6$' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-product.md"
+  [ "$status" -eq 0 ]
+  run grep -n '^description:' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-product.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'PRD alignment' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-product.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'MVP focus' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-product.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'Feature scope' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-product.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'Milestone sequencing' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-product.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'Acceptance criteria quality' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-product.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'Discovery awareness' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-product.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'runoq:payload:plan-review-product' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-product.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'runoq:payload:plan-review-technical' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-product.md"
+  [ "$status" -ne 0 ]
+  run grep -n 'REVIEW-TYPE: plan-product' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-product.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'Do NOT read source code' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-product.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'Do NOT create issues' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-product.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'Output ONLY the verdict block' "$RUNOQ_ROOT/.claude/agents/plan-reviewer-product.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "task decomposer prompt documents single-milestone task output" {
+  run grep -n '^name: task-decomposer$' "$RUNOQ_ROOT/.claude/agents/task-decomposer.md"
+  [ "$status" -eq 0 ]
+  run grep -n '^model: claude-opus-4-6$' "$RUNOQ_ROOT/.claude/agents/task-decomposer.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'runoq:payload:task-decomposer' "$RUNOQ_ROOT/.claude/agents/task-decomposer.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'milestonePath' "$RUNOQ_ROOT/.claude/agents/task-decomposer.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'planPath' "$RUNOQ_ROOT/.claude/agents/task-decomposer.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'priorFindingsPath' "$RUNOQ_ROOT/.claude/agents/task-decomposer.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'templatePath' "$RUNOQ_ROOT/.claude/agents/task-decomposer.md"
+  [ "$status" -eq 0 ]
+  run grep -n '"estimated_complexity"' "$RUNOQ_ROOT/.claude/agents/task-decomposer.md"
+  [ "$status" -eq 0 ]
+  run grep -n '"complexity_rationale"' "$RUNOQ_ROOT/.claude/agents/task-decomposer.md"
+  [ "$status" -eq 0 ]
+  run grep -n '"depends_on_keys"' "$RUNOQ_ROOT/.claude/agents/task-decomposer.md"
+  [ "$status" -eq 0 ]
+  run grep -n '"goal"' "$RUNOQ_ROOT/.claude/agents/task-decomposer.md"
+  [ "$status" -ne 0 ]
+  run grep -n '"sequencing_rationale"' "$RUNOQ_ROOT/.claude/agents/task-decomposer.md"
+  [ "$status" -ne 0 ]
+  run grep -n 'single milestone' "$RUNOQ_ROOT/.claude/agents/task-decomposer.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'Do NOT create issues' "$RUNOQ_ROOT/.claude/agents/task-decomposer.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'Do NOT read source code' "$RUNOQ_ROOT/.claude/agents/task-decomposer.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "milestone reviewer prompt documents adjustment output contract" {
+  run grep -n '^name: milestone-reviewer$' "$RUNOQ_ROOT/.claude/agents/milestone-reviewer.md"
+  [ "$status" -eq 0 ]
+  run grep -n '^model: claude-opus-4-6$' "$RUNOQ_ROOT/.claude/agents/milestone-reviewer.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'runoq:payload:milestone-reviewer' "$RUNOQ_ROOT/.claude/agents/milestone-reviewer.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'milestonePath' "$RUNOQ_ROOT/.claude/agents/milestone-reviewer.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'planPath' "$RUNOQ_ROOT/.claude/agents/milestone-reviewer.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'completedTasksPath' "$RUNOQ_ROOT/.claude/agents/milestone-reviewer.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'remainingMilestonesPath' "$RUNOQ_ROOT/.claude/agents/milestone-reviewer.md"
+  [ "$status" -eq 0 ]
+  run grep -n '"milestone_number"' "$RUNOQ_ROOT/.claude/agents/milestone-reviewer.md"
+  [ "$status" -eq 0 ]
+  run grep -n '"status"' "$RUNOQ_ROOT/.claude/agents/milestone-reviewer.md"
+  [ "$status" -eq 0 ]
+  run grep -n '"delivered_criteria"' "$RUNOQ_ROOT/.claude/agents/milestone-reviewer.md"
+  [ "$status" -eq 0 ]
+  run grep -n '"missed_criteria"' "$RUNOQ_ROOT/.claude/agents/milestone-reviewer.md"
+  [ "$status" -eq 0 ]
+  run grep -n '"learnings"' "$RUNOQ_ROOT/.claude/agents/milestone-reviewer.md"
+  [ "$status" -eq 0 ]
+  run grep -n '"proposed_adjustments"' "$RUNOQ_ROOT/.claude/agents/milestone-reviewer.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'modify' "$RUNOQ_ROOT/.claude/agents/milestone-reviewer.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'new_milestone' "$RUNOQ_ROOT/.claude/agents/milestone-reviewer.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'discovery' "$RUNOQ_ROOT/.claude/agents/milestone-reviewer.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'remove' "$RUNOQ_ROOT/.claude/agents/milestone-reviewer.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'Do NOT create issues' "$RUNOQ_ROOT/.claude/agents/milestone-reviewer.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'Do NOT modify GitHub state' "$RUNOQ_ROOT/.claude/agents/milestone-reviewer.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'proposed_adjustments.*\[\]' "$RUNOQ_ROOT/.claude/agents/milestone-reviewer.md"
+  [ "$status" -eq 0 ]
+}
+
 @test "subagent worktree orchestration skill defines hard delegation boundaries" {
   run grep -n "^name: subagent-worktree-orchestration$" "$RUNOQ_ROOT/.agents/skills/subagent-worktree-orchestration/SKILL.md"
   [ "$status" -eq 0 ]

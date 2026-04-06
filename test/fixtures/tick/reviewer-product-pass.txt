@@ -1,0 +1,6 @@
+<!-- runoq:payload:plan-review-product -->
+REVIEW-TYPE: plan-product
+VERDICT: PASS
+SCORE: 27/30
+CHECKLIST:
+- [ ] Product scope is appropriately staged.

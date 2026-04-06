@@ -187,6 +187,54 @@ EOF
   [ "$shell_fail_err" = "$runtime_fail_err" ]
 }
 
+@test "acceptance parity: issue queue set-status done closes the issue in both modes" {
+  prepare_runtime_bin
+
+  scenario="$TEST_TMPDIR/scenario.json"
+  write_fake_gh_scenario "$scenario" <<EOF
+[
+  {
+    "contains": ["issue", "view", "42", "--repo owner/repo", "--json labels"],
+    "stdout": "{\"labels\":[{\"name\":\"runoq:in-progress\"},{\"name\":\"bug\"}]}"
+  },
+  {
+    "contains": ["issue", "edit", "42", "--repo owner/repo", "--remove-label runoq:in-progress", "--add-label runoq:done"],
+    "stdout": ""
+  },
+  {
+    "contains": ["issue", "close", "42", "--repo owner/repo"],
+    "stdout": ""
+  }
+]
+EOF
+
+  project_dir="$TEST_TMPDIR/project"
+  make_git_repo "$project_dir"
+
+  run bash -lc 'cd "'"$project_dir"'" && RUNOQ_NO_AUTO_TOKEN=1 RUNOQ_ISSUE_QUEUE_IMPLEMENTATION=shell FAKE_GH_SCENARIO="'"$scenario"'" FAKE_GH_STATE="'"$TEST_TMPDIR"'/shell-done.state" FAKE_GH_LOG="'"$TEST_TMPDIR"'/shell-done.log" GH_BIN="'"$RUNOQ_ROOT"'/test/helpers/gh" "'"$RUNOQ_ROOT"'/scripts/gh-issue-queue.sh" set-status owner/repo 42 done 2>"'"$TEST_TMPDIR"'/shell-done.err"'
+  shell_status="$status"
+  shell_output="$output"
+
+  run bash -lc 'cd "'"$project_dir"'" && RUNOQ_NO_AUTO_TOKEN=1 RUNOQ_RUNTIME_BIN="'"$RUNOQ_RUNTIME_BIN"'" RUNOQ_ISSUE_QUEUE_IMPLEMENTATION=runtime FAKE_GH_SCENARIO="'"$scenario"'" FAKE_GH_STATE="'"$TEST_TMPDIR"'/runtime-done.state" FAKE_GH_LOG="'"$TEST_TMPDIR"'/runtime-done.log" GH_BIN="'"$RUNOQ_ROOT"'/test/helpers/gh" "'"$RUNOQ_ROOT"'/scripts/gh-issue-queue.sh" set-status owner/repo 42 done 2>"'"$TEST_TMPDIR"'/runtime-done.err"'
+  runtime_status="$status"
+  runtime_output="$output"
+
+  run cat "$TEST_TMPDIR/shell-done.err"
+  shell_err="$output"
+  run cat "$TEST_TMPDIR/runtime-done.err"
+  runtime_err="$output"
+
+  [ "$shell_status" -eq "$runtime_status" ]
+  [ "$shell_status" -eq 0 ]
+  [ "$(normalize_json "$shell_output")" = "$(normalize_json "$runtime_output")" ]
+  [ "$shell_err" = "$runtime_err" ]
+
+  run grep -q 'issue close.*42.*--repo owner/repo' "$TEST_TMPDIR/shell-done.log"
+  [ "$status" -eq 0 ]
+  run grep -q 'issue close.*42.*--repo owner/repo' "$TEST_TMPDIR/runtime-done.log"
+  [ "$status" -eq 0 ]
+}
+
 @test "acceptance parity: issue queue create and epic-status match shell and runtime contracts" {
   prepare_runtime_bin
 

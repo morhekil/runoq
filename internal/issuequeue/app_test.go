@@ -70,6 +70,51 @@ func TestListParsesMetadataVariants(t *testing.T) {
 	}
 }
 
+func TestListParsesPlanningAndAdjustmentTypes(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t, []string{"list", "owner/repo", "runoq:ready"})
+	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+		t.Helper()
+		if req.Name != "gh" {
+			t.Fatalf("unexpected command: %s %v", req.Name, req.Args)
+		}
+		_, _ = req.Stdout.Write([]byte(`[
+  {
+    "number": 99,
+    "title": "Plan milestone 1",
+    "body": "<!-- runoq:meta\ndepends_on: []\npriority: 1\nestimated_complexity: low\ntype: planning\n-->\n\nBody",
+    "labels": [{"name":"runoq:ready"}],
+    "url": "https://example.test/issues/99"
+  },
+  {
+    "number": 100,
+    "title": "Adjust milestones",
+    "body": "<!-- runoq:meta\ndepends_on: []\npriority: 1\nestimated_complexity: low\ntype: adjustment\n-->\n\nBody",
+    "labels": [{"name":"runoq:ready"}],
+    "url": "https://example.test/issues/100"
+  }
+]`))
+		return nil
+	})
+
+	code := app.Run(t.Context())
+	if code != 0 {
+		t.Fatalf("Run returned %d stderr=%q", code, app.stderr.(*bytes.Buffer).String())
+	}
+
+	var issues []listedIssue
+	if err := json.Unmarshal(app.stdout.(*bytes.Buffer).Bytes(), &issues); err != nil {
+		t.Fatalf("unmarshal output: %v\n%s", err, app.stdout.(*bytes.Buffer).String())
+	}
+	if len(issues) != 2 {
+		t.Fatalf("expected 2 issues, got %d", len(issues))
+	}
+	if issues[0].Type != "planning" || issues[1].Type != "adjustment" {
+		t.Fatalf("unexpected types: %+v", issues)
+	}
+}
+
 func TestNextSkipsBlockedDependencies(t *testing.T) {
 	t.Parallel()
 
@@ -143,6 +188,44 @@ func TestSetStatusRemovesExistingRunoqLabels(t *testing.T) {
 	}
 }
 
+func TestSetStatusDoneClosesIssue(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t, []string{"set-status", "owner/repo", "42", "done"})
+	var commands []string
+	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+		t.Helper()
+		command := req.Name + " " + strings.Join(req.Args, " ")
+		commands = append(commands, command)
+		switch {
+		case strings.Contains(command, "issue view 42 --repo owner/repo --json labels"):
+			_, _ = req.Stdout.Write([]byte(`{"labels":[{"name":"runoq:in-progress"},{"name":"bug"}]}`))
+			return nil
+		case strings.Contains(command, "issue edit 42 --repo owner/repo --remove-label runoq:in-progress --add-label runoq:done"):
+			return nil
+		case strings.Contains(command, "issue close 42 --repo owner/repo"):
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s", command)
+			return nil
+		}
+	})
+
+	code := app.Run(t.Context())
+	if code != 0 {
+		t.Fatalf("Run returned %d stderr=%q", code, app.stderr.(*bytes.Buffer).String())
+	}
+	if len(commands) != 3 {
+		t.Fatalf("unexpected command count: %v", commands)
+	}
+	if !strings.Contains(commands[2], "issue close 42 --repo owner/repo") {
+		t.Fatalf("expected close command, got %v", commands)
+	}
+	if !strings.Contains(app.stdout.(*bytes.Buffer).String(), `"label": "runoq:done"`) {
+		t.Fatalf("unexpected output: %s", app.stdout.(*bytes.Buffer).String())
+	}
+}
+
 func TestCreateWritesMetadataAndLinksParentEpic(t *testing.T) {
 	t.Parallel()
 
@@ -195,6 +278,90 @@ func TestCreateWritesMetadataAndLinksParentEpic(t *testing.T) {
 	}
 	if len(commands) != 3 {
 		t.Fatalf("unexpected command count: %v", commands)
+	}
+}
+
+func TestCreatePlanningWritesPlanningType(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t, []string{
+		"create", "owner/repo", "Plan milestone 1", "body",
+		"--type", "planning",
+		"--priority", "1",
+		"--estimated-complexity", "low",
+	})
+	var bodyText string
+	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+		t.Helper()
+		command := req.Name + " " + strings.Join(req.Args, " ")
+		switch {
+		case strings.Contains(command, "issue create --repo owner/repo --title Plan milestone 1 --body-file "):
+			for i := range len(req.Args) {
+				if req.Args[i] == "--body-file" {
+					data, err := os.ReadFile(req.Args[i+1])
+					if err != nil {
+						t.Fatalf("read body file: %v", err)
+					}
+					bodyText = string(data)
+					break
+				}
+			}
+			_, _ = req.Stdout.Write([]byte("https://github.com/owner/repo/issues/99"))
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s", command)
+			return nil
+		}
+	})
+
+	code := app.Run(t.Context())
+	if code != 0 {
+		t.Fatalf("Run returned %d stderr=%q", code, app.stderr.(*bytes.Buffer).String())
+	}
+	if !strings.Contains(bodyText, "type: planning") {
+		t.Fatalf("unexpected body file:\n%s", bodyText)
+	}
+}
+
+func TestCreateAdjustmentWritesAdjustmentType(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t, []string{
+		"create", "owner/repo", "Adjust milestones", "body",
+		"--type", "adjustment",
+		"--priority", "1",
+		"--estimated-complexity", "low",
+	})
+	var bodyText string
+	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+		t.Helper()
+		command := req.Name + " " + strings.Join(req.Args, " ")
+		switch {
+		case strings.Contains(command, "issue create --repo owner/repo --title Adjust milestones --body-file "):
+			for i := range len(req.Args) {
+				if req.Args[i] == "--body-file" {
+					data, err := os.ReadFile(req.Args[i+1])
+					if err != nil {
+						t.Fatalf("read body file: %v", err)
+					}
+					bodyText = string(data)
+					break
+				}
+			}
+			_, _ = req.Stdout.Write([]byte("https://github.com/owner/repo/issues/100"))
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s", command)
+			return nil
+		}
+	})
+
+	code := app.Run(t.Context())
+	if code != 0 {
+		t.Fatalf("Run returned %d stderr=%q", code, app.stderr.(*bytes.Buffer).String())
+	}
+	if !strings.Contains(bodyText, "type: adjustment") {
+		t.Fatalf("unexpected body file:\n%s", bodyText)
 	}
 }
 

@@ -133,6 +133,36 @@ EOF
 
   [ "$status" -eq 0 ]
   [[ "$output" == *'"label": "runoq:in-progress"'* ]]
+  run grep -q 'issue close' "$FAKE_GH_LOG"
+  [ "$status" -ne 0 ]
+}
+
+@test "issue queue set-status done closes the issue with repo scope" {
+  scenario="$TEST_TMPDIR/scenario.json"
+  write_fake_gh_scenario "$scenario" <<EOF
+[
+  {
+    "contains": ["issue", "view", "42", "--repo owner/repo", "--json labels"],
+    "stdout": "{\"labels\":[{\"name\":\"runoq:in-progress\"},{\"name\":\"bug\"}]}"
+  },
+  {
+    "contains": ["issue", "edit", "42", "--repo owner/repo", "--remove-label runoq:in-progress", "--add-label runoq:done"],
+    "stdout": ""
+  },
+  {
+    "contains": ["issue", "close", "42", "--repo owner/repo"],
+    "stdout": ""
+  }
+]
+EOF
+  use_fake_gh "$scenario"
+
+  run "$RUNOQ_ROOT/scripts/gh-issue-queue.sh" set-status owner/repo 42 done
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"label": "runoq:done"'* ]]
+  run grep -q 'issue close.*42.*--repo owner/repo' "$FAKE_GH_LOG"
+  [ "$status" -eq 0 ]
 }
 
 @test "issue queue create writes metadata block and ready label" {
@@ -157,6 +187,48 @@ EOF
   [ "$status" -eq 0 ]
   run grep -n "estimated_complexity: low" "$FAKE_GH_CAPTURE_DIR/0.body"
   [ "$status" -eq 0 ]
+}
+
+@test "issue queue create accepts planning and adjustment types" {
+  planning_scenario="$TEST_TMPDIR/planning-scenario.json"
+  write_fake_gh_scenario "$planning_scenario" <<EOF
+[
+  {
+    "contains": ["issue", "create", "--repo owner/repo", "--title Plan milestone 1", "--label runoq:ready"],
+    "stdout": "https://github.com/owner/repo/issues/99"
+  }
+]
+EOF
+  use_fake_gh "$planning_scenario" "$TEST_TMPDIR/planning.state" "$TEST_TMPDIR/planning.log" "$TEST_TMPDIR/planning-capture"
+
+  run "$RUNOQ_ROOT/scripts/gh-issue-queue.sh" create owner/repo "Plan milestone 1" "body" --type planning --priority 1 --estimated-complexity low
+
+  [ "$status" -eq 0 ]
+  run grep -n "type: planning" "$TEST_TMPDIR/planning-capture/0.body"
+  [ "$status" -eq 0 ]
+
+  adjustment_scenario="$TEST_TMPDIR/adjustment-scenario.json"
+  write_fake_gh_scenario "$adjustment_scenario" <<EOF
+[
+  {
+    "contains": ["issue", "create", "--repo owner/repo", "--title Adjust milestones", "--label runoq:ready"],
+    "stdout": "https://github.com/owner/repo/issues/100"
+  }
+]
+EOF
+  use_fake_gh "$adjustment_scenario" "$TEST_TMPDIR/adjustment.state" "$TEST_TMPDIR/adjustment.log" "$TEST_TMPDIR/adjustment-capture"
+
+  run "$RUNOQ_ROOT/scripts/gh-issue-queue.sh" create owner/repo "Adjust milestones" "body" --type adjustment --priority 1 --estimated-complexity low
+
+  [ "$status" -eq 0 ]
+  run grep -n "type: adjustment" "$TEST_TMPDIR/adjustment-capture/0.body"
+  [ "$status" -eq 0 ]
+}
+
+@test "issue queue create rejects invalid types" {
+  run "$RUNOQ_ROOT/scripts/gh-issue-queue.sh" create owner/repo "Bad" "body" --type bogus
+
+  [ "$status" -ne 0 ]
 }
 
 @test "issue queue set-status fails cleanly for unknown statuses" {

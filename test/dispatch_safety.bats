@@ -259,6 +259,40 @@ EOF
   [[ "$output" == *"dependency #12 is not runoq:done"* ]]
 }
 
+@test "dispatch safety eligibility accepts planning issues without acceptance criteria" {
+  remote_dir="$TEST_TMPDIR/remote.git"
+  local_dir="$TEST_TMPDIR/local"
+  prepare_dispatch_repo "$remote_dir" "$local_dir"
+  export TARGET_ROOT="$local_dir"
+  body="$(cat <<'EOF'
+<!-- runoq:meta
+depends_on: []
+priority: 1
+estimated_complexity: low
+type: planning
+-->
+
+Plan body.
+EOF
+)"
+
+  scenario="$TEST_TMPDIR/scenario.json"
+  write_fake_gh_scenario "$scenario" <<EOF
+[
+  {
+    "contains": ["issue", "view", "99", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
+    "stdout": $(jq -Rn --arg body "$body" '{"number":99,"title":"Plan milestone 1","body":$body,"labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/99"}')
+  }
+]
+EOF
+  use_fake_gh "$scenario"
+
+  run "$RUNOQ_ROOT/scripts/dispatch-safety.sh" eligibility owner/repo 99
+
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | jq -r '.allowed')" = "true" ]
+}
+
 @test "dispatch safety eligibility rejects issues with an existing open PR" {
   remote_dir="$TEST_TMPDIR/remote.git"
   local_dir="$TEST_TMPDIR/local"

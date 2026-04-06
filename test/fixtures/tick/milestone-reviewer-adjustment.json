@@ -1,0 +1,30 @@
+{
+  "milestone_number": 10,
+  "status": "complete",
+  "delivered_criteria": [
+    "formatter contract shipped",
+    "overflow handling shipped"
+  ],
+  "missed_criteria": [],
+  "learnings": [
+    "validation concerns surfaced while implementing overflow behavior"
+  ],
+  "proposed_adjustments": [
+    {
+      "type": "modify",
+      "target_milestone_number": 20,
+      "title": "Add validation scope",
+      "description": "Expand the caching discovery milestone to validate malformed CLI input assumptions before recommendation sign-off.",
+      "suggested_position": "before #20",
+      "reason": "Formatter implementation exposed input-shape risks that should be assessed before downstream work."
+    },
+    {
+      "type": "new_milestone",
+      "target_milestone_number": null,
+      "title": "Debt cleanup from formatter shortcuts",
+      "description": "Create a small follow-up milestone to remove shortcuts taken during formatter delivery.",
+      "suggested_position": "after #20",
+      "reason": "The current milestone delivered value, but it created cleanup work that should stay visible."
+    }
+  ]
+}

@@ -41,7 +41,7 @@ Notes:
 
 ## `plan.sh`
 
-Purpose: plan decomposition pipeline. Decomposes a plan document into epics and tasks, presents the proposal, and creates GitHub issues deterministically.
+Purpose: legacy plan decomposition pipeline. Decomposes a plan document into epics and tasks, presents the proposal, and creates GitHub issues deterministically.
 
 Primary callers: `bin/runoq`, operators, tests.
 
@@ -57,10 +57,74 @@ Pipeline phases:
 
 Notes:
 
+- `plan.sh` is deprecated in favor of `tick.sh` plus `plan-dispatch.sh`, but remains available during the transition.
 - `--auto-confirm` skips interactive confirmation.
 - `--dry-run` outputs the decomposition JSON without creating issues.
 - Epic issues are created with `--type epic`; child tasks reference their parent via `--parent-epic`.
 - Agent invocation artifacts are persisted under `log/claude/plan-decomposer-<timestamp>/`, including the request payload, live raw Claude stream, stderr, progress events, and extracted final response.
+
+## `plan-dispatch.sh`
+
+Purpose: deterministic planning review loop for planning issues. Produces proposal comments but does not directly create milestone or task issues.
+
+Primary callers: `tick.sh`, tests.
+
+| Invocation | Arguments | JSON/stdout contract | Side effects |
+| --- | --- | --- | --- |
+| `plan-dispatch.sh` | `<repo> <issue-number> <milestone\|task> <plan-file> [milestone-file] [prior-findings-file]` | single-line status `Proposal posted on #<n>` on success | calls decomposer and both plan reviewers, posts proposal comment with `runoq:payload:plan-proposal` marker |
+
+Pipeline phases:
+
+1. **Decompose**: calls `milestone-decomposer` or `task-decomposer` depending on review mode.
+2. **Review**: calls `plan-reviewer-technical` and `plan-reviewer-product`.
+3. **Iterate or publish**: merges reviewer checklists when either reviewer returns `ITERATE`, reruns decomposition up to `planning.maxDecompositionRounds`, and posts the best proposal as an issue comment.
+
+Notes:
+
+- Proposal comments are numbered for human addressability.
+- Reviewer outputs are parsed from their marker-delimited verdict blocks.
+- When the maximum review rounds are reached, the proposal comment includes a warning but is still posted.
+
+## `tick.sh`
+
+Purpose: one-step project coordinator for iterative planning and milestone-gated execution.
+
+Primary callers: `bin/runoq`, operators, smoke tests.
+
+| Invocation | Arguments | JSON/stdout contract | Side effects |
+| --- | --- | --- | --- |
+| `tick.sh` | none | one-line status such as `Proposal posted on #N`, `Responded to comments on #N`, `Applied approvals from #N`, `Dispatched #N`, or `Project complete` | reads GitHub issue state, may create planning/adjustment issues, may materialize approved milestones/tasks, may dispatch implementation |
+
+State checks in order:
+
+1. Bootstrap a planning epic and planning issue when no milestone epics exist.
+2. Answer or await pending planning/adjustment review issues.
+3. Materialize approved review issues into milestone/task issues.
+4. Dispatch planning decomposition for the current milestone when needed.
+5. Delegate implementation dispatch when the current milestone has open tasks.
+6. Review completed milestones and either create adjustments or advance to the next milestone.
+7. Report project completion when no open milestone epics remain.
+
+Notes:
+
+- `tick.sh` reads the committed plan path via `runoq::plan_file`, so `runoq.json` at the target root is required.
+- Planning issues use proposal comments rather than immediate issue creation.
+- Discovery milestones always pause for human review when `planning.discoveryMilestoneAutoAdvance` is `false`.
+
+## `plan-comment-handler.sh`
+
+Purpose: answer human comments on planning and adjustment review issues.
+
+Primary callers: `tick.sh`, tests.
+
+| Invocation | Arguments | JSON/stdout contract | Side effects |
+| --- | --- | --- | --- |
+| `plan-comment-handler.sh` | `<repo> <issue-number> <plan-file>` | single-line status `Responded to comments on #<n>` on success | reads issue comments, invokes `plan-comment-responder`, posts `runoq:event` reply comment |
+
+Notes:
+
+- Only human comments without an existing `runoq:event` reply are actionable.
+- Replies are intentionally audit-marked so later ticks can detect whether a comment has already been handled.
 
 ## `orchestrator.sh`
 

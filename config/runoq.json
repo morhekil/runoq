@@ -5,6 +5,7 @@
     "done": "runoq:done",
     "needsReview": "runoq:needs-human-review",
     "blocked": "runoq:blocked",
+    "planApproved": "runoq:plan-approved",
     "maintenanceReview": "runoq:maintenance-review"
   },
   "identity": {
@@ -40,5 +41,9 @@
   },
   "stall": {
     "timeoutSeconds": 600
+  },
+  "planning": {
+    "maxDecompositionRounds": 3,
+    "discoveryMilestoneAutoAdvance": false
   }
 }

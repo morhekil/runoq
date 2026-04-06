@@ -54,6 +54,14 @@ runoq::target_root() {
   git rev-parse --show-toplevel 2>/dev/null || runoq::die "Run runoq from inside a git repository."
 }
 
+runoq::plan_file() {
+  local project_config
+  project_config="$(runoq::target_root)/runoq.json"
+  [[ -f "$project_config" ]] || runoq::die "Missing project config: ${project_config}. Run 'runoq init --plan <path>' or add runoq.json at the repository root."
+  jq -er '.plan | select(type == "string" and length > 0)' "$project_config" 2>/dev/null ||
+    runoq::die "Invalid project config: ${project_config} is missing a non-empty .plan string."
+}
+
 runoq::origin_url() {
   git -C "$(runoq::target_root)" remote get-url origin 2>/dev/null || runoq::die "No 'origin' remote found. runoq requires a GitHub-hosted repo."
 }
