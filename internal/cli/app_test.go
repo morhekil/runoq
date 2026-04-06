@@ -527,7 +527,7 @@ func TestParseRepoFromRemote(t *testing.T) {
 func TestSubcommandHelpPrintsUsageAndExitsZero(t *testing.T) {
 	t.Parallel()
 
-	for _, cmd := range []string{"init", "plan", "tick", "run", "report", "maintenance"} {
+	for _, cmd := range []string{"init", "plan", "tick", "loop", "run", "report", "maintenance"} {
 		for _, flag := range []string{"-h", "--help"} {
 			t.Run(cmd+"/"+flag, func(t *testing.T) {
 				t.Parallel()

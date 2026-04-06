@@ -18,6 +18,7 @@ const usageText = `Usage:
   runoq init [--plan <path>]
   runoq plan [file] [--auto-confirm] [--dry-run]
   runoq tick
+  runoq loop [--backoff N]
   runoq run [--issue N] [--dry-run]
   runoq report <summary|issue|cost> [...]
   runoq maintenance
@@ -59,6 +60,22 @@ Options:
 	"tick": `Usage: runoq tick
 
 Run one iteration of the planning lifecycle.
+
+Exit codes:
+  0    Work done, more available
+  2    Nothing to do, waiting for human input
+  1    Error
+`,
+	"loop": `Usage: runoq loop [--backoff N]
+
+Run tick in a loop until interrupted.
+
+Calls runoq tick repeatedly. On exit 0 (work done), loops immediately.
+On exit 2 (waiting), sleeps for the backoff duration before retrying.
+On exit 1 (error), stops.
+
+Options:
+  --backoff N   Seconds to wait when tick has no work (default: 30)
 `,
 	"run": `Usage: runoq run [--issue N] [--dry-run]
 
@@ -129,7 +146,7 @@ func (a *App) Run(ctx context.Context) int {
 	}
 
 	switch subcommand {
-	case "init", "plan", "tick", "run", "report", "maintenance":
+	case "init", "plan", "tick", "loop", "run", "report", "maintenance":
 		if hasHelpFlag(args) {
 			_, _ = io.WriteString(a.stdout, subcommandHelp[subcommand])
 			return 0
@@ -163,6 +180,12 @@ func (a *App) Run(ctx context.Context) int {
 			return code
 		}
 		return a.runScript(ctx, targetEnv, runoqRoot, "tick.sh", args)
+	case "loop":
+		targetEnv, code := a.prepareTargetContext(ctx, runoqRoot, env)
+		if code != 0 {
+			return code
+		}
+		return a.runScript(ctx, targetEnv, runoqRoot, "loop.sh", args)
 	case "run":
 		targetEnv, code := a.prepareTargetContext(ctx, runoqRoot, env)
 		if code != 0 {
