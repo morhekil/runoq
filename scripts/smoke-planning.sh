@@ -349,6 +349,7 @@ run_planning() {
   created_issues='[]'
   comment_interactions=0
   operator_login_value="$(operator_login)"
+  export RUNOQ_OPERATOR_LOGIN="$operator_login_value"
 
   if [[ "$(printf '%s' "$failures_json" | jq 'length')" -eq 0 ]]; then
     smoke_log "running tick bootstrap"

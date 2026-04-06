@@ -280,6 +280,7 @@ run_tick_smoke() {
   STEPS_JSON='[]'
   local comment_interactions=0 items_rejected=0 discovery_forced_adjustment=false
   operator_login_value="$(operator_login)"
+  export RUNOQ_OPERATOR_LOGIN="$operator_login_value"
 
   cleanup() {
     if [[ -n "${tmpdir:-}" ]]; then

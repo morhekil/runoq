@@ -388,6 +388,12 @@ func (a *App) runCreate(ctx context.Context, repo string, title string, body str
 }
 
 func (a *App) operatorLogin(ctx context.Context) (string, error) {
+	if login, ok := common.EnvLookup(a.env, "RUNOQ_OPERATOR_LOGIN"); ok {
+		login = strings.TrimSpace(login)
+		if login != "" {
+			return login, nil
+		}
+	}
 	env := withoutEnvKeys(a.ghClient.Env(), "GH_TOKEN", "GITHUB_TOKEN")
 	bin := "gh"
 	if v, ok := common.EnvLookup(env, "GH_BIN"); ok && v != "" {

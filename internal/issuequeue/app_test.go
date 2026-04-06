@@ -377,6 +377,55 @@ func TestCreateAdjustmentWritesAdjustmentType(t *testing.T) {
 	}
 }
 
+func TestCreatePlanningUsesOperatorLoginOverride(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t, []string{
+		"create", "owner/repo", "Plan milestone 1", "body",
+		"--type", "planning",
+		"--priority", "1",
+		"--estimated-complexity", "low",
+	})
+	app.env = append(app.env, "RUNOQ_OPERATOR_LOGIN=override-user")
+	var bodyText string
+	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+		t.Helper()
+		command := req.Name + " " + strings.Join(req.Args, " ")
+		switch {
+		case strings.Contains(command, "api user --jq .login"):
+			t.Fatalf("unexpected operator login lookup command: %s", command)
+			return nil
+		case strings.Contains(command, "issue create --repo owner/repo --title Plan milestone 1 --body-file "):
+			if !strings.Contains(command, "--assignee override-user") {
+				t.Fatalf("expected override assignee on planning issue create, got %s", command)
+			}
+			for i := range len(req.Args) {
+				if req.Args[i] == "--body-file" {
+					data, err := os.ReadFile(req.Args[i+1])
+					if err != nil {
+						t.Fatalf("read body file: %v", err)
+					}
+					bodyText = string(data)
+					break
+				}
+			}
+			_, _ = req.Stdout.Write([]byte("https://github.com/owner/repo/issues/99"))
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s", command)
+			return nil
+		}
+	})
+
+	code := app.Run(t.Context())
+	if code != 0 {
+		t.Fatalf("Run returned %d stderr=%q", code, app.stderr.(*bytes.Buffer).String())
+	}
+	if !strings.Contains(bodyText, "type: planning") {
+		t.Fatalf("unexpected body file:\n%s", bodyText)
+	}
+}
+
 func TestEpicStatusTracksPendingChildren(t *testing.T) {
 	t.Parallel()
 
