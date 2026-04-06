@@ -237,6 +237,8 @@ handle_bootstrap() {
   printf 'Created planning milestone. Proposal posted on #%s\n' "$planning_number"
 }
 
+# Returns 0 if work was done, 1 if needs further processing (no proposal yet),
+# 2 if waiting for human input.
 handle_pending_review() {
   local pending_review="$1"
   local pending_number issue_view
@@ -244,28 +246,22 @@ handle_pending_review() {
   runoq::step "Loading review #$pending_number"
   issue_view="$(runoq::gh issue view "$pending_number" --repo "$repo" --json number,title,body,comments,labels,state)"
   if [[ "$(issue_type "$(printf '%s' "$pending_review" | jq -r '.body // ""')")" == "planning" ]] && ! printf '%s' "$issue_view" | jq -r '.body // ""' | grep -q 'runoq:payload:plan-proposal'; then
-    runoq::info "planning issue #$pending_number has no proposal yet"
+    runoq::info "planning issue #$pending_number has no proposal yet — needs dispatch"
     return 1
   elif has_unresponded_comments "$issue_view"; then
     runoq::step "Responding to unanswered comments on #$pending_number"
     if ! "$comment_handler_script" "$repo" "$pending_number" "$plan_file" >/dev/null; then
       runoq::warn "Comment handler failed for #$pending_number"
       printf 'Comment handler failed for #%s\n' "$pending_number"
-      return 0
-    fi
-    runoq::success "Responded to comments on #$pending_number"
-    printf 'Responded to comments on #%s\n' "$pending_number"
-    # Check if handler added plan-approved label — if so, signal main to continue
-    local fresh_view
-    fresh_view="$(runoq::gh issue view "$pending_number" --repo "$repo" --json labels)"
-    if has_label "$(printf '%s' "$fresh_view" | jq -c '{labels: .labels}')" "$plan_approved_label"; then
-      return 2
+    else
+      runoq::success "Responded to comments on #$pending_number"
+      printf 'Responded to comments on #%s\n' "$pending_number"
     fi
     return 0
   else
     runoq::warn "Awaiting human decision on #$pending_number"
     printf 'Awaiting human decision on #%s\n' "$pending_number"
-    return 0
+    return 2
   fi
 }
 
@@ -492,139 +488,138 @@ main() {
   dispatch_safety_script="${RUNOQ_TICK_DISPATCH_SAFETY_SCRIPT:-$(runoq::root)/scripts/dispatch-safety.sh}"
   plan_approved_label="$(runoq::config_get '.labels.planApproved')"
 
+  # Exit codes: 0 = work done (more to do), 2 = waiting (back off)
   runoq::step "Starting tick"
   runoq::detail "repo" "$repo"
   runoq::detail "plan" "$plan_file"
 
-  while true; do
-    runoq::step "Fetching issues"
-    issues_json="$(runoq::gh issue list --repo "$repo" --state all --limit 200 --json number,title,body,labels,state,url)"
-    local issue_count
-    issue_count="$(printf '%s' "$issues_json" | jq 'length')"
-    runoq::info "found $issue_count issues"
+  runoq::step "Fetching issues"
+  issues_json="$(runoq::gh issue list --repo "$repo" --state all --limit 200 --json number,title,body,labels,state,url)"
+  local issue_count
+  issue_count="$(printf '%s' "$issues_json" | jq 'length')"
+  runoq::info "found $issue_count issues"
 
-    runoq::step "Finding current epic"
-    current_epic="$(first_open_epic "$issues_json")"
-    if [[ -z "$current_epic" ]]; then
-      if ! any_epic_exists "$issues_json"; then
-        runoq::info "no epics exist — bootstrapping project"
-        handle_bootstrap
-      else
-        runoq::success "Project complete"
-        printf 'Project complete\n'
-      fi
+  runoq::step "Finding current epic"
+  current_epic="$(first_open_epic "$issues_json")"
+  if [[ -z "$current_epic" ]]; then
+    if ! any_epic_exists "$issues_json"; then
+      runoq::info "no epics exist — bootstrapping project"
+      handle_bootstrap
       exit 0
-    fi
-    runoq::detail "epic" "#$(printf '%s' "$current_epic" | jq -r '.number') $(printf '%s' "$current_epic" | jq -r '.title')"
-
-    runoq::step "Checking for pending review"
-    local pending_review
-    pending_review="$(find_review_issue "$issues_json" pending "$plan_approved_label" || true)"
-    if [[ -n "$pending_review" ]]; then
-      runoq::info "found pending review #$(printf '%s' "$pending_review" | jq -r '.number')"
-      local pending_result=0
-      handle_pending_review "$pending_review" || pending_result=$?
-      if [[ "$pending_result" -eq 0 ]]; then
-        exit 0
-      elif [[ "$pending_result" -eq 2 ]]; then
-        runoq::info "approval detected, continuing"
-        continue
-      else
-        runoq::info "pending review not actionable, continuing"
-      fi
     else
-      runoq::info "none"
+      runoq::success "All milestones complete"
+      printf 'All milestones complete\n'
+      exit 2
+    fi
+  fi
+  runoq::detail "epic" "#$(printf '%s' "$current_epic" | jq -r '.number') $(printf '%s' "$current_epic" | jq -r '.title')"
+
+  runoq::step "Checking for pending review"
+  local pending_review
+  pending_review="$(find_review_issue "$issues_json" pending "$plan_approved_label" || true)"
+  if [[ -n "$pending_review" ]]; then
+    runoq::info "found pending review #$(printf '%s' "$pending_review" | jq -r '.number')"
+    local pending_result=0
+    handle_pending_review "$pending_review" || pending_result=$?
+    if [[ "$pending_result" -eq 0 ]]; then
+      exit 0
+    elif [[ "$pending_result" -eq 2 ]]; then
+      exit 2
+    fi
+    # pending_result=1: no proposal yet, fall through to dispatch it
+    runoq::info "pending review not actionable, continuing"
+  else
+    runoq::info "none"
+  fi
+
+  runoq::step "Checking for approved review"
+  local approved_review
+  approved_review="$(find_review_issue "$issues_json" approved "$plan_approved_label" || true)"
+  if [[ -n "$approved_review" ]]; then
+    local review_number review_body review_type review_parent review_view selection_json
+    review_number="$(printf '%s' "$approved_review" | jq -r '.number')"
+    review_body="$(printf '%s' "$approved_review" | jq -r '.body // ""')"
+    review_type="$(issue_type "$review_body")"
+    review_parent="$(issue_parent_epic "$review_body")"
+    runoq::info "found approved $review_type review #$review_number (parent #$review_parent)"
+
+    runoq::step "Loading review details for #$review_number"
+    review_view="$(runoq::gh issue view "$review_number" --repo "$repo" --json number,title,body,comments,labels,state)"
+    selection_json="$(human_comment_selection "$review_view")"
+    local approved_items rejected_items
+    approved_items="$(printf '%s' "$selection_json" | jq '.approved | length')"
+    rejected_items="$(printf '%s' "$selection_json" | jq '.rejected | length')"
+    if (( approved_items > 0 || rejected_items > 0 )); then
+      runoq::detail "approved items" "$approved_items"
+      runoq::detail "rejected items" "$rejected_items"
     fi
 
-    runoq::step "Checking for approved review"
-    local approved_review
-    approved_review="$(find_review_issue "$issues_json" approved "$plan_approved_label" || true)"
-    if [[ -n "$approved_review" ]]; then
-      local review_number review_body review_type review_parent review_view selection_json
-      review_number="$(printf '%s' "$approved_review" | jq -r '.number')"
-      review_body="$(printf '%s' "$approved_review" | jq -r '.body // ""')"
-      review_type="$(issue_type "$review_body")"
-      review_parent="$(issue_parent_epic "$review_body")"
-      runoq::info "found approved $review_type review #$review_number (parent #$review_parent)"
-
-      runoq::step "Loading review details for #$review_number"
-      review_view="$(runoq::gh issue view "$review_number" --repo "$repo" --json number,title,body,comments,labels,state)"
-      selection_json="$(human_comment_selection "$review_view")"
-      local approved_items rejected_items
-      approved_items="$(printf '%s' "$selection_json" | jq '.approved | length')"
-      rejected_items="$(printf '%s' "$selection_json" | jq '.rejected | length')"
-      if (( approved_items > 0 || rejected_items > 0 )); then
-        runoq::detail "approved items" "$approved_items"
-        runoq::detail "rejected items" "$rejected_items"
-      fi
-
-      if [[ "$review_type" == "planning" ]]; then
-        runoq::step "Applying approved planning from #$review_number"
-        handle_approved_planning "$review_view" "$review_number" "$review_parent" "$selection_json"
-        continue
-      elif [[ "$review_type" == "adjustment" ]]; then
-        runoq::step "Applying approved adjustments from #$review_number"
-        handle_approved_adjustment "$review_view" "$review_number" "$review_parent" "$selection_json"
-        continue
-      fi
-    else
-      runoq::info "none"
-    fi
-
-    current_epic_number="$(printf '%s' "$current_epic" | jq -r '.number')"
-    current_epic_title="$(printf '%s' "$current_epic" | jq -r '.title')"
-    current_epic_type="$(issue_milestone_type "$(printf '%s' "$current_epic" | jq -r '.body // ""')")"
-
-    runoq::step "Scanning children of epic #$current_epic_number"
-    local planning_child=""
-    while IFS= read -r child; do
-      [[ -n "$child" ]] || continue
-      if [[ "$(printf '%s' "$child" | jq -r '.state')" == "OPEN" && "$(issue_type "$(printf '%s' "$child" | jq -r '.body // ""')")" == "planning" ]]; then
-        planning_child="$child"
-        break
-      fi
-    done < <(children_for_epic "$issues_json" "$current_epic_number")
-    if [[ -n "$planning_child" ]]; then
-      local planning_child_number
-      planning_child_number="$(printf '%s' "$planning_child" | jq -r '.number')"
-      runoq::info "found planning issue #$planning_child_number"
-      if planning_issue_needs_dispatch "$planning_child" "$repo"; then
-        runoq::step "Dispatching plan decomposition for #$planning_child_number"
-        handle_planning_dispatch "$planning_child"
-        exit 0
-      fi
-      runoq::info "planning issue #$planning_child_number already has a proposal"
-    fi
-
-    local open_children=0 has_open_task=0
-    while IFS= read -r child; do
-      [[ -n "$child" ]] || continue
-      if [[ "$(printf '%s' "$child" | jq -r '.state')" == "OPEN" ]]; then
-        open_children=$((open_children + 1))
-        if [[ "$(issue_type "$(printf '%s' "$child" | jq -r '.body // ""')")" == "task" ]]; then
-          has_open_task=1
-        fi
-      fi
-    done < <(children_for_epic "$issues_json" "$current_epic_number")
-    runoq::detail "open children" "$open_children"
-    runoq::detail "has open tasks" "$has_open_task"
-
-    if (( has_open_task == 1 )); then
-      runoq::step "Dispatching implementation for epic #$current_epic_number"
-      handle_implementation
+    if [[ "$review_type" == "planning" ]]; then
+      runoq::step "Applying approved planning from #$review_number"
+      handle_approved_planning "$review_view" "$review_number" "$review_parent" "$selection_json"
+      exit 0
+    elif [[ "$review_type" == "adjustment" ]]; then
+      runoq::step "Applying approved adjustments from #$review_number"
+      handle_approved_adjustment "$review_view" "$review_number" "$review_parent" "$selection_json"
       exit 0
     fi
+  else
+    runoq::info "none"
+  fi
 
-    if (( open_children == 0 )); then
-      runoq::step "All tasks complete — reviewing milestone #$current_epic_number"
-      handle_milestone_complete
+  current_epic_number="$(printf '%s' "$current_epic" | jq -r '.number')"
+  current_epic_title="$(printf '%s' "$current_epic" | jq -r '.title')"
+  current_epic_type="$(issue_milestone_type "$(printf '%s' "$current_epic" | jq -r '.body // ""')")"
+
+  runoq::step "Scanning children of epic #$current_epic_number"
+  local planning_child=""
+  while IFS= read -r child; do
+    [[ -n "$child" ]] || continue
+    if [[ "$(printf '%s' "$child" | jq -r '.state')" == "OPEN" && "$(issue_type "$(printf '%s' "$child" | jq -r '.body // ""')")" == "planning" ]]; then
+      planning_child="$child"
+      break
+    fi
+  done < <(children_for_epic "$issues_json" "$current_epic_number")
+  if [[ -n "$planning_child" ]]; then
+    local planning_child_number
+    planning_child_number="$(printf '%s' "$planning_child" | jq -r '.number')"
+    runoq::info "found planning issue #$planning_child_number"
+    if planning_issue_needs_dispatch "$planning_child" "$repo"; then
+      runoq::step "Dispatching plan decomposition for #$planning_child_number"
+      handle_planning_dispatch "$planning_child"
       exit 0
     fi
+    runoq::info "planning issue #$planning_child_number already has a proposal"
+  fi
 
-    runoq::warn "$open_children tasks in progress, none ready"
-    printf '%s tasks in progress, none ready\n' "$open_children"
-    break
-  done
+  local open_children=0 has_open_task=0
+  while IFS= read -r child; do
+    [[ -n "$child" ]] || continue
+    if [[ "$(printf '%s' "$child" | jq -r '.state')" == "OPEN" ]]; then
+      open_children=$((open_children + 1))
+      if [[ "$(issue_type "$(printf '%s' "$child" | jq -r '.body // ""')")" == "task" ]]; then
+        has_open_task=1
+      fi
+    fi
+  done < <(children_for_epic "$issues_json" "$current_epic_number")
+  runoq::detail "open children" "$open_children"
+  runoq::detail "has open tasks" "$has_open_task"
+
+  if (( has_open_task == 1 )); then
+    runoq::step "Dispatching implementation for epic #$current_epic_number"
+    handle_implementation
+    exit 0
+  fi
+
+  if (( open_children == 0 )); then
+    runoq::step "All tasks complete — reviewing milestone #$current_epic_number"
+    handle_milestone_complete
+    exit 0
+  fi
+
+  runoq::warn "$open_children tasks in progress, none ready"
+  printf '%s tasks in progress, none ready\n' "$open_children"
+  exit 2
 }
 
 main "$@"

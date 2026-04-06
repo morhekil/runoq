@@ -247,7 +247,7 @@ EOF
 
   run "$RUNOQ_ROOT/scripts/tick.sh"
 
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 2 ]
   [[ "$output" == *"Awaiting human decision on #2"* ]]
 }
 
@@ -342,14 +342,10 @@ EOF
   view_json="$(jq -cn --argjson number 2 --arg title 'Break plan into milestones' --arg body "$planning_body" --arg proposal "$proposal_comment" '{number:$number,title:$title,body:($body + "\n\n<!-- runoq:proposal-start -->\n" + $proposal),comments:[{author:{login:"human"},body:"OK, approved with item 3 removed",id:"IC_approval"}],labels:[{name:"runoq:plan-approved"}],state:"OPEN"}')"
 
   scenario="$TEST_TMPDIR/scenario.json"
-  # After materialization, tick loops and re-fetches. Return all-closed so tick reports complete.
-  local post_list_json
-  post_list_json="$(jq -cn '[{number:1,title:"X",state:"CLOSED",body:"<!-- runoq:meta\ntype: epic\n-->",labels:[],url:"u"}]')"
   write_fake_gh_scenario "$scenario" <<EOF
 [
   {"contains":["issue","list","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$list_json" '$json')},
-  {"contains":["issue","view","2","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$view_json" '$json')},
-  {"contains":["issue","list","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$post_list_json" '$json')}
+  {"contains":["issue","view","2","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$view_json" '$json')}
 ]
 EOF
   use_fake_gh "$scenario" "$TEST_TMPDIR/gh.state" "$TEST_TMPDIR/gh.log" "$TEST_TMPDIR/gh-capture"
@@ -404,13 +400,10 @@ EOF
   view_json="$(jq -cn --argjson number 11 --arg title 'Break down milestone into tasks' --arg body "$planning_body" --arg proposal "$proposal_comment" '{number:$number,title:$title,body:($body + "\n\n<!-- runoq:proposal-start -->\n" + $proposal),comments:[{author:{login:"human"},body:"Looks good"}],labels:[{name:"runoq:plan-approved"}],state:"OPEN"}')"
 
   scenario="$TEST_TMPDIR/scenario.json"
-  local post_list_json
-  post_list_json="$(jq -cn '[{number:10,title:"X",state:"CLOSED",body:"<!-- runoq:meta\ntype: epic\n-->",labels:[],url:"u"}]')"
   write_fake_gh_scenario "$scenario" <<EOF
 [
   {"contains":["issue","list","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$list_json" '$json')},
-  {"contains":["issue","view","11","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$view_json" '$json')},
-  {"contains":["issue","list","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$post_list_json" '$json')}
+  {"contains":["issue","view","11","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$view_json" '$json')}
 ]
 EOF
   use_fake_gh "$scenario" "$TEST_TMPDIR/gh.state" "$TEST_TMPDIR/gh.log" "$TEST_TMPDIR/gh-capture"
@@ -642,8 +635,7 @@ EOF
   {"contains":["issue","list","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$initial_list_json" '$json')},
   {"contains":["issue","view","11","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$adjustment_view_json" '$json')},
   {"contains":["issue","edit","20","--repo","owner/repo"],"stdout":""},
-  {"contains":["issue","list","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$refreshed_list_json" '$json')},
-  {"contains":["issue","list","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$(jq -cn '[{number:10,title:"X",state:"CLOSED",body:"<!-- runoq:meta\ntype: epic\n-->",labels:[],url:"u"}]')" '$json')}
+  {"contains":["issue","list","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$refreshed_list_json" '$json')}
 ]
 EOF
   use_fake_gh "$scenario" "$TEST_TMPDIR/gh.state" "$TEST_TMPDIR/gh.log" "$TEST_TMPDIR/gh-capture"
@@ -730,8 +722,8 @@ EOF
 
   run "$RUNOQ_ROOT/scripts/tick.sh"
 
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"Project complete"* ]]
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"All milestones complete"* ]]
 }
 
 @test "tick is idempotent in awaiting-review state" {
@@ -768,9 +760,9 @@ EOF
 
   run "$RUNOQ_ROOT/scripts/tick.sh"
   first="$output"
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 2 ]
   run "$RUNOQ_ROOT/scripts/tick.sh"
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 2 ]
   [ "$output" = "$first" ]
 }
 
