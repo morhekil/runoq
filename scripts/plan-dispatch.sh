@@ -64,16 +64,33 @@ proposal_comment_body() {
   local warning="${4:-}"
 
   {
-    printf '%s\n\n' "<!-- runoq:payload:plan-proposal -->"
-    printf 'Technical score: %s\n' "$(printf '%s' "$technical_json" | jq -r '.score')"
-    printf 'Product score: %s\n\n' "$(printf '%s' "$product_json" | jq -r '.score')"
+    printf '## Review scores\n\n'
+    printf '| Reviewer | Score | Verdict |\n'
+    printf '|----------|-------|---------|\n'
+    printf '| Technical | %s | %s |\n' \
+      "$(printf '%s' "$technical_json" | jq -r '.score')" \
+      "$(printf '%s' "$technical_json" | jq -r '.verdict')"
+    printf '| Product | %s | %s |\n\n' \
+      "$(printf '%s' "$product_json" | jq -r '.score')" \
+      "$(printf '%s' "$product_json" | jq -r '.verdict')"
     if [[ -n "$warning" ]]; then
-      printf 'Warning: %s\n\n' "$warning"
+      printf '> **Warning:** %s\n\n' "$warning"
     fi
+    local warning_lines
+    warning_lines="$(jq -r '(.warnings // [])[] // empty' "$proposal_path" 2>/dev/null)"
+    if [[ -n "$warning_lines" ]]; then
+      printf '**Warnings from decomposer:**\n'
+      while IFS= read -r line; do
+        [[ -n "$line" ]] && printf '- %s\n' "$line"
+      done <<< "$warning_lines"
+      printf '\n'
+    fi
+    printf '## Proposed milestones\n\n'
     runoq::format_plan_proposal "$proposal_path"
-    printf '\n```json\n'
+    printf '\n<details>\n<summary>Raw JSON payload</summary>\n\n'
+    printf '```json\n'
     cat "$proposal_path"
-    printf '\n```\n'
+    printf '\n```\n\n</details>\n'
   }
 }
 
@@ -91,6 +108,11 @@ main() {
 
   local max_rounds
   max_rounds="$(runoq::config_get '.planning.maxDecompositionRounds // 3')"
+
+  runoq::step "Plan dispatch: $review_type decomposition for #$issue_number"
+  runoq::detail "plan" "$plan_file"
+  runoq::detail "max rounds" "$max_rounds"
+  [[ -z "$milestone_file" ]] || runoq::detail "milestone" "$milestone_file"
   local plan_dir milestone_dir prior_findings_dir
   plan_dir="$(dirname "$plan_file")"
   milestone_dir=""
@@ -117,8 +139,12 @@ main() {
       marker='runoq:payload:task-decomposer'
     fi
 
+    runoq::step "Decomposition round $round/$max_rounds"
+    runoq::detail "agent" "$decomposer"
+
     local feedback_payload="$merged_checklist"
     if [[ -n "$feedback_payload" ]]; then
+      runoq::info "feeding back reviewer checklist from previous round"
       feedback_payload=$'CHECKLIST:\n'"$feedback_payload"
     fi
 
@@ -141,35 +167,51 @@ main() {
       '
     )"
 
+    runoq::info "calling $decomposer agent"
     response_path="$(call_agent "$decomposer" "$payload" "$plan_dir" "$milestone_dir" "$prior_findings_dir")"
     proposal_json="$(read_json_output "$response_path" "$marker")" ||
       runoq::die "Invalid ${decomposer} output"
+    local item_count
+    item_count="$(printf '%s' "$proposal_json" | jq '.items | length')"
+    runoq::detail "items proposed" "$item_count"
     proposal_tmp="$(mktemp "${TMPDIR:-/tmp}/runoq-plan-proposal.XXXXXX")"
     printf '%s\n' "$proposal_json" >"$proposal_tmp"
 
+    runoq::step "Reviewing proposal (round $round)"
     local review_payload tech_path product_path
     review_payload="$(jq -cn --arg proposalPath "$proposal_tmp" --arg planPath "$plan_file" --arg reviewType "$review_type" '{proposalPath:$proposalPath, planPath:$planPath, reviewType:$reviewType}')"
+    runoq::info "calling plan-reviewer-technical"
     tech_path="$(call_agent plan-reviewer-technical "$review_payload" "$plan_dir" "$(dirname "$proposal_tmp")")"
+    runoq::info "calling plan-reviewer-product"
     product_path="$(call_agent plan-reviewer-product "$review_payload" "$plan_dir" "$(dirname "$proposal_tmp")")"
     technical_json="$(runoq::parse_verdict_block "$tech_path")"
     product_json="$(runoq::parse_verdict_block "$product_path")"
 
-    local tech_verdict product_verdict
+    local tech_verdict product_verdict tech_score product_score
     tech_verdict="$(printf '%s' "$technical_json" | jq -r '.verdict')"
     product_verdict="$(printf '%s' "$product_json" | jq -r '.verdict')"
+    tech_score="$(printf '%s' "$technical_json" | jq -r '.score')"
+    product_score="$(printf '%s' "$product_json" | jq -r '.score')"
+    runoq::detail "technical" "$tech_verdict ($tech_score)"
+    runoq::detail "product" "$product_verdict ($product_score)"
+
     if [[ "$tech_verdict" == "PASS" && "$product_verdict" == "PASS" ]]; then
+      runoq::success "Both reviewers passed"
       warning=""
       break
     fi
 
     merged_checklist="$(runoq::merge_checklists "$(printf '%s' "$technical_json" | jq -r '.checklist')" "$(printf '%s' "$product_json" | jq -r '.checklist')")"
     if (( round == max_rounds )); then
+      runoq::warn "Max review rounds reached — proceeding with current proposal"
       warning="max review rounds reached"
       break
     fi
+    runoq::info "reviewers requested changes, iterating"
     round=$((round + 1))
   done
 
+  runoq::step "Posting proposal comment on #$issue_number"
   local body_file
   body_file="$(mktemp "${TMPDIR:-/tmp}/runoq-plan-comment.XXXXXX")"
   proposal_tmp="$(mktemp "${TMPDIR:-/tmp}/runoq-plan-proposal-final.XXXXXX")"
@@ -177,6 +219,7 @@ main() {
   proposal_comment_body "$proposal_tmp" "$technical_json" "$product_json" "$warning" >"$body_file"
 
   runoq::gh issue comment "$issue_number" --repo "$repo" --body-file "$body_file" >/dev/null
+  runoq::success "Proposal posted on #$issue_number"
   printf 'Proposal posted on #%s\n' "$issue_number"
 }
 

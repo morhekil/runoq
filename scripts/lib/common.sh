@@ -3,7 +3,7 @@
 set -euo pipefail
 
 runoq::die() {
-  echo "runoq: $*" >&2
+  printf '%b%s%b\n' '\033[1;31m' "runoq: $*" '\033[0m' >&2
   exit 1
 }
 
@@ -12,6 +12,40 @@ runoq::die() {
 runoq::log() {
   [[ -n "${RUNOQ_LOG:-}" ]] || return 0
   printf '[%s] %s\n' "$1" "$2" >&2
+}
+
+# ---------------------------------------------------------------------------
+# Operator-facing progress output (always on, writes to stderr)
+# ---------------------------------------------------------------------------
+
+# Major phase header — bold cyan arrow
+# Usage: runoq::step "Fetching issue list"
+runoq::step() {
+  printf '%b▸ %s%b\n' '\033[1;36m' "$*" '\033[0m' >&2
+}
+
+# Supplementary context — dim grey
+# Usage: runoq::info "using plan file docs/plan.md"
+runoq::info() {
+  printf '%b  %s%b\n' '\033[2m' "$*" '\033[0m' >&2
+}
+
+# Key-value detail — dim key, normal value, indented
+# Usage: runoq::detail "repo" "owner/repo"
+runoq::detail() {
+  printf '%b  %s:%b %s\n' '\033[2m' "$1" '\033[0m' "$2" >&2
+}
+
+# Success result — bold green checkmark
+# Usage: runoq::success "Proposal posted on #42"
+runoq::success() {
+  printf '%b✔ %s%b\n' '\033[1;32m' "$*" '\033[0m' >&2
+}
+
+# Warning — bold yellow
+# Usage: runoq::warn "max review rounds reached"
+runoq::warn() {
+  printf '%b⚠ %s%b\n' '\033[1;33m' "$*" '\033[0m' >&2
 }
 
 runoq::script_dir() {
@@ -389,7 +423,7 @@ runoq::captured_exec() {
     : >"$capture_dir/request.txt"
   fi
 
-  printf '[%s] logs: %s\n' "$tool_kind" "$capture_dir" >&2
+  runoq::info "[$tool_kind] logs: $capture_dir"
 
   local stdout_pipe stderr_pipe
   stdout_pipe="$(mktemp "${TMPDIR:-/tmp}/runoq-capture-stdout.XXXXXX")"
@@ -520,7 +554,7 @@ runoq::claude_stream() {
     : >"$request_file"
   fi
   : >"$progress_log"
-  printf '[agent] logs: %s\n' "$capture_dir" >&2
+  runoq::info "[agent] logs: $capture_dir"
 
   local stream_file
   stream_file="$raw_stream_file"
@@ -532,7 +566,7 @@ runoq::claude_stream() {
 
   emit_progress() {
     local message="$1"
-    printf '%s\n' "$message" >&2
+    printf '%b  %s%b\n' '\033[2m' "$message" '\033[0m' >&2
     printf '%s\n' "$message" >>"$progress_log"
   }
 
