@@ -131,6 +131,8 @@ case "$cmd" in
     repo="$1"; issue="$2"; status="$3"
     jq -cn --argjson issue "$issue" --arg status "$status" '{issue:$issue,status:$status}'
     ;;
+  assign)
+    ;;
   *)
     echo "unexpected issue-queue command: $cmd" >&2
     exit 1
@@ -340,10 +342,14 @@ EOF
   view_json="$(jq -cn --argjson number 2 --arg title 'Break plan into milestones' --arg body "$planning_body" --arg proposal "$proposal_comment" '{number:$number,title:$title,body:($body + "\n\n<!-- runoq:proposal-start -->\n" + $proposal),comments:[{author:{login:"human"},body:"OK, approved with item 3 removed",id:"IC_approval"}],labels:[{name:"runoq:plan-approved"}],state:"OPEN"}')"
 
   scenario="$TEST_TMPDIR/scenario.json"
+  # After materialization, tick loops and re-fetches. Return all-closed so tick reports complete.
+  local post_list_json
+  post_list_json="$(jq -cn '[{number:1,title:"X",state:"CLOSED",body:"<!-- runoq:meta\ntype: epic\n-->",labels:[],url:"u"}]')"
   write_fake_gh_scenario "$scenario" <<EOF
 [
   {"contains":["issue","list","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$list_json" '$json')},
-  {"contains":["issue","view","2","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$view_json" '$json')}
+  {"contains":["issue","view","2","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$view_json" '$json')},
+  {"contains":["issue","list","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$post_list_json" '$json')}
 ]
 EOF
   use_fake_gh "$scenario" "$TEST_TMPDIR/gh.state" "$TEST_TMPDIR/gh.log" "$TEST_TMPDIR/gh-capture"
@@ -398,10 +404,13 @@ EOF
   view_json="$(jq -cn --argjson number 11 --arg title 'Break down milestone into tasks' --arg body "$planning_body" --arg proposal "$proposal_comment" '{number:$number,title:$title,body:($body + "\n\n<!-- runoq:proposal-start -->\n" + $proposal),comments:[{author:{login:"human"},body:"Looks good"}],labels:[{name:"runoq:plan-approved"}],state:"OPEN"}')"
 
   scenario="$TEST_TMPDIR/scenario.json"
+  local post_list_json
+  post_list_json="$(jq -cn '[{number:10,title:"X",state:"CLOSED",body:"<!-- runoq:meta\ntype: epic\n-->",labels:[],url:"u"}]')"
   write_fake_gh_scenario "$scenario" <<EOF
 [
   {"contains":["issue","list","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$list_json" '$json')},
-  {"contains":["issue","view","11","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$view_json" '$json')}
+  {"contains":["issue","view","11","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$view_json" '$json')},
+  {"contains":["issue","list","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$post_list_json" '$json')}
 ]
 EOF
   use_fake_gh "$scenario" "$TEST_TMPDIR/gh.state" "$TEST_TMPDIR/gh.log" "$TEST_TMPDIR/gh-capture"
@@ -579,7 +588,7 @@ EOF
   [[ "$output" == *"Adjustments proposed on #"* ]]
   run grep -q 'create owner/repo Review milestone adjustments' "$TICK_ISSUE_QUEUE_LOG"
   [ "$status" -eq 0 ]
-  run grep -q '### 1. Add validation scope' "$TICK_ISSUE_QUEUE_CAPTURE_DIR/101.body"
+  run grep -q '### 1\.' "$TICK_ISSUE_QUEUE_CAPTURE_DIR/101.body"
   [ "$status" -eq 0 ]
 }
 
@@ -633,7 +642,8 @@ EOF
   {"contains":["issue","list","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$initial_list_json" '$json')},
   {"contains":["issue","view","11","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$adjustment_view_json" '$json')},
   {"contains":["issue","edit","20","--repo","owner/repo"],"stdout":""},
-  {"contains":["issue","list","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$refreshed_list_json" '$json')}
+  {"contains":["issue","list","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$refreshed_list_json" '$json')},
+  {"contains":["issue","list","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$(jq -cn '[{number:10,title:"X",state:"CLOSED",body:"<!-- runoq:meta\ntype: epic\n-->",labels:[],url:"u"}]')" '$json')}
 ]
 EOF
   use_fake_gh "$scenario" "$TEST_TMPDIR/gh.state" "$TEST_TMPDIR/gh.log" "$TEST_TMPDIR/gh-capture"

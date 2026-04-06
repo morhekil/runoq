@@ -374,10 +374,7 @@ run_tick_smoke() {
   items_rejected=$((items_rejected + 1))
 
   output="$(tick_once "$root")"
-  add_step "process_approval_comment" "$output"
-
-  output="$(tick_once "$root")"
-  add_step "materialize_milestones" "$output"
+  add_step "approve_and_materialize_milestones" "$output"
   issues_json="$(list_issues_json "$repo")"
   milestone1="$(find_open_epic_by_title "$issues_json" "Core formatter")"
   milestone2="$(find_open_epic_by_title "$issues_json" "Caching strategy")"
@@ -415,9 +412,7 @@ run_tick_smoke() {
   operator_gh issue comment "$milestone1_plan_number" --repo "$repo" --body "Approved, create the tasks" >/dev/null
   comment_interactions=$((comment_interactions + 1))
   output="$(tick_once "$root")"
-  add_step "approve_tasks" "$output"
-  output="$(tick_once "$root")"
-  add_step "materialize_tasks" "$output"
+  add_step "approve_and_materialize_tasks" "$output"
   issues_json="$(list_issues_json "$repo")"
   local milestone1_tasks
   milestone1_tasks="$(printf '%s' "$issues_json" | jq -c --argjson parent "$milestone1_number" '
@@ -463,9 +458,7 @@ run_tick_smoke() {
   items_rejected=$((items_rejected + 1))
 
   output="$(tick_once "$root")"
-  add_step "approve_adjustments" "$output"
-  output="$(tick_once "$root")"
-  add_step "apply_adjustments" "$output"
+  add_step "approve_and_apply_adjustments" "$output"
   issues_json="$(list_issues_json "$repo")"
   milestone2_plan="$(find_open_child_by_type "$issues_json" "$milestone2_number" planning || true)"
   milestone2_plan_number="$(printf '%s' "$milestone2_plan" | jq -r '.number // empty')"
@@ -486,9 +479,7 @@ run_tick_smoke() {
   operator_gh issue comment "$milestone2_plan_number" --repo "$repo" --body "Approved" >/dev/null
   comment_interactions=$((comment_interactions + 1))
   output="$(tick_once "$root")"
-  add_step "approve_discovery_tasks" "$output"
-  output="$(tick_once "$root")"
-  add_step "materialize_discovery_task" "$output"
+  add_step "approve_and_materialize_discovery_tasks" "$output"
   issues_json="$(list_issues_json "$repo")"
   local milestone2_tasks
   milestone2_tasks="$(printf '%s' "$issues_json" | jq -c --argjson parent "$milestone2_number" '
@@ -520,9 +511,7 @@ run_tick_smoke() {
   comment_interactions=$((comment_interactions + 1))
   items_rejected=$((items_rejected + 1))
   output="$(tick_once "$root")"
-  add_step "approve_discovery_adjustment" "$output"
-  output="$(tick_once "$root")"
-  add_step "apply_discovery_adjustment" "$output"
+  add_step "approve_and_apply_discovery_adjustment" "$output"
 
   output="$(tick_once "$root")"
   add_step "project_complete" "$output"
