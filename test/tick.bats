@@ -268,7 +268,7 @@ EOF
 ```json
 {"items":[{"title":"Core formatter","type":"implementation","goal":"Goal 1","criteria":["A"],"scope":["core"],"sequencing_rationale":"s","priority":1}]}
 ```'
-  view_json="$(jq -cn --argjson number 2 --arg title 'Break plan into milestones' --arg body "$planning_body" --arg proposal "$proposal_comment" '{number:$number,title:$title,body:$body,comments:[{author:{login:"runoq"},body:$proposal},{author:{login:"human"},body:"Why this order?"}],labels:[],state:"OPEN"}')"
+  view_json="$(jq -cn --argjson number 2 --arg title 'Break plan into milestones' --arg body "$planning_body" --arg proposal "$proposal_comment" '{number:$number,title:$title,body:$body,comments:[{author:{login:"runoq"},body:$proposal,id:"IC_bot"},{author:{login:"human"},body:"Why this order?",id:"IC_human123"}],labels:[],state:"OPEN"}')"
 
   fixture_dir="$TEST_TMPDIR/fixtures"
   mkdir -p "$fixture_dir"
@@ -288,7 +288,8 @@ EOF
   {"contains":["issue","list","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$list_json" '$json')},
   {"contains":["issue","view","2","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$view_json" '$json')},
   {"contains":["issue","view","2","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$view_json" '$json')},
-  {"contains":["issue","comment","2","--repo","owner/repo"],"stdout":""}
+  {"contains":["issue","comment","2","--repo","owner/repo"],"stdout":""},
+  {"contains":["api","graphql","addReaction","IC_human123","EYES"],"stdout":"{}"}
 ]
 EOF
   use_fake_gh "$scenario" "$TEST_TMPDIR/gh.state" "$TEST_TMPDIR/gh.log" "$TEST_TMPDIR/gh-capture"
@@ -300,6 +301,8 @@ EOF
   run grep -q 'plan-comment-responder' "$FAKE_CLAUDE_LOG"
   [ "$status" -eq 0 ]
   run grep -q 'issue comment 2 --repo owner/repo' "$FAKE_GH_LOG"
+  [ "$status" -eq 0 ]
+  run grep -q 'addReaction.*IC_human123.*EYES' "$FAKE_GH_LOG"
   [ "$status" -eq 0 ]
 }
 
@@ -335,13 +338,14 @@ EOF
   {"title":"CLI wrapper","type":"implementation","goal":"Goal 3","criteria":["C"],"scope":["cli"],"sequencing_rationale":"s","priority":3}
 ]}
 ```'
-  view_json="$(jq -cn --argjson number 2 --arg title 'Break plan into milestones' --arg body "$planning_body" --arg proposal "$proposal_comment" '{number:$number,title:$title,body:$body,comments:[{author:{login:"runoq"},body:$proposal},{author:{login:"human"},body:"OK, approved with item 3 removed"}],labels:[{name:"runoq:plan-approved"}],state:"OPEN"}')"
+  view_json="$(jq -cn --argjson number 2 --arg title 'Break plan into milestones' --arg body "$planning_body" --arg proposal "$proposal_comment" '{number:$number,title:$title,body:$body,comments:[{author:{login:"runoq"},body:$proposal,id:"IC_bot"},{author:{login:"human"},body:"OK, approved with item 3 removed",id:"IC_approval"}],labels:[{name:"runoq:plan-approved"}],state:"OPEN"}')"
 
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<EOF
 [
   {"contains":["issue","list","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$list_json" '$json')},
-  {"contains":["issue","view","2","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$view_json" '$json')}
+  {"contains":["issue","view","2","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$view_json" '$json')},
+  {"contains":["api","graphql","addReaction","IC_approval","EYES"],"stdout":"{}"}
 ]
 EOF
   use_fake_gh "$scenario" "$TEST_TMPDIR/gh.state" "$TEST_TMPDIR/gh.log" "$TEST_TMPDIR/gh-capture"

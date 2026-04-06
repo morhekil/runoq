@@ -106,6 +106,17 @@ select_items_from_proposal() {
   printf '%s' "$proposal_json" | "$(runoq::root)/scripts/tick-fmt.sh" select-items --selection "$selection_json"
 }
 
+react_to_last_human_comment() {
+  local issue_view_json="$1"
+  local comment_id
+  comment_id="$(printf '%s' "$issue_view_json" | jq -r '
+    [.comments // [] | .[] | select((.author.login // "") != "runoq" and ((.body // "") | contains("runoq:event") | not))]
+    | last | .id // empty
+  ')"
+  [[ -n "$comment_id" ]] || return 0
+  runoq::gh api graphql -f query="$(printf 'mutation { addReaction(input: {subjectId: "%s", content: EYES}) { reaction { content } } }' "$comment_id")" >/dev/null 2>&1 || true
+}
+
 latest_human_comment_unanswered() {
   local issue_view_json="$1"
   printf '%s' "$issue_view_json" | jq -e '
@@ -261,6 +272,7 @@ handle_pending_review() {
   elif latest_human_comment_unanswered "$issue_view"; then
     runoq::step "Responding to unanswered comments on #$pending_number"
     "$comment_handler_script" "$repo" "$pending_number" "$plan_file" >/dev/null
+    react_to_last_human_comment "$issue_view"
     runoq::success "Responded to comments on #$pending_number"
     printf 'Responded to comments on #%s\n' "$pending_number"
     return 0
@@ -321,6 +333,7 @@ handle_approved_planning() {
     runoq::info "closing review #$review_number"
     "$issue_queue_script" set-status "$repo" "$review_number" done >/dev/null
   fi
+  react_to_last_human_comment "$review_view"
   runoq::success "Applied approvals from #$review_number, created issues"
   printf 'Applied approvals from #%s, created issues\n' "$review_number"
 }
@@ -381,6 +394,7 @@ handle_approved_adjustment() {
     runoq::info "seeding planning issue for next epic #$next_number"
     create_planning_issue "$issue_queue_script" "$repo" "$next_number" "Break down milestone into tasks" "## Acceptance Criteria\n\n- [ ] Tasks proposed." >/dev/null
   fi
+  react_to_last_human_comment "$review_view"
   runoq::success "Applied adjustments from #$review_number"
   printf 'Applied approvals from #%s, created issues\n' "$review_number"
 }
