@@ -1,3 +1,8 @@
+---
+name: plan-to-issues
+description: Slice a local plan document into GitHub issues organized into an epic/task hierarchy. Superseded by scripts/plan.sh + plan-decomposer agent.
+---
+
 # plan-to-issues
 
 > **Note:** This skill is superseded by `scripts/plan.sh` + the `plan-decomposer` agent.

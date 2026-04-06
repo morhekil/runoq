@@ -1,3 +1,8 @@
+---
+name: diff-review
+description: Lightweight, diff-scoped PERFECT-D review that evaluates changed code and its immediate context as a fast quality gate.
+---
+
 # Diff-Scoped PERFECT-D Review
 
 A lightweight, diff-scoped PERFECT-D review that evaluates the changed code, its immediate context, and related files that consume changed interfaces. Same quality bar as `full-review`, smaller blast radius.

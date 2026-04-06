@@ -1,3 +1,8 @@
+---
+name: pr-lifecycle
+description: Deterministic PR operations via gh-pr-lifecycle.sh — create, comment, finalize, poll mentions, and manage PR metadata.
+---
+
 # pr-lifecycle
 
 Use this skill for deterministic PR operations. Delegate all GitHub mutations to `"$RUNOQ_ROOT/scripts/gh-pr-lifecycle.sh"`.

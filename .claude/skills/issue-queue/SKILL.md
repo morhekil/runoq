@@ -1,3 +1,8 @@
+---
+name: issue-queue
+description: Structured access to the GitHub issue queue — list, next, set-status, and create issues via gh-issue-queue.sh.
+---
+
 # issue-queue
 
 Use this skill when you need structured access to the GitHub issue queue.

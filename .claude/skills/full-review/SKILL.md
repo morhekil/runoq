@@ -1,3 +1,8 @@
+---
+name: full-review
+description: Thorough PERFECT-D code review of a complete implementation against its spec, producing a structured scorecard and actionable feedback.
+---
+
 # PERFECT-D Review of Code Implementation
 
 Perform a thorough PERFECT-D code review of a single implementation against its spec, producing a structured scorecard and actionable feedback for the implementation agent.
