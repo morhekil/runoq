@@ -4,6 +4,7 @@ set -euo pipefail
 
 # shellcheck source=./scripts/lib/smoke-common.sh
 source "$(cd "$(dirname "$0")" && pwd)/lib/smoke-common.sh"
+source "$(cd "$(dirname "$0")" && pwd)/lib/planning.sh"
 
 export RUNOQ_SMOKE_LOG_SCOPE="smoke-tick"
 
@@ -112,34 +113,10 @@ tick_preflight_json() {
   '
 }
 
-metadata_value() {
-  local body="$1"
-  local key="$2"
-  printf '%s\n' "$body" | awk -v key="$key" '
-    /<!-- runoq:meta/ {in_meta=1; next}
-    in_meta && /-->/ {exit}
-    in_meta && index($0, key ":") == 1 {
-      sub("^" key ":[[:space:]]*", "", $0)
-      print $0
-      exit
-    }
-  '
-}
-
-issue_type() {
-  local body="$1"
-  local value
-  value="$(metadata_value "$body" "type")"
-  printf '%s\n' "${value:-task}"
-}
-
-issue_parent_epic() {
-  metadata_value "$1" "parent_epic"
-}
-
-issue_milestone_type() {
-  metadata_value "$1" "milestone_type"
-}
+metadata_value() { runoq::metadata_value "$@"; }
+issue_type() { runoq::issue_type "$@"; }
+issue_parent_epic() { runoq::issue_parent_epic "$@"; }
+issue_milestone_type() { runoq::issue_milestone_type "$@"; }
 
 list_issues_json() {
   local repo="$1"
