@@ -197,6 +197,36 @@ configure_managed_repo() {
   runoq::die "Failed to configure managed repo ${repo}: ${output}"
 }
 
+rewrite_tick_adjustment_fixture() {
+  local fixture_dir="$1"
+  local target_milestone_number="$2"
+  local fixture_path tmp suggested_before suggested_after
+  fixture_path="$fixture_dir/milestone-reviewer-adjustment.json"
+  [[ -f "$fixture_path" ]] || runoq::die "Tick adjustment fixture not found: ${fixture_path}"
+
+  suggested_before="before #${target_milestone_number}"
+  suggested_after="after #${target_milestone_number}"
+  tmp="$(mktemp "${TMPDIR:-/tmp}/runoq-tick-adjustment.XXXXXX")"
+  jq \
+    --argjson target "$target_milestone_number" \
+    --arg before "$suggested_before" \
+    --arg after "$suggested_after" '
+    .proposed_adjustments |= (
+      map(
+        if .type == "modify" then
+          .target_milestone_number = $target
+          | .suggested_position = $before
+        elif .type == "new_milestone" then
+          .suggested_position = $after
+        else
+          .
+        end
+      )
+    )
+  ' "$fixture_path" >"$tmp"
+  mv "$tmp" "$fixture_path"
+}
+
 resolve_tool_bin() {
   local candidate="$1"
   local resolved=""

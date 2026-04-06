@@ -319,7 +319,11 @@ run_tick_smoke() {
   export RUNOQ_SYMLINK_DIR="$tmpdir/bin"
   export TARGET_ROOT="$target_dir"
   export REPO="$repo"
-  export RUNOQ_TEST_AGENT_FIXTURE_DIR="$root/test/fixtures/tick"
+  local fixture_dir
+  fixture_dir="$tmpdir/tick-fixtures"
+  mkdir -p "$fixture_dir"
+  cp -R "$root/test/fixtures/tick/." "$fixture_dir/"
+  export RUNOQ_TEST_AGENT_FIXTURE_DIR="$fixture_dir"
   export RUNOQ_TEST_AGENT_STATE_DIR="$tmpdir/agent-state"
   export RUNOQ_CLAUDE_BIN="$root/test/helpers/fixture-claude"
   export FAKE_CLAUDE_LOG="$artifacts_dir/claude.log"
@@ -446,6 +450,7 @@ run_tick_smoke() {
     "$root/scripts/gh-issue-queue.sh" set-status "$repo" "$task_number" done >/dev/null
   done < <(printf '%s' "$milestone1_tasks" | jq -r '.[].number')
 
+  rewrite_tick_adjustment_fixture "$fixture_dir" "$milestone2_number"
   output="$(tick_once "$root")"
   add_step "milestone1_adjustment_review" "$output"
   issues_json="$(list_issues_json "$repo")"

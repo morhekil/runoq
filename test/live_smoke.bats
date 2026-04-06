@@ -438,6 +438,24 @@ EOF
   [ "$output" = "2" ]
 }
 
+@test "tick adjustment fixture rewrites target milestone numbers for live smoke" {
+  fixture_dir="$TEST_TMPDIR/tick-fixtures"
+  mkdir -p "$fixture_dir"
+  cp -R "$RUNOQ_ROOT/test/fixtures/tick/." "$fixture_dir/"
+
+  run bash -lc '
+    set -euo pipefail
+    export RUNOQ_ROOT="'"$RUNOQ_ROOT"'"
+    export RUNOQ_CONFIG="'"$RUNOQ_CONFIG"'"
+    source "'"$RUNOQ_ROOT"'/scripts/lib/smoke-common.sh"
+    rewrite_tick_adjustment_fixture "'"$fixture_dir"'" 4
+    jq -c "{target:(.proposed_adjustments[0].target_milestone_number), before:(.proposed_adjustments[0].suggested_position), after:(.proposed_adjustments[1].suggested_position)}" "'"$fixture_dir"'/milestone-reviewer-adjustment.json"
+  '
+
+  [ "$status" -eq 0 ]
+  [ "$output" = '{"target":4,"before":"before #4","after":"after #4"}' ]
+}
+
 @test "operator_gh runs without inherited bot token" {
   helper="$TEST_TMPDIR/gh-env"
   cat >"$helper" <<'EOF'
