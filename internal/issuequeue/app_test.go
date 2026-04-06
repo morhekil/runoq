@@ -495,6 +495,135 @@ func TestEpicStatusTracksPendingChildren(t *testing.T) {
 	}
 }
 
+func TestOperatorLoginFallsBackToGHWhenEnvEmpty(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t, []string{
+		"create", "owner/repo", "Plan milestone 1", "body",
+		"--type", "planning",
+		"--priority", "1",
+		"--estimated-complexity", "low",
+	})
+	app.env = append(app.env, "RUNOQ_OPERATOR_LOGIN=")
+	var sawAPICall bool
+	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+		t.Helper()
+		command := req.Name + " " + strings.Join(req.Args, " ")
+		switch {
+		case strings.Contains(command, "api user --jq .login"):
+			sawAPICall = true
+			_, _ = req.Stdout.Write([]byte("gh-user"))
+			return nil
+		case strings.Contains(command, "issue create --repo owner/repo --title Plan milestone 1 --body-file "):
+			if !strings.Contains(command, "--assignee gh-user") {
+				t.Fatalf("expected gh-user assignee, got %s", command)
+			}
+			_, _ = req.Stdout.Write([]byte("https://github.com/owner/repo/issues/99"))
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s", command)
+			return nil
+		}
+	})
+
+	code := app.Run(t.Context())
+	if code != 0 {
+		t.Fatalf("Run returned %d stderr=%q", code, app.stderr.(*bytes.Buffer).String())
+	}
+	if !sawAPICall {
+		t.Fatal("expected gh api user fallback when RUNOQ_OPERATOR_LOGIN is empty")
+	}
+}
+
+func TestOperatorLoginFailsWhenGHReturnsEmpty(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t, []string{
+		"create", "owner/repo", "Plan milestone 1", "body",
+		"--type", "planning",
+		"--priority", "1",
+		"--estimated-complexity", "low",
+	})
+	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+		t.Helper()
+		command := req.Name + " " + strings.Join(req.Args, " ")
+		switch {
+		case strings.Contains(command, "api user --jq .login"):
+			_, _ = req.Stdout.Write([]byte(""))
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s", command)
+			return nil
+		}
+	})
+
+	code := app.Run(t.Context())
+	if code == 0 {
+		t.Fatal("expected non-zero exit when gh api user returns empty login")
+	}
+	if !strings.Contains(app.stderr.(*bytes.Buffer).String(), "empty login") {
+		t.Fatalf("expected empty login error, got %q", app.stderr.(*bytes.Buffer).String())
+	}
+}
+
+func TestRunGHMutationWithRetryExhaustion(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t, []string{"set-status", "owner/repo", "42", "done"})
+	editAttempts := 0
+	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+		t.Helper()
+		command := req.Name + " " + strings.Join(req.Args, " ")
+		switch {
+		case strings.Contains(command, "issue view 42 --repo owner/repo --json labels"):
+			_, _ = req.Stdout.Write([]byte(`{"labels":[{"name":"runoq:in-progress"}]}`))
+			return nil
+		case strings.Contains(command, "issue edit 42 --repo owner/repo"):
+			editAttempts++
+			return errors.New("server error")
+		default:
+			t.Fatalf("unexpected command: %s", command)
+			return nil
+		}
+	})
+
+	code := app.Run(t.Context())
+	if code == 0 {
+		t.Fatal("expected non-zero exit when all retry attempts fail")
+	}
+	if editAttempts != 2 {
+		t.Fatalf("expected 2 edit attempts, got %d", editAttempts)
+	}
+}
+
+func TestWithoutEnvKeysEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	t.Run("no keys to remove", func(t *testing.T) {
+		env := []string{"FOO=bar", "BAZ=qux"}
+		result := withoutEnvKeys(env)
+		if len(result) != 2 {
+			t.Fatalf("expected 2 entries, got %d", len(result))
+		}
+	})
+
+	t.Run("removes all matching keys", func(t *testing.T) {
+		env := []string{"GH_TOKEN=abc", "OTHER=val", "GITHUB_TOKEN=def"}
+		result := withoutEnvKeys(env, "GH_TOKEN", "GITHUB_TOKEN")
+		if len(result) != 1 || result[0] != "OTHER=val" {
+			t.Fatalf("unexpected result: %v", result)
+		}
+	})
+
+	t.Run("entry without equals sign kept", func(t *testing.T) {
+		env := []string{"NOEQUALS", "GH_TOKEN=abc"}
+		result := withoutEnvKeys(env, "GH_TOKEN")
+		if len(result) != 1 || result[0] != "NOEQUALS" {
+			t.Fatalf("unexpected result: %v", result)
+		}
+	})
+}
+
 func newTestApp(t *testing.T, args []string) *App {
 	t.Helper()
 
