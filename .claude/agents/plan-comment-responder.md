@@ -56,7 +56,7 @@ Output **only** valid JSON — no preamble, no markdown, no explanation outside 
 
 - NEVER edit code.
 - NEVER modify state or create issues.
-- Output ONLY the JSON object. No surrounding text.
+- Output ONLY the JSON object. No surrounding text, no markdown code fences, no preamble.
 - Keep replies focused on the comment being answered.
 - For change requests, apply the requested changes to produce the revised proposal — do not just acknowledge.
 - For approvals, confirm which items will proceed.

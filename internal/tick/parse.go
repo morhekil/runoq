@@ -123,6 +123,33 @@ func ParseHumanCommentSelection(issueViewJSON string) (ItemSelection, error) {
 	return sel, nil
 }
 
+// stripCodeFence extracts JSON from markdown code fences if present.
+// Returns the original text if no fence is found.
+func stripCodeFence(text string) string {
+	text = strings.TrimSpace(text)
+	// Try direct JSON parse first
+	if len(text) > 0 && text[0] == '{' {
+		return text
+	}
+	// Look for ```json ... ``` pattern
+	start := strings.Index(text, "```")
+	if start < 0 {
+		return text
+	}
+	// Skip the opening fence line
+	after := text[start+3:]
+	nl := strings.Index(after, "\n")
+	if nl < 0 {
+		return text
+	}
+	content := after[nl+1:]
+	end := strings.Index(content, "```")
+	if end < 0 {
+		return text
+	}
+	return strings.TrimSpace(content[:end])
+}
+
 func extractNumbers(s string) []int {
 	matches := numberPattern.FindAllString(s, -1)
 	nums := make([]int, 0, len(matches))
@@ -153,8 +180,10 @@ type AgentResponse struct {
 
 // ParseAgentResponse parses and validates the structured JSON output from the
 // plan-comment-responder agent. Returns an error if the JSON is invalid, the
-// action is unknown, or required fields are missing.
+// action is unknown, or required fields are missing. Handles JSON wrapped in
+// markdown code fences (agents sometimes add these despite instructions).
 func ParseAgentResponse(text string) (AgentResponse, error) {
+	text = stripCodeFence(text)
 	var resp AgentResponse
 	if err := json.Unmarshal([]byte(text), &resp); err != nil {
 		return AgentResponse{}, fmt.Errorf("invalid agent response JSON: %w", err)

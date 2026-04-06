@@ -197,6 +197,30 @@ func TestParseAgentResponseUnknownAction(t *testing.T) {
 	}
 }
 
+func TestParseAgentResponseFencedJSON(t *testing.T) {
+	t.Parallel()
+	input := "```json\n{\"action\":\"approve\",\"reply\":\"Ship it.\"}\n```"
+	resp, err := ParseAgentResponse(input)
+	if err != nil {
+		t.Fatalf("should handle fenced JSON: %v", err)
+	}
+	if resp.Action != ActionApprove {
+		t.Errorf("action = %q", resp.Action)
+	}
+}
+
+func TestParseAgentResponseFencedJSONWithPreamble(t *testing.T) {
+	t.Parallel()
+	input := "Here's the response:\n\n```json\n{\"action\":\"question\",\"reply\":\"Because reasons.\"}\n```\n\nHope that helps."
+	resp, err := ParseAgentResponse(input)
+	if err != nil {
+		t.Fatalf("should handle fenced JSON with preamble: %v", err)
+	}
+	if resp.Action != ActionQuestion {
+		t.Errorf("action = %q", resp.Action)
+	}
+}
+
 func TestParseAgentResponseInvalidJSON(t *testing.T) {
 	t.Parallel()
 	_, err := ParseAgentResponse(`not json`)
