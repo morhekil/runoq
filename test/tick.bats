@@ -42,6 +42,7 @@ set -euo pipefail
 log_file="${TICK_ISSUE_QUEUE_LOG:?}"
 state_file="${TICK_ISSUE_QUEUE_STATE_FILE:?}"
 capture_dir="${TICK_ISSUE_QUEUE_CAPTURE_DIR:?}"
+fail_once_file="${TICK_ISSUE_QUEUE_FAIL_ONCE_STATE_FILE:-}"
 mkdir -p "$(dirname "$state_file")" "$capture_dir"
 printf '%s\n' "$*" >>"$log_file"
 
@@ -93,6 +94,17 @@ case "$cmd" in
           ;;
       esac
     done
+    if [[ "${TICK_ISSUE_QUEUE_FAIL_FIRST_TASK_CREATE_ONCE:-0}" == "1" && "$issue_type" == "task" ]]; then
+      if [[ -z "$fail_once_file" ]]; then
+        echo "missing TICK_ISSUE_QUEUE_FAIL_ONCE_STATE_FILE" >&2
+        exit 1
+      fi
+      if [[ ! -f "$fail_once_file" ]]; then
+        printf '%s\n' "1" >"$fail_once_file"
+        echo "transient task create failure" >&2
+        exit 1
+      fi
+    fi
     count=$((count + 1))
     printf '%s\n' "$count" >"$state_file"
     {
@@ -347,6 +359,58 @@ EOF
   [ "$status" -eq 0 ]
   run grep -q 'milestone_type: discovery' "$TICK_ISSUE_QUEUE_CAPTURE_DIR/102.body"
   [ "$status" -eq 0 ]
+}
+
+@test "tick retries transient task creation failure when applying approved planning proposal" {
+  project_dir="$TEST_TMPDIR/project"
+  make_git_repo "$project_dir" "git@github.com:owner/repo.git"
+  cat >"$project_dir/runoq.json" <<'EOF'
+{"plan":"docs/prd.md"}
+EOF
+  mkdir -p "$project_dir/docs"
+  printf '# Plan\n' >"$project_dir/docs/prd.md"
+  export TARGET_ROOT="$project_dir"
+
+  issue_queue_bin="$TEST_TMPDIR/fake-issue-queue"
+  write_fake_issue_queue_bin "$issue_queue_bin"
+  export TICK_ISSUE_QUEUE_LOG="$TEST_TMPDIR/issue-queue.log"
+  export TICK_ISSUE_QUEUE_STATE_FILE="$TEST_TMPDIR/issue-queue.state"
+  export TICK_ISSUE_QUEUE_CAPTURE_DIR="$TEST_TMPDIR/issue-queue-capture"
+  export TICK_ISSUE_QUEUE_FAIL_FIRST_TASK_CREATE_ONCE="1"
+  export TICK_ISSUE_QUEUE_FAIL_ONCE_STATE_FILE="$TEST_TMPDIR/issue-queue-fail-once.state"
+
+  epic_body="$(meta_body epic 1 '' implementation)"
+  planning_labels='[{"name":"runoq:plan-approved"}]'
+  planning_body="$(meta_body planning 1 10)"
+  list_json="$(jq -cn --argjson a "$(tick_issue_json 10 'Core formatter' OPEN "$epic_body")" --argjson b "$(tick_issue_json 11 'Break down milestone into tasks' OPEN "$planning_body" "$planning_labels")" '[$a,$b]')"
+  proposal_comment='<!-- runoq:payload:plan-proposal -->
+1. Implement formatter
+2. Add tests
+
+```json
+{"items":[
+  {"title":"Implement formatter","type":"task","body":"## Acceptance Criteria\n\n- [ ] Works.","priority":1,"estimated_complexity":"low","complexity_rationale":"single module","depends_on_keys":[]},
+  {"title":"Add tests","type":"task","body":"## Acceptance Criteria\n\n- [ ] Works.","priority":2,"estimated_complexity":"low","complexity_rationale":"single module","depends_on_keys":[]}
+]}
+```'
+  view_json="$(jq -cn --argjson number 11 --arg title 'Break down milestone into tasks' --arg body "$planning_body" --arg proposal "$proposal_comment" '{number:$number,title:$title,body:$body,comments:[{author:{login:"runoq"},body:$proposal},{author:{login:"human"},body:"Looks good"}],labels:[{name:"runoq:plan-approved"}],state:"OPEN"}')"
+
+  scenario="$TEST_TMPDIR/scenario.json"
+  write_fake_gh_scenario "$scenario" <<EOF
+[
+  {"contains":["issue","list","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$list_json" '$json')},
+  {"contains":["issue","view","11","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$view_json" '$json')}
+]
+EOF
+  use_fake_gh "$scenario" "$TEST_TMPDIR/gh.state" "$TEST_TMPDIR/gh.log" "$TEST_TMPDIR/gh-capture"
+
+  run env RUNOQ_TICK_ISSUE_QUEUE_SCRIPT="$issue_queue_bin" "$RUNOQ_ROOT/scripts/tick.sh"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Applied approvals from #11"* ]]
+  run grep -c '^create owner/repo' "$TICK_ISSUE_QUEUE_LOG"
+  [ "$status" -eq 0 ]
+  [ "$output" = "3" ]
 }
 
 @test "tick dispatches planning issue when current milestone proposal is missing" {

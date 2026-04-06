@@ -258,6 +258,27 @@ create_planning_issue() {
   "$issue_queue_script" create "$repo" "$title" "$body" --type planning --priority 1 --estimated-complexity low --parent-epic "$parent_epic"
 }
 
+create_task_issue() {
+  local issue_queue_script="$1" repo="$2" title="$3" body="$4" priority="$5" complexity="$6" rationale="$7" parent_epic="$8"
+  local max_attempts pause attempt output
+  max_attempts="${RUNOQ_TICK_TASK_CREATE_ATTEMPTS:-2}"
+  pause="${RUNOQ_TICK_TASK_CREATE_RETRY_DELAY_SECONDS:-1}"
+  attempt=1
+
+  while true; do
+    if output="$("$issue_queue_script" create "$repo" "$title" "$body" --type task --priority "$priority" --estimated-complexity "$complexity" --complexity-rationale "$rationale" --parent-epic "$parent_epic")"; then
+      printf '%s\n' "$output"
+      return 0
+    fi
+    if (( attempt >= max_attempts )); then
+      return 1
+    fi
+    runoq::log "tick" "task create failed for '${title}', retrying (${attempt}/${max_attempts})"
+    sleep "$pause"
+    attempt=$((attempt + 1))
+  done
+}
+
 main() {
   if [[ $# -gt 0 && ( "$1" == "-h" || "$1" == "--help" || "$1" == "help" ) ]]; then
     usage
@@ -357,7 +378,7 @@ main() {
           complexity="$(printf '%s' "$item" | jq -r '.estimated_complexity // "medium"')"
           rationale="$(printf '%s' "$item" | jq -r '.complexity_rationale // ""')"
           depcsv=""
-          "$issue_queue_script" create "$repo" "$title" "$body" --type task --priority "$priority" --estimated-complexity "$complexity" --complexity-rationale "$rationale" --parent-epic "$review_parent" >/dev/null
+          create_task_issue "$issue_queue_script" "$repo" "$title" "$body" "$priority" "$complexity" "$rationale" "$review_parent" >/dev/null
         done < <(printf '%s' "$filtered_json" | jq -c '.items[]')
         "$issue_queue_script" set-status "$repo" "$review_number" done >/dev/null
       fi
