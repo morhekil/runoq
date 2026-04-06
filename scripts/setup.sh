@@ -90,12 +90,21 @@ ensure_identity() {
 }
 
 ensure_labels() {
-  local repo existing label
+  local repo existing label delay attempt
   repo="$(runoq::repo)"
+  delay="${RUNOQ_SETUP_LABEL_RETRY_DELAY_SECONDS:-3}"
   existing="$(operator_gh label list --repo "$repo" --limit 200 --json name | jq -r '.[].name')"
   while IFS= read -r label; do
     if ! grep -Fxq "$label" <<<"$existing"; then
-      operator_gh label create "$label" --repo "$repo" --color BFDADC --description "Managed by runoq" >/dev/null
+      for attempt in 1 2 3; do
+        if operator_gh label create "$label" --repo "$repo" --color BFDADC --description "Managed by runoq" >/dev/null; then
+          break
+        fi
+        if [[ "$attempt" -eq 3 ]]; then
+          return 1
+        fi
+        sleep "$delay"
+      done
     fi
   done < <(runoq::all_state_labels)
 }

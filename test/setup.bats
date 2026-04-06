@@ -184,6 +184,60 @@ EOF
   [ "$(jq -r '.appId' "$project_dir/.runoq/identity.json")" = "123" ]
 }
 
+@test "setup init retries label creation after transient EOF failures" {
+  project_dir="$TEST_TMPDIR/project"
+  make_git_repo "$project_dir" "git@github.com:owner/repo.git"
+  export TARGET_ROOT="$project_dir"
+  export RUNOQ_SYMLINK_DIR="$TEST_TMPDIR/bin"
+  export RUNOQ_APP_KEY="$TEST_TMPDIR/app-key.pem"
+  export RUNOQ_APP_ID="123"
+  export RUNOQ_SETUP_LABEL_RETRY_DELAY_SECONDS="0"
+  write_empty_key "$RUNOQ_APP_KEY"
+
+  create_count_file="$TEST_TMPDIR/label-create.count"
+  gh_wrapper="$TEST_TMPDIR/gh-wrapper"
+  cat >"$gh_wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+count_file="$create_count_file"
+
+if [[ "\${1:-}" == "api" && "\$*" == *"/repos/owner/repo/installation"* ]]; then
+  printf '%s' '{"id":789,"app_id":123,"app_slug":"runoq"}'
+  exit 0
+fi
+
+if [[ "\${1:-}" == "label" && "\${2:-}" == "list" ]]; then
+  printf '%s' '[]'
+  exit 0
+fi
+
+if [[ "\${1:-}" == "label" && "\${2:-}" == "create" ]]; then
+  count=0
+  [[ -f "\$count_file" ]] && count="\$(cat "\$count_file")"
+  count="\$((count + 1))"
+  printf '%s' "\$count" >"\$count_file"
+  if [[ "\$count" -eq 1 ]]; then
+    printf 'Post "https://api.github.com/repos/owner/repo/labels": unexpected EOF\n' >&2
+    exit 1
+  fi
+  exit 0
+fi
+
+echo "unexpected gh invocation: \$*" >&2
+exit 1
+EOF
+  chmod +x "$gh_wrapper"
+  export GH_BIN="$gh_wrapper"
+
+  run "$RUNOQ_ROOT/scripts/setup.sh"
+
+  [ "$status" -eq 0 ]
+  run cat "$create_count_file"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 2 ]
+}
+
 @test "setup init is idempotent on repeated runs" {
   project_dir="$TEST_TMPDIR/project"
   make_git_repo "$project_dir" "git@github.com:owner/repo.git"
