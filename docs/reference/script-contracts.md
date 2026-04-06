@@ -38,6 +38,29 @@ Notes:
 - `epic-status` checks whether all children of an epic have the `runoq:done` label, enabling INTEGRATE phase triggering.
 - dependency checks require upstream issues to carry the configured done label.
 - `gh-issue-queue.sh` remains the stable shell entrypoint and dispatches to the Go runtime queue engine (`RUNOQ_RUNTIME_BIN` first, then `go run` fallback from `RUNOQ_ROOT`).
+- `assign` adds the operator as issue assignee (resolves via `RUNOQ_OPERATOR_LOGIN` or `gh api user`).
+
+## `tick-fmt.sh`
+
+Purpose: pure formatting and parsing subcommands for the tick pipeline. All string templating, markdown generation, JSON transformation, and text parsing that was previously done inline in shell via jq/awk/printf is now implemented in Go (`internal/tick/`).
+
+Primary callers: `tick.sh`, `plan-dispatch.sh`, `lib/planning.sh`.
+
+| Subcommand | stdin | stdout |
+|---|---|---|
+| `format-proposal` | Proposal JSON | Markdown with payload marker |
+| `proposal-comment-body` | `{proposal, technical, product, warning}` | Full review comment markdown |
+| `milestone-body` | ProposalItem JSON | Milestone issue body |
+| `adjustment-review-body` | `{proposed_adjustments}` JSON | Adjustment review body |
+| `parse-verdict` | Verdict text | ReviewScore JSON |
+| `extract-json <marker>` | Text with marker block | Extracted JSON |
+| `human-comment-selection` | Issue view JSON | `{approved, rejected}` JSON |
+| `select-items --selection JSON` | Proposal JSON | Filtered Proposal JSON |
+| `merge-checklists <left> <right>` | (none) | Merged text |
+
+Notes:
+- `tick-fmt.sh` dispatches to the Go runtime (`__tick_fmt`) using the same pattern as `gh-issue-queue.sh`.
+- All subcommands are pure transformations: no GitHub API calls, no env dependencies.
 
 ## `plan.sh`
 

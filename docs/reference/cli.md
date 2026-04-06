@@ -235,6 +235,24 @@ Common failures:
 - Missing auth bootstrap inputs
 - Missing or invalid maintenance state on resume
 
+## Internal: `tick-fmt` Subcommands
+
+`scripts/tick-fmt.sh` (routed internally as `__tick_fmt`) provides pure formatting and parsing subcommands used by `tick.sh` and `plan-dispatch.sh`. All subcommands read from stdin and write to stdout.
+
+| Subcommand | Input (stdin) | Output (stdout) |
+|---|---|---|
+| `format-proposal` | Proposal JSON | Markdown with `<!-- runoq:payload:plan-proposal -->` marker |
+| `proposal-comment-body` | `{proposal, technical, product, warning}` JSON | Full review comment markdown |
+| `milestone-body` | ProposalItem JSON | Milestone issue body markdown |
+| `adjustment-review-body` | `{proposed_adjustments}` JSON | Adjustment review issue body |
+| `parse-verdict` | Verdict text (VERDICT/SCORE/CHECKLIST) | ReviewScore JSON |
+| `extract-json <marker>` | Text with marker-delimited code block | Extracted JSON string |
+| `human-comment-selection` | Issue view JSON (`gh issue view --json`) | `{approved, rejected}` JSON |
+| `select-items --selection JSON` | Proposal JSON | Filtered Proposal JSON |
+| `merge-checklists <left> <right>` | (none — positional args) | Merged checklist text |
+
+These are internal implementation details and are not part of the public CLI contract.
+
 ## Common Examples
 
 Initialize a repo and create queue issues from a plan:
