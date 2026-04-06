@@ -308,7 +308,8 @@ run_planning() {
   fi
 
   local output issues_json planning_issue planning_number planning_view proposal_json milestone1 milestone1_number
-  local milestone1_plan milestone1_plan_number milestone1_plan_view created_tasks task_count milestone_count has_discovery_milestone comment_interactions
+  local milestone1_plan milestone1_plan_number milestone1_plan_view created_tasks created_issues task_count milestone_count has_discovery_milestone comment_interactions
+  created_issues='[]'
   comment_interactions=0
 
   if [[ "$(printf '%s' "$failures_json" | jq 'length')" -eq 0 ]]; then
