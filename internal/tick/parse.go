@@ -134,3 +134,45 @@ func extractNumbers(s string) []int {
 	}
 	return nums
 }
+
+// AgentAction classifies the intent of a plan-comment-responder response.
+type AgentAction string
+
+const (
+	ActionQuestion      AgentAction = "question"
+	ActionChangeRequest AgentAction = "change-request"
+	ActionApprove       AgentAction = "approve"
+)
+
+// AgentResponse is the structured output from the plan-comment-responder agent.
+type AgentResponse struct {
+	Action          AgentAction `json:"action"`
+	Reply           string      `json:"reply"`
+	RevisedProposal *Proposal   `json:"revised_proposal,omitzero"`
+}
+
+// ParseAgentResponse parses and validates the structured JSON output from the
+// plan-comment-responder agent. Returns an error if the JSON is invalid, the
+// action is unknown, or required fields are missing.
+func ParseAgentResponse(text string) (AgentResponse, error) {
+	var resp AgentResponse
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		return AgentResponse{}, fmt.Errorf("invalid agent response JSON: %w", err)
+	}
+	switch resp.Action {
+	case ActionQuestion, ActionApprove:
+		// valid, no extra fields required
+	case ActionChangeRequest:
+		if resp.RevisedProposal == nil {
+			return AgentResponse{}, fmt.Errorf("change-request action requires revised_proposal")
+		}
+	case "":
+		return AgentResponse{}, fmt.Errorf("missing required field: action")
+	default:
+		return AgentResponse{}, fmt.Errorf("unknown action: %q", resp.Action)
+	}
+	if resp.Reply == "" {
+		return AgentResponse{}, fmt.Errorf("missing required field: reply")
+	}
+	return resp, nil
+}

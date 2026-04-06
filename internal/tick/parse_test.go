@@ -116,6 +116,95 @@ func TestParseHumanCommentSelection(t *testing.T) {
 	}
 }
 
+func TestParseAgentResponseQuestion(t *testing.T) {
+	t.Parallel()
+	input := `{"action":"question","reply":"The ordering reduces dependency risk."}`
+	resp, err := ParseAgentResponse(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Action != ActionQuestion {
+		t.Errorf("action = %q, want question", resp.Action)
+	}
+	if resp.Reply != "The ordering reduces dependency risk." {
+		t.Errorf("reply = %q", resp.Reply)
+	}
+	if resp.RevisedProposal != nil {
+		t.Error("revised_proposal should be nil for question")
+	}
+}
+
+func TestParseAgentResponseApprove(t *testing.T) {
+	t.Parallel()
+	input := `{"action":"approve","reply":"Acknowledged, proceeding with the approved set."}`
+	resp, err := ParseAgentResponse(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Action != ActionApprove {
+		t.Errorf("action = %q, want approve", resp.Action)
+	}
+}
+
+func TestParseAgentResponseChangeRequest(t *testing.T) {
+	t.Parallel()
+	input := `{"action":"change-request","reply":"Dropped item 3 as requested.","revised_proposal":{"items":[{"title":"A","type":"task"}]}}`
+	resp, err := ParseAgentResponse(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Action != ActionChangeRequest {
+		t.Errorf("action = %q, want change-request", resp.Action)
+	}
+	if resp.RevisedProposal == nil {
+		t.Fatal("revised_proposal must be non-nil for change-request")
+	}
+	if len(resp.RevisedProposal.Items) != 1 {
+		t.Errorf("expected 1 item, got %d", len(resp.RevisedProposal.Items))
+	}
+}
+
+func TestParseAgentResponseChangeRequestMissingProposal(t *testing.T) {
+	t.Parallel()
+	input := `{"action":"change-request","reply":"Dropped it."}`
+	_, err := ParseAgentResponse(input)
+	if err == nil {
+		t.Fatal("expected error for change-request without revised_proposal")
+	}
+}
+
+func TestParseAgentResponseMissingAction(t *testing.T) {
+	t.Parallel()
+	_, err := ParseAgentResponse(`{"reply":"text"}`)
+	if err == nil {
+		t.Fatal("expected error for missing action")
+	}
+}
+
+func TestParseAgentResponseMissingReply(t *testing.T) {
+	t.Parallel()
+	_, err := ParseAgentResponse(`{"action":"question"}`)
+	if err == nil {
+		t.Fatal("expected error for missing reply")
+	}
+}
+
+func TestParseAgentResponseUnknownAction(t *testing.T) {
+	t.Parallel()
+	_, err := ParseAgentResponse(`{"action":"bogus","reply":"text"}`)
+	if err == nil {
+		t.Fatal("expected error for unknown action")
+	}
+}
+
+func TestParseAgentResponseInvalidJSON(t *testing.T) {
+	t.Parallel()
+	_, err := ParseAgentResponse(`not json`)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
 func intSliceEqual(a, b []int) bool {
 	if len(a) == 0 && len(b) == 0 {
 		return true
