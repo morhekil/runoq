@@ -106,6 +106,39 @@ EOF
   [[ "$(printf '%s' "$output" | jq -r '.failures | join(" ")')" == *"runoq init failed"* ]]
 }
 
+@test "live planning smoke retries issue listing after transient failures" {
+  attempt_file="$TEST_TMPDIR/issue-list-attempts"
+  helper_dir="$TEST_TMPDIR/scripts"
+  helper_script="$helper_dir/smoke-planning.sh"
+  mkdir -p "$helper_dir"
+  ln -s "$RUNOQ_ROOT/scripts/lib" "$helper_dir/lib"
+  sed '/^case "${1:-}" in$/,$d' "$RUNOQ_ROOT/scripts/smoke-planning.sh" >"$helper_script"
+  run bash -lc '
+    set -euo pipefail
+    export RUNOQ_ROOT="'"$RUNOQ_ROOT"'"
+    export RUNOQ_CONFIG="'"$RUNOQ_CONFIG"'"
+    export RUNOQ_SMOKE_RETRY_DELAY_SECONDS=0
+    export RUNOQ_SMOKE_ISSUE_LIST_ATTEMPTS=2
+    attempt_file="'"$attempt_file"'"
+    printf "%s" "0" >"$attempt_file"
+    source "'"$helper_script"'"
+    runoq::gh() {
+      attempts="$(cat "$attempt_file")"
+      attempts=$((attempts + 1))
+      printf "%s" "$attempts" >"$attempt_file"
+      if [[ "$attempts" -eq 1 ]]; then
+        return 1
+      fi
+      printf "%s\n" "[]"
+    }
+    list_issues_json_retry owner/repo >/dev/null
+    cat "$attempt_file"
+  '
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "2" ]
+}
+
 @test "live planning smoke validates the tick-based planning workflow" {
   if [[ "${RUNOQ_SMOKE_PLANNING:-0}" != "1" ]]; then
     skip "Set RUNOQ_SMOKE_PLANNING=1 plus the required RUNOQ_SMOKE_* variables to run live planning smoke."

@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # shellcheck source=./scripts/lib/smoke-common.sh
-source "$(cd "$(dirname "$0")" && pwd)/lib/smoke-common.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/lib/smoke-common.sh"
 
 export RUNOQ_SMOKE_LOG_SCOPE="smoke-planning"
 
@@ -145,6 +145,26 @@ issue_parent_epic() {
 list_issues_json() {
   local repo="$1"
   runoq::gh issue list --repo "$repo" --state all --limit 200 --json number,title,body,labels,state,url
+}
+
+list_issues_json_retry() {
+  local repo="$1"
+  local attempts="${RUNOQ_SMOKE_ISSUE_LIST_ATTEMPTS:-5}"
+  local delay attempt output
+  delay="$(smoke_retry_delay_seconds)"
+
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    if output="$(list_issues_json "$repo" 2>/dev/null)"; then
+      printf '%s\n' "$output"
+      return 0
+    fi
+    smoke_log "issue list attempt ${attempt}/${attempts} failed for ${repo}"
+    if (( attempt < attempts )); then
+      sleep "$delay"
+    fi
+  done
+
+  return 1
 }
 
 find_issue_by_title() {
@@ -359,7 +379,7 @@ run_planning() {
     )"
     printf '%s\n' "$output" >"$artifacts_dir/tick-bootstrap.log"
 
-    issues_json="$(list_issues_json "$repo")"
+    issues_json="$(list_issues_json_retry "$repo")"
     planning_issue="$(find_issue_by_title "$issues_json" "Break plan into milestones")"
     planning_number="$(printf '%s' "$planning_issue" | jq -r '.number // empty')"
     if [[ -z "$planning_number" ]]; then
@@ -405,7 +425,7 @@ run_planning() {
       "$root/scripts/tick.sh"
     )"
     printf '%s\n' "$output" >"$artifacts_dir/tick-approve-milestones.log"
-    issues_json="$(list_issues_json "$repo")"
+    issues_json="$(list_issues_json_retry "$repo")"
     milestone1="$(first_open_epic "$issues_json")"
     milestone1_number="$(printf '%s' "$milestone1" | jq -r '.number // empty')"
     milestone_count="$(printf '%s' "$issues_json" | jq '[.[] | select(.state == "OPEN" and .title != "Project Planning" and (.body // "" | contains("type: epic")))] | length')"
@@ -453,7 +473,7 @@ run_planning() {
       "$root/scripts/tick.sh"
     )"
     printf '%s\n' "$output" >"$artifacts_dir/tick-approve-tasks.log"
-    issues_json="$(list_issues_json "$repo")"
+    issues_json="$(list_issues_json_retry "$repo")"
     created_tasks="$(printf '%s' "$issues_json" | jq -c --argjson parent "$milestone1_number" '
       [.[] | select(.state == "OPEN" and (.body // "" | contains("type: task")) and (.body // "" | contains("parent_epic: " + ($parent|tostring))))]
     ')"
