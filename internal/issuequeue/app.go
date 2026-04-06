@@ -313,12 +313,12 @@ func (a *App) runSetStatus(ctx context.Context, repo string, issueNumber string,
 	editArgs = append(editArgs, "--add-label", newLabel)
 	a.log("issue-queue", fmt.Sprintf("set-status issue=#%s: removing=[%s] adding=[%s]", issueNumber, strings.Join(removing, ", "), newLabel))
 
-	if err := a.ghClient.Run(ctx, editArgs, io.Discard, io.Discard); err != nil {
+	if err := a.runGHMutationWithRetry(ctx, editArgs); err != nil {
 		return common.Failf(a.stderr, "%v", err)
 	}
 
 	if status == "done" {
-		if err := a.ghClient.Run(ctx, []string{"issue", "close", issueNumber, "--repo", repo}, io.Discard, io.Discard); err != nil {
+		if err := a.runGHMutationWithRetry(ctx, []string{"issue", "close", issueNumber, "--repo", repo}); err != nil {
 			return common.Failf(a.stderr, "%v", err)
 		}
 	}
@@ -332,6 +332,20 @@ func (a *App) runSetStatus(ctx context.Context, repo string, issueNumber string,
 		Status: status,
 		Label:  newLabel,
 	})
+}
+
+func (a *App) runGHMutationWithRetry(ctx context.Context, args []string) error {
+	var err error
+	for attempt := 1; attempt <= 2; attempt++ {
+		err = a.ghClient.Run(ctx, args, io.Discard, io.Discard)
+		if err == nil {
+			return nil
+		}
+		if attempt < 2 {
+			a.log("issue-queue", fmt.Sprintf("retrying gh mutation after failure: %s", strings.Join(args, " ")))
+		}
+	}
+	return err
 }
 
 func (a *App) runCreate(ctx context.Context, repo string, title string, body string, args []string) int {

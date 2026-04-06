@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -223,6 +224,43 @@ func TestSetStatusDoneClosesIssue(t *testing.T) {
 	}
 	if !strings.Contains(app.stdout.(*bytes.Buffer).String(), `"label": "runoq:done"`) {
 		t.Fatalf("unexpected output: %s", app.stdout.(*bytes.Buffer).String())
+	}
+}
+
+func TestSetStatusDoneRetriesCloseOnce(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t, []string{"set-status", "owner/repo", "42", "done"})
+	var commands []string
+	closeAttempts := 0
+	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+		t.Helper()
+		command := req.Name + " " + strings.Join(req.Args, " ")
+		commands = append(commands, command)
+		switch {
+		case strings.Contains(command, "issue view 42 --repo owner/repo --json labels"):
+			_, _ = req.Stdout.Write([]byte(`{"labels":[{"name":"runoq:in-progress"},{"name":"bug"}]}`))
+			return nil
+		case strings.Contains(command, "issue edit 42 --repo owner/repo --remove-label runoq:in-progress --add-label runoq:done"):
+			return nil
+		case strings.Contains(command, "issue close 42 --repo owner/repo"):
+			closeAttempts++
+			if closeAttempts == 1 {
+				return errors.New("exit status 1")
+			}
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s", command)
+			return nil
+		}
+	})
+
+	code := app.Run(t.Context())
+	if code != 0 {
+		t.Fatalf("Run returned %d stderr=%q", code, app.stderr.(*bytes.Buffer).String())
+	}
+	if closeAttempts != 2 {
+		t.Fatalf("expected 2 close attempts, got %d (%v)", closeAttempts, commands)
 	}
 }
 
