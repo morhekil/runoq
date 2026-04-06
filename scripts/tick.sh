@@ -257,7 +257,11 @@ handle_pending_review() {
     return 1
   elif latest_human_comment_unanswered "$issue_view"; then
     runoq::step "Responding to unanswered comments on #$pending_number"
-    "$comment_handler_script" "$repo" "$pending_number" "$plan_file" >/dev/null
+    if ! "$comment_handler_script" "$repo" "$pending_number" "$plan_file" >/dev/null; then
+      runoq::warn "Comment handler failed for #$pending_number"
+      printf 'Comment handler failed for #%s\n' "$pending_number"
+      return 0
+    fi
     react_to_last_human_comment "$issue_view"
     runoq::success "Responded to comments on #$pending_number"
     printf 'Responded to comments on #%s\n' "$pending_number"
