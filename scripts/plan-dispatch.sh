@@ -62,6 +62,7 @@ proposal_comment_body() {
   local technical_json="$2"
   local product_json="$3"
   local warning="${4:-}"
+  local review_type="${5:-milestone}"
   local proposal_json
   proposal_json="$(cat "$proposal_path")"
 
@@ -70,7 +71,8 @@ proposal_comment_body() {
     --argjson technical "$technical_json" \
     --argjson product "$product_json" \
     --arg warning "$warning" \
-    '{proposal:$proposal, technical:$technical, product:$product, warning:$warning}' \
+    --arg review_type "$review_type" \
+    '{proposal:$proposal, technical:$technical, product:$product, warning:$warning, review_type:$review_type}' \
     | "$(runoq::root)/scripts/tick-fmt.sh" proposal-comment-body
 }
 
@@ -196,7 +198,7 @@ main() {
   proposal_file="$(mktemp "${TMPDIR:-/tmp}/runoq-plan-proposal-final.XXXXXX")"
   printf '%s\n' "$proposal_json" >"$proposal_file"
   proposal_body_file="$(mktemp "${TMPDIR:-/tmp}/runoq-plan-proposal-body.XXXXXX")"
-  proposal_comment_body "$proposal_file" "$technical_json" "$product_json" "$warning" >"$proposal_body_file"
+  proposal_comment_body "$proposal_file" "$technical_json" "$product_json" "$warning" "$review_type" >"$proposal_body_file"
 
   current_body="$(runoq::gh issue view "$issue_number" --repo "$repo" --json body --jq '.body // ""')"
   new_body_file="$(mktemp "${TMPDIR:-/tmp}/runoq-plan-new-body.XXXXXX")"

@@ -169,6 +169,43 @@ func TestFormatProposalCommentBodyWithWarning(t *testing.T) {
 	}
 }
 
+func TestFormatProposalCommentBodyTaskMode(t *testing.T) {
+	t.Parallel()
+
+	input := ProposalCommentInput{
+		Proposal: Proposal{
+			Items: []ProposalItem{
+				{
+					Title:               "Implement formatter",
+					Type:                "task",
+					Body:                "## Context\nBuild the core formatter.",
+					EstimatedComplexity: "medium",
+					ComplexityRationale: "touches two modules",
+					Priority:            new(1),
+				},
+			},
+		},
+		Technical: ReviewScore{Verdict: "PASS", Score: "30/35"},
+		Product:   ReviewScore{Verdict: "PASS", Score: "25/30"},
+		ReviewType: "task",
+	}
+
+	got := FormatProposalCommentBody(input)
+
+	if !containsString(got, "## Proposed tasks") {
+		t.Error("should say 'Proposed tasks' not 'Proposed milestones' for task review type")
+	}
+	if containsString(got, "Proposed milestones") {
+		t.Error("should not say 'Proposed milestones' for task review type")
+	}
+	if !containsString(got, "**Complexity:** medium") {
+		t.Error("missing complexity")
+	}
+	if !containsString(got, "touches two modules") {
+		t.Error("missing complexity rationale")
+	}
+}
+
 func TestFormatProposalCommentBodyNoWarnings(t *testing.T) {
 	t.Parallel()
 

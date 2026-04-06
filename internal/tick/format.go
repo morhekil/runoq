@@ -42,10 +42,11 @@ type ItemSelection struct {
 
 // ProposalCommentInput is the input for building a full proposal review comment.
 type ProposalCommentInput struct {
-	Proposal  Proposal    `json:"proposal"`
-	Technical ReviewScore `json:"technical"`
-	Product   ReviewScore `json:"product"`
-	Warning   string      `json:"warning,omitzero"`
+	Proposal   Proposal    `json:"proposal"`
+	Technical  ReviewScore `json:"technical"`
+	Product    ReviewScore `json:"product"`
+	Warning    string      `json:"warning,omitzero"`
+	ReviewType string      `json:"review_type,omitzero"` // "milestone" or "task"
 }
 
 // Adjustment is a single proposed adjustment from a milestone review.
@@ -97,6 +98,15 @@ func FormatPlanProposal(p Proposal) string {
 			for _, s := range item.Scope {
 				fmt.Fprintf(&b, "- %s\n", s)
 			}
+			b.WriteString("\n")
+		}
+
+		if item.EstimatedComplexity != "" {
+			fmt.Fprintf(&b, "**Complexity:** %s", item.EstimatedComplexity)
+			if item.ComplexityRationale != "" {
+				fmt.Fprintf(&b, " — %s", item.ComplexityRationale)
+			}
+			b.WriteString("\n")
 		}
 	}
 
@@ -130,7 +140,11 @@ func FormatProposalCommentBody(input ProposalCommentInput) string {
 	}
 
 	// Proposal content
-	b.WriteString("## Proposed milestones\n\n")
+	heading := "Proposed milestones"
+	if input.ReviewType == "task" {
+		heading = "Proposed tasks"
+	}
+	fmt.Fprintf(&b, "## %s\n\n", heading)
 	b.WriteString(FormatPlanProposal(input.Proposal))
 
 	// Collapsed JSON payload
