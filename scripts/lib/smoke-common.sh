@@ -670,15 +670,24 @@ seed_lifecycle_repo() {
 create_managed_repo() {
   local target_dir="$1"
   local run_id="$2"
-  local owner prefix visibility repo_name repo create_output url
+  local owner prefix visibility repo_name repo create_output url gh_bin
   owner="$(smoke_repo_owner)"
   prefix="$(runoq::branch_slug "$(smoke_repo_prefix)")"
   visibility="$(smoke_repo_visibility)"
   repo_name="$(runoq::branch_slug "${prefix}-${run_id}")"
   repo="${owner}/${repo_name}"
-  create_output="$(runoq::gh repo create "$repo" "--${visibility}" --source "$target_dir" --remote origin --push 2>&1)"
+  gh_bin="${GH_BIN:-gh}"
+  if ! create_output="$(env -u GH_TOKEN "$gh_bin" repo create "$repo" "--${visibility}" --source "$target_dir" --remote origin --push 2>&1)"; then
+    runoq::die "Failed to create managed repo ${repo}: ${create_output}"
+  fi
+  if printf '%s' "$create_output" | grep -Eiq '(^|[[:space:]])(GraphQL:|HTTP [0-9]{3}:|error:|failed)' ; then
+    runoq::die "Failed to create managed repo ${repo}: ${create_output}"
+  fi
+  if ! env -u GH_TOKEN "$gh_bin" repo view "$repo" --json name >/dev/null 2>&1; then
+    runoq::die "Failed to create managed repo ${repo}: ${create_output}"
+  fi
   url="$(printf '%s\n' "$create_output" | tail -n1)"
-  runoq::gh repo edit "$repo" --default-branch main --enable-auto-merge --enable-squash-merge --delete-branch-on-merge >/dev/null
+  env -u GH_TOKEN "$gh_bin" repo edit "$repo" --default-branch main --enable-auto-merge --enable-squash-merge --delete-branch-on-merge >/dev/null
   jq -n --arg repo "$repo" --arg url "$url" '{repo:$repo, url:$url}'
 }
 

@@ -199,6 +199,37 @@ EOF
   [ "$output" = "runoq[bot]" ]
 }
 
+@test "managed repo creation fails fast when gh repo create fails" {
+  scenario="$TEST_TMPDIR/scenario.json"
+  target_dir="$TEST_TMPDIR/target"
+  mkdir -p "$target_dir"
+  write_fake_gh_scenario "$scenario" <<'EOF'
+[
+  {
+    "contains": ["repo", "create", "owner/runoq-live-eval-run-123"],
+    "stdout": "GraphQL: Resource not accessible by integration (createRepository)"
+  }
+]
+EOF
+  use_fake_gh "$scenario"
+
+  run bash -lc '
+    set -euo pipefail
+    export RUNOQ_ROOT="'"$RUNOQ_ROOT"'"
+    export RUNOQ_CONFIG="'"$RUNOQ_CONFIG"'"
+    export GH_BIN="'"$GH_BIN"'"
+    export RUNOQ_SMOKE_REPO_OWNER=owner
+    export RUNOQ_SMOKE_REPO_PREFIX=runoq-live-eval
+    source "'"$RUNOQ_ROOT"'/scripts/lib/smoke-common.sh"
+    create_managed_repo "'"$target_dir"'" run-123
+  '
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Failed to create managed repo"* ]]
+  run grep -c 'repo edit' "$FAKE_GH_LOG"
+  [ "$status" -eq 1 ]
+}
+
 @test "live lifecycle smoke preflight requires explicit managed repo configuration" {
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<'EOF'
