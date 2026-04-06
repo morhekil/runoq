@@ -410,10 +410,10 @@ handle_planning_dispatch() {
 handle_implementation() {
   runoq::info "reconciling dispatch safety"
   "$dispatch_safety_script" reconcile "$repo" >/dev/null 2>&1 || true
-  runoq::info "running dry-run dispatch"
-  "$run_script" --dry-run >/dev/null 2>&1 || true
-  runoq::success "Dispatched #$current_epic_number"
-  printf 'Dispatched #%s\n' "$current_epic_number"
+  runoq::info "running next issue"
+  "$run_script" || true
+  runoq::success "Executed issue for #$current_epic_number"
+  printf 'Executed issue for #%s\n' "$current_epic_number"
 }
 
 handle_milestone_complete() {

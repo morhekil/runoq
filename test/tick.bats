@@ -484,9 +484,11 @@ EOF
   run env RUNOQ_TICK_RUN_SCRIPT="$run_bin" RUNOQ_TICK_DISPATCH_SAFETY_SCRIPT="$dispatch_safety_bin" "$RUNOQ_ROOT/scripts/tick.sh"
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Dispatched #10"* ]]
+  [[ "$output" == *"Executed issue for #10"* ]]
+  # Verify run.sh was called (without --dry-run)
+  [ -f "$TICK_RUN_LOG" ]
   run grep -q -- '--dry-run' "$TICK_RUN_LOG"
-  [ "$status" -eq 0 ]
+  [ "$status" -ne 0 ]
 }
 
 @test "tick closes clean milestone and opens planning for next milestone" {

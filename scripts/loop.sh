@@ -15,6 +15,7 @@ EOF
 }
 
 main() {
+  trap 'exit 0' INT TERM
   local backoff=30
 
   while [[ $# -gt 0 ]]; do
