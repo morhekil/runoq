@@ -286,8 +286,9 @@ EOF
   {"contains":["issue","list","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$list_json" '$json')},
   {"contains":["issue","view","2","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$view_json" '$json')},
   {"contains":["issue","view","2","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$view_json" '$json')},
+  {"contains":["api","graphql","addReaction","IC_human123","EYES"],"stdout":"{}"},
   {"contains":["issue","comment","2","--repo","owner/repo"],"stdout":""},
-  {"contains":["api","graphql","addReaction","IC_human123","EYES"],"stdout":"{}"}
+  {"contains":["api","graphql","addReaction","IC_human123","THUMBS_UP"],"stdout":"{}"}
 ]
 EOF
   use_fake_gh "$scenario" "$TEST_TMPDIR/gh.state" "$TEST_TMPDIR/gh.log" "$TEST_TMPDIR/gh-capture"
@@ -300,7 +301,7 @@ EOF
   [ "$status" -eq 0 ]
   run grep -q 'issue comment 2 --repo owner/repo' "$FAKE_GH_LOG"
   [ "$status" -eq 0 ]
-  run grep -q 'addReaction.*IC_human123.*EYES' "$FAKE_GH_LOG"
+  run grep -q 'addReaction.*IC_human123.*THUMBS_UP' "$FAKE_GH_LOG"
   [ "$status" -eq 0 ]
 }
 
@@ -342,8 +343,7 @@ EOF
   write_fake_gh_scenario "$scenario" <<EOF
 [
   {"contains":["issue","list","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$list_json" '$json')},
-  {"contains":["issue","view","2","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$view_json" '$json')},
-  {"contains":["api","graphql","addReaction","IC_approval","EYES"],"stdout":"{}"}
+  {"contains":["issue","view","2","--repo","owner/repo"],"stdout":$(jq -Rn --arg json "$view_json" '$json')}
 ]
 EOF
   use_fake_gh "$scenario" "$TEST_TMPDIR/gh.state" "$TEST_TMPDIR/gh.log" "$TEST_TMPDIR/gh-capture"
@@ -579,7 +579,7 @@ EOF
   [[ "$output" == *"Adjustments proposed on #"* ]]
   run grep -q 'create owner/repo Review milestone adjustments' "$TICK_ISSUE_QUEUE_LOG"
   [ "$status" -eq 0 ]
-  run grep -q '1. modify:' "$TICK_ISSUE_QUEUE_CAPTURE_DIR/101.body"
+  run grep -q '### 1. Add validation scope' "$TICK_ISSUE_QUEUE_CAPTURE_DIR/101.body"
   [ "$status" -eq 0 ]
 }
 

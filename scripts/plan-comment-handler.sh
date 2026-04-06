@@ -11,20 +11,39 @@ Usage:
 EOF
 }
 
+add_reaction() {
+  local comment_id="$1" content="$2"
+  runoq::gh api graphql -f query="$(printf 'mutation { addReaction(input: {subjectId: "%s", content: %s}) { reaction { content } } }' "$comment_id" "$content")" >/dev/null 2>&1 || true
+}
+
 main() {
   [[ $# -eq 3 ]] || { usage >&2; exit 1; }
   local repo="$1" issue_number="$2" plan_file="$3"
 
-  local issue_json comment_body comments_path payload response_path claude_bin
+  local issue_json unresponded_ids
   issue_json="$(runoq::gh issue view "$issue_number" --repo "$repo" --json number,title,body,comments)"
-  comment_body="$(printf '%s' "$issue_json" | jq -r '
-    .comments // []
-    | map(select((.author.login // "") != "runoq" and (.body // "" | contains("runoq:event") | not)))
-    | last
-    | .body // empty
-  ')"
-  [[ -n "$comment_body" ]] || exit 0
+  unresponded_ids="$(printf '%s' "$issue_json" | "$(runoq::root)/scripts/tick-fmt.sh" find-unresponded-comments)"
 
+  local count
+  count="$(printf '%s' "$unresponded_ids" | jq 'length')"
+  [[ "$count" -gt 0 ]] || exit 0
+
+  # Gather all unresponded comment bodies for the agent
+  local comment_body
+  comment_body="$(printf '%s' "$issue_json" | jq -r --argjson ids "$unresponded_ids" '
+    .comments // []
+    | map(select(.id as $id | $ids | index($id)))
+    | map(.body)
+    | join("\n\n---\n\n")
+  ')"
+
+  # Mark all as picked up (eyes)
+  local cid
+  while IFS= read -r cid; do
+    [[ -n "$cid" ]] && add_reaction "$cid" "EYES"
+  done < <(printf '%s' "$unresponded_ids" | jq -r '.[]')
+
+  local comments_path payload response_path claude_bin
   comments_path="$(mktemp "${TMPDIR:-/tmp}/runoq-plan-comments.XXXXXX")"
   printf '%s' "$issue_json" | jq '.comments // []' >"$comments_path"
   payload="$(
@@ -63,7 +82,6 @@ main() {
     change-request)
       local revised_proposal_json proposal_body_file current_body new_body_file review_type
       revised_proposal_json="$(printf '%s' "$action_json" | jq -c '.revised_proposal')"
-      # Determine review type from the issue body context
       review_type="milestone"
       if printf '%s' "$issue_json" | jq -r '.body // ""' | grep -q 'Proposed tasks'; then
         review_type="task"
@@ -89,6 +107,11 @@ main() {
     question)
       ;;
   esac
+
+  # Mark all as successfully responded (+1)
+  while IFS= read -r cid; do
+    [[ -n "$cid" ]] && add_reaction "$cid" "THUMBS_UP"
+  done < <(printf '%s' "$unresponded_ids" | jq -r '.[]')
 
   printf 'Responded to comments on #%s\n' "$issue_number"
 }

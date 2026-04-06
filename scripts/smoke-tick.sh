@@ -357,10 +357,10 @@ run_tick_smoke() {
   add_check_or_failure \
     "$(printf '%s' "$planning_view" | jq -e '
       [.comments // [] | .[] | select((.author.login // "") != "runoq" and ((.body // "") | contains("runoq:event") | not))]
-      | last | .reactionGroups // [] | any(.content == "EYES" and (.users.totalCount // 0) > 0)
+      | last | .reactionGroups // [] | any(.content == "THUMBS_UP" and (.users.totalCount // 0) > 0)
     ' >/dev/null 2>&1 && printf true || printf false)" \
-    "comment_reaction_added" \
-    "No eyes reaction was added to the human comment on #${planning_number}."
+    "comment_responded_reaction" \
+    "No +1 reaction was added to the human comment on #${planning_number}."
 
   output="$(tick_once "$root")"
   add_step "awaiting_human_decision" "$output"
