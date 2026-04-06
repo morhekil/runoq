@@ -66,9 +66,9 @@ EOF
   [ "$output" = "1" ]
   run grep -q 'runoq:payload:plan-proposal' "$TEST_TMPDIR/capture/0.body"
   [ "$status" -eq 0 ]
-  run grep -qE '^1\. ' "$TEST_TMPDIR/capture/0.body"
+  run grep -qE '^### 1\. ' "$TEST_TMPDIR/capture/0.body"
   [ "$status" -eq 0 ]
-  run grep -qE '^2\. ' "$TEST_TMPDIR/capture/0.body"
+  run grep -qE '^### 2\. ' "$TEST_TMPDIR/capture/0.body"
   [ "$status" -eq 0 ]
 }
 

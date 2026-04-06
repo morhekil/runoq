@@ -81,6 +81,6 @@ EOF
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"<!-- runoq:payload:plan-proposal -->"* ]]
-  [[ "$output" == *$'1. First item'* ]]
-  [[ "$output" == *$'2. Second item'* ]]
+  [[ "$output" == *$'### 1. First item'* ]]
+  [[ "$output" == *$'### 2. Second item'* ]]
 }
