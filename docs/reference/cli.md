@@ -7,6 +7,7 @@ This document describes the public `runoq` CLI implemented by [`bin/runoq`](../.
 ```text
 runoq init
 runoq plan <file>
+runoq tick
 runoq run [--issue N] [--dry-run]
 runoq report <summary|issue|cost> [...]
 runoq maintenance
@@ -36,6 +37,7 @@ The public CLI contract is unchanged; these env vars only control runtime dispat
 | --- | --- | --- |
 | `runoq init` | Yes | Yes |
 | `runoq plan <file>` | No | Yes, but only after user confirmation in the plan pipeline |
+| `runoq tick` | No intended durable local mutation beyond logs and transient planning artifacts | Yes |
 | `runoq run --issue N` | Yes | Yes |
 | `runoq run` | Yes | Yes |
 | `runoq run --dry-run` | No intended durable mutation beyond reconciliation side effects | Reconciliation comments or label cleanup may occur before the dry-run output |
@@ -80,6 +82,7 @@ Common failures:
 ### `runoq plan <file>`
 
 Decomposes a plan document into GitHub issues using the plan decomposition pipeline (`scripts/plan.sh`).
+This command is deprecated in favor of `runoq tick`.
 
 ```bash
 runoq plan docs/plan.md
@@ -105,6 +108,38 @@ Common failures:
 - Missing plan file
 - Claude CLI not found
 - Missing `.runoq/identity.json` or GitHub App key after auth bootstrap
+
+### `runoq tick`
+
+Advances the iterative planning and coordination workflow by exactly one step.
+
+```bash
+runoq tick
+```
+
+What it does:
+
+- Resolves target repo context and GitHub auth
+- Reads the committed `runoq.json` plan path and current GitHub issue state
+- Executes one deterministic transition in the iterative planning state machine
+- May bootstrap planning, answer planning comments, materialize approved milestone or task proposals, dispatch implementation, or advance milestone review
+- Prints a single-line status suitable for operators and notification hooks
+
+Common statuses:
+
+- `Proposal posted on #<n>`
+- `Responded to comments on #<n>`
+- `Applied approvals from #<n>`
+- `Dispatched #<n>`
+- `Awaiting human decision on #<n>`
+- `Project complete`
+
+Common failures:
+
+- Missing committed `runoq.json` or configured `plan.file`
+- Missing auth bootstrap inputs
+- Proposal comment missing the expected `runoq:payload:*` marker
+- Underlying planning or dispatch script failure
 
 ### `runoq run [--issue N] [--dry-run]`
 
@@ -206,6 +241,7 @@ Initialize a repo and create queue issues from a plan:
 
 ```bash
 runoq init
+runoq tick
 runoq plan docs/plan.md
 ```
 

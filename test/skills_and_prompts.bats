@@ -364,6 +364,22 @@ load test_helper
   [ "$status" -ne 0 ]
 }
 
+@test "cli and flow docs describe tick as the primary planning entrypoint" {
+  run grep -n '^runoq tick$' "$RUNOQ_ROOT/docs/reference/cli.md"
+  [ "$status" -eq 0 ]
+  run grep -n '^### `runoq tick`$' "$RUNOQ_ROOT/docs/reference/cli.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'deprecated in favor of `runoq tick`' "$RUNOQ_ROOT/docs/reference/cli.md"
+  [ "$status" -eq 0 ]
+
+  run grep -n 'milestone-decomposer' "$RUNOQ_ROOT/docs/architecture/flows.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'task-decomposer' "$RUNOQ_ROOT/docs/architecture/flows.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'plan-decomposer' "$RUNOQ_ROOT/docs/architecture/flows.md"
+  [ "$status" -ne 0 ]
+}
+
 @test "milestone reviewer prompt documents adjustment output contract" {
   run grep -n '^name: milestone-reviewer$' "$RUNOQ_ROOT/.claude/agents/milestone-reviewer.md"
   [ "$status" -eq 0 ]

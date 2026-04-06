@@ -87,16 +87,20 @@ sequenceDiagram
   actor Operator
   participant CLI as bin/runoq
   participant Plan as plan.sh
-  participant Claude as plan-decomposer agent
+  participant Milestones as milestone-decomposer agent
+  participant Tasks as task-decomposer agent
   participant Queue as gh-issue-queue.sh
   participant GH as GitHub
 
   Operator->>CLI: runoq plan docs/plan.md
   CLI->>CLI: resolve TARGET_ROOT, REPO, absolute plan path
   CLI->>Plan: invoke plan.sh with repo and plan file
-  Plan->>Claude: --agent plan-decomposer -- payload
-  Claude->>Claude: read plan, decompose into epic/task hierarchy
-  Claude-->>Plan: JSON with items[], each having complexity and rationale
+  Plan->>Milestones: --agent milestone-decomposer -- payload
+  Milestones-->>Plan: JSON milestone list
+  loop for each milestone
+    Plan->>Tasks: --agent task-decomposer -- payload
+    Tasks-->>Plan: JSON task list with complexity and rationale
+  end
   Plan->>Plan: validate JSON, extract items
   Plan-->>Operator: proposal with hierarchy, complexity, rationale, warnings
   alt operator confirms (or --auto-confirm)
