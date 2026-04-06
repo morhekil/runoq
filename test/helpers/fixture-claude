@@ -63,6 +63,15 @@ case "${agent}:${count}" in
     mapped_candidate="$fixture_dir/comment-response-partial-approve.md"
     ;;
   plan-comment-responder:3)
+    mapped_candidate="$fixture_dir/comment-response-partial-approve.md"
+    ;;
+  plan-comment-responder:4)
+    mapped_candidate="$fixture_dir/comment-response-adjustment-partial.md"
+    ;;
+  plan-comment-responder:5)
+    mapped_candidate="$fixture_dir/comment-response-partial-approve.md"
+    ;;
+  plan-comment-responder:6)
     mapped_candidate="$fixture_dir/comment-response-adjustment-partial.md"
     ;;
 esac

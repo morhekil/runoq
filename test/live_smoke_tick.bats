@@ -21,6 +21,6 @@ load test_helper
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.status')" = "ok" ]
-  [ "$(printf '%s' "$output" | jq -r '.steps | length')" -ge 10 ]
+  [ "$(printf '%s' "$output" | jq -r '.steps | length')" -ge 14 ]
   [ "$(printf '%s' "$output" | jq -r '.failures | length')" = "0" ]
 }

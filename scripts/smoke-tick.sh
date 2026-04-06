@@ -334,9 +334,9 @@ run_tick_smoke() {
   planning_number="$(printf '%s' "$planning_issue" | jq -r '.number')"
   planning_view="$(issue_view_json "$repo" "$planning_number")"
   add_check_or_failure \
-    "$(printf '%s' "$planning_view" | jq -e '(.comments // []) | any(.body // "" | contains("runoq:payload:plan-proposal"))' >/dev/null && printf true || printf false)" \
-    "bootstrap_proposal_posted" \
-    "Bootstrap tick did not post a plan proposal comment."
+    "$(printf '%s' "$planning_view" | jq -r '.body // ""' | grep -q 'runoq:payload:plan-proposal' && printf true || printf false)" \
+    "bootstrap_proposal_in_body" \
+    "Bootstrap tick did not write plan proposal into issue body."
   add_check_or_failure \
     "$(issue_assigned_to "$planning_view" "$operator_login_value" && printf true || printf false)" \
     "bootstrap_planning_issue_assigned" \
@@ -370,9 +370,11 @@ run_tick_smoke() {
     "Tick did not report the awaiting-review state."
 
   operator_gh issue comment "$planning_number" --repo "$repo" --body "OK, approved with item 3 removed" >/dev/null
-  runoq::gh issue edit "$planning_number" --repo "$repo" --add-label "$(runoq::config_get '.labels.planApproved')" >/dev/null
   comment_interactions=$((comment_interactions + 1))
   items_rejected=$((items_rejected + 1))
+
+  output="$(tick_once "$root")"
+  add_step "process_approval_comment" "$output"
 
   output="$(tick_once "$root")"
   add_step "materialize_milestones" "$output"
@@ -406,11 +408,14 @@ run_tick_smoke() {
   local milestone1_plan_view
   milestone1_plan_view="$(issue_view_json "$repo" "$milestone1_plan_number")"
   add_check_or_failure \
-    "$(printf '%s' "$milestone1_plan_view" | jq -e '(.comments // []) | any(.body // "" | contains("runoq:payload:plan-proposal"))' >/dev/null && printf true || printf false)" \
+    "$(printf '%s' "$milestone1_plan_view" | jq -r '.body // ""' | grep -q 'runoq:payload:plan-proposal' && printf true || printf false)" \
     "milestone_task_proposal_posted" \
     "Task proposal for milestone 1 was not posted."
 
-  runoq::gh issue edit "$milestone1_plan_number" --repo "$repo" --add-label "$(runoq::config_get '.labels.planApproved')" >/dev/null
+  operator_gh issue comment "$milestone1_plan_number" --repo "$repo" --body "Approved, create the tasks" >/dev/null
+  comment_interactions=$((comment_interactions + 1))
+  output="$(tick_once "$root")"
+  add_step "approve_tasks" "$output"
   output="$(tick_once "$root")"
   add_step "materialize_tasks" "$output"
   issues_json="$(list_issues_json "$repo")"
@@ -454,10 +459,11 @@ run_tick_smoke() {
   fi
 
   operator_gh issue comment "$adjustment_number" --repo "$repo" --body "Approve item 1, reject item 2" >/dev/null
-  runoq::gh issue edit "$adjustment_number" --repo "$repo" --add-label "$(runoq::config_get '.labels.planApproved')" >/dev/null
   comment_interactions=$((comment_interactions + 1))
   items_rejected=$((items_rejected + 1))
 
+  output="$(tick_once "$root")"
+  add_step "approve_adjustments" "$output"
   output="$(tick_once "$root")"
   add_step "apply_adjustments" "$output"
   issues_json="$(list_issues_json "$repo")"
@@ -477,7 +483,10 @@ run_tick_smoke() {
       "next_milestone_planning_issue_assigned" \
       "Next milestone planning issue #${milestone2_plan_number} is not assigned to @${operator_login_value}."
   fi
-  runoq::gh issue edit "$milestone2_plan_number" --repo "$repo" --add-label "$(runoq::config_get '.labels.planApproved')" >/dev/null
+  operator_gh issue comment "$milestone2_plan_number" --repo "$repo" --body "Approved" >/dev/null
+  comment_interactions=$((comment_interactions + 1))
+  output="$(tick_once "$root")"
+  add_step "approve_discovery_tasks" "$output"
   output="$(tick_once "$root")"
   add_step "materialize_discovery_task" "$output"
   issues_json="$(list_issues_json "$repo")"
@@ -507,7 +516,11 @@ run_tick_smoke() {
     FAILURES_JSON="$(append_missing "$FAILURES_JSON" "Discovery milestone did not force an adjustment review.")"
   fi
 
-  runoq::gh issue edit "$discovery_adjustment_number" --repo "$repo" --add-label "$(runoq::config_get '.labels.planApproved')" >/dev/null
+  operator_gh issue comment "$discovery_adjustment_number" --repo "$repo" --body "Approve item 1, reject item 2" >/dev/null
+  comment_interactions=$((comment_interactions + 1))
+  items_rejected=$((items_rejected + 1))
+  output="$(tick_once "$root")"
+  add_step "approve_discovery_adjustment" "$output"
   output="$(tick_once "$root")"
   add_step "apply_discovery_adjustment" "$output"
 
