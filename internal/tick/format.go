@@ -48,6 +48,21 @@ type ProposalCommentInput struct {
 	Warning   string      `json:"warning,omitzero"`
 }
 
+// Adjustment is a single proposed adjustment from a milestone review.
+type Adjustment struct {
+	Type                  string `json:"type"`
+	Title                 string `json:"title,omitzero"`
+	Description           string `json:"description,omitzero"`
+	Reason                string `json:"reason,omitzero"`
+	TargetMilestoneNumber *int   `json:"target_milestone_number,omitzero"`
+	SuggestedPosition     string `json:"suggested_position,omitzero"`
+}
+
+// AdjustmentReviewInput is the input for building an adjustment review issue body.
+type AdjustmentReviewInput struct {
+	ProposedAdjustments []Adjustment `json:"proposed_adjustments"`
+}
+
 // FormatPlanProposal renders proposal items as numbered markdown sections.
 func FormatPlanProposal(p Proposal) string {
 	var b strings.Builder
@@ -126,4 +141,51 @@ func FormatProposalCommentBody(input ProposalCommentInput) string {
 	b.WriteString("\n```\n\n</details>\n")
 
 	return b.String()
+}
+
+// FormatMilestoneBody renders an issue body for a milestone epic.
+func FormatMilestoneBody(item ProposalItem) string {
+	var b strings.Builder
+	b.WriteString("## Context\n\n")
+	fmt.Fprintf(&b, "Goal: %s\n\n", item.Goal)
+	fmt.Fprintf(&b, "Scope: %s\n\n", strings.Join(item.Scope, ", "))
+	b.WriteString("## Acceptance Criteria\n\n")
+	for _, c := range item.Criteria {
+		fmt.Fprintf(&b, "- [ ] %s\n", c)
+	}
+	return b.String()
+}
+
+// FormatAdjustmentReviewBody renders the body for an adjustment review issue.
+func FormatAdjustmentReviewBody(input AdjustmentReviewInput) string {
+	var b strings.Builder
+	b.WriteString("## Acceptance Criteria\n\n- [ ] Review proposed adjustments.\n\n")
+	for i, adj := range input.ProposedAdjustments {
+		title := adj.Title
+		if title == "" {
+			title = adj.Description
+		}
+		fmt.Fprintf(&b, "%d. %s: %s\n", i+1, adj.Type, title)
+	}
+	b.WriteString("\n```json\n")
+	data, _ := json.Marshal(input)
+	b.Write(data)
+	b.WriteString("\n```\n")
+	return b.String()
+}
+
+// MergeChecklists concatenates two checklist strings, dropping blank lines.
+func MergeChecklists(left, right string) string {
+	var lines []string
+	for _, src := range []string{left, right} {
+		if src == "" {
+			continue
+		}
+		for line := range strings.SplitSeq(src, "\n") {
+			if strings.TrimSpace(line) != "" {
+				lines = append(lines, line)
+			}
+		}
+	}
+	return strings.Join(lines, "\n")
 }

@@ -184,6 +184,82 @@ func TestFormatProposalCommentBodyNoWarnings(t *testing.T) {
 	}
 }
 
+func TestFormatMilestoneBody(t *testing.T) {
+	t.Parallel()
+
+	item := ProposalItem{
+		Goal:     "Ship a reusable formatter",
+		Scope:    []string{"src/progress.js", "test/progress.test.js"},
+		Criteria: []string{"formats input", "clamps overflow"},
+	}
+
+	got := FormatMilestoneBody(item)
+
+	if !containsString(got, "## Context") {
+		t.Error("missing context section")
+	}
+	if !containsString(got, "Goal: Ship a reusable formatter") {
+		t.Error("missing goal")
+	}
+	if !containsString(got, "Scope: src/progress.js, test/progress.test.js") {
+		t.Error("missing scope")
+	}
+	if !containsString(got, "- [ ] formats input") {
+		t.Error("missing criteria checkbox")
+	}
+}
+
+func TestFormatAdjustmentReviewBody(t *testing.T) {
+	t.Parallel()
+
+	data := loadFixture(t, "../../test/fixtures/tick/milestone-reviewer-adjustment.json")
+	var input AdjustmentReviewInput
+	if err := json.Unmarshal(data, &input); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	got := FormatAdjustmentReviewBody(input)
+
+	if !containsString(got, "## Acceptance Criteria") {
+		t.Error("missing acceptance criteria section")
+	}
+	if !containsString(got, "1. modify: Add validation scope") {
+		t.Error("missing enumerated adjustment 1")
+	}
+	if !containsString(got, "2. new_milestone: Debt cleanup from formatter shortcuts") {
+		t.Error("missing enumerated adjustment 2")
+	}
+	if !containsString(got, "```json") {
+		t.Error("missing json code block")
+	}
+}
+
+func TestMergeChecklists(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		left, right string
+		want        string
+	}{
+		{"both empty", "", "", ""},
+		{"left only", "- [ ] A\n- [ ] B", "", "- [ ] A\n- [ ] B"},
+		{"right only", "", "- [ ] C", "- [ ] C"},
+		{"both", "- [ ] A", "- [ ] B\n- [ ] C", "- [ ] A\n- [ ] B\n- [ ] C"},
+		{"strips blank lines", "- [ ] A\n\n- [ ] B", "- [ ] C", "- [ ] A\n- [ ] B\n- [ ] C"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := MergeChecklists(tt.left, tt.right)
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func containsString(s, substr string) bool {
 	return len(s) >= len(substr) && searchString(s, substr)
 }
