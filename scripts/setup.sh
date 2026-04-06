@@ -123,6 +123,7 @@ ensure_package_json() {
   }
 }
 EOF
+    git -C "$target_root" add package.json
   fi
 }
 
@@ -206,6 +207,8 @@ ensure_gitignore() {
   for entry in "${missing[@]}"; do
     printf '%s\n' "$entry" >>"$gitignore"
   done
+
+  git -C "$target_root" add .gitignore
 }
 
 write_project_config() {

@@ -72,6 +72,11 @@ EOF
   [ "$(readlink "$project_dir/.claude/skills/plan-to-issues/SKILL.md")" = "$RUNOQ_ROOT/.claude/skills/plan-to-issues/SKILL.md" ]
   [ -L "$RUNOQ_SYMLINK_DIR/runoq" ]
   [ "$(jq -r '.appId' "$project_dir/.runoq/identity.json")" = "123" ]
+
+  run git -C "$project_dir" diff --cached --name-only
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"package.json"* ]]
+  [[ "$output" == *".gitignore"* ]]
 }
 
 @test "setup init rejects repo installations for a different app slug" {
