@@ -93,11 +93,12 @@ What it does:
 
 - Resolves target repo context and GitHub auth
 - Runs `scripts/plan.sh <repo> <absolute-path>`, which:
-  1. Calls the `plan-decomposer` agent to decompose the plan into epics and tasks with dependency ordering, complexity estimates, and complexity rationales
+  1. Calls `milestone-decomposer` to break the plan into milestones, then `task-decomposer` for each milestone to produce the final epics and tasks with dependency ordering, complexity estimates, and complexity rationales
   2. Presents the proposed issue hierarchy to the operator for confirmation
   3. Creates GitHub issues deterministically via `gh-issue-queue.sh create` (epics first, then tasks with resolved dependency numbers)
 - Supports `--auto-confirm` and `--dry-run` flags
-- Persists the plan-decomposer invocation under `log/claude/plan-decomposer-<timestamp>/` with `argv.txt`, `context.log`, `request.txt`, live `stdout.log`, `stderr.log`, `progress.log`, and `response.txt`
+- Prints a deprecation notice pointing operators to `runoq tick`
+- Persists the decomposition invocations under `log/claude/milestone-decomposer-<timestamp>/` and `log/claude/task-decomposer-<timestamp>/` with `argv.txt`, `context.log`, `request.txt`, live `stdout.log`, `stderr.log`, `progress.log`, and `response.txt`
 
 Common failures:
 

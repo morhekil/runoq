@@ -334,6 +334,36 @@ load test_helper
   [ "$status" -eq 0 ]
 }
 
+@test "planning docs and skills reference milestone and task decomposition" {
+  run grep -n 'milestone-decomposer' "$RUNOQ_ROOT/docs/reference/script-contracts.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'task-decomposer' "$RUNOQ_ROOT/docs/reference/script-contracts.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'plan-decomposer' "$RUNOQ_ROOT/docs/reference/script-contracts.md"
+  [ "$status" -ne 0 ]
+
+  run grep -n 'milestone-decomposer' "$RUNOQ_ROOT/docs/reference/cli.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'task-decomposer' "$RUNOQ_ROOT/docs/reference/cli.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'plan-decomposer' "$RUNOQ_ROOT/docs/reference/cli.md"
+  [ "$status" -ne 0 ]
+
+  run grep -n 'milestone-decomposer' "$RUNOQ_ROOT/docs/architecture/overview.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'task-decomposer' "$RUNOQ_ROOT/docs/architecture/overview.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'plan-decomposer' "$RUNOQ_ROOT/docs/architecture/overview.md"
+  [ "$status" -ne 0 ]
+
+  run grep -n 'milestone-decomposer' "$RUNOQ_ROOT/.claude/skills/plan-to-issues/SKILL.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'task-decomposer' "$RUNOQ_ROOT/.claude/skills/plan-to-issues/SKILL.md"
+  [ "$status" -eq 0 ]
+  run grep -n 'plan-decomposer' "$RUNOQ_ROOT/.claude/skills/plan-to-issues/SKILL.md"
+  [ "$status" -ne 0 ]
+}
+
 @test "milestone reviewer prompt documents adjustment output contract" {
   run grep -n '^name: milestone-reviewer$' "$RUNOQ_ROOT/.claude/agents/milestone-reviewer.md"
   [ "$status" -eq 0 ]

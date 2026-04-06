@@ -47,11 +47,11 @@ Primary callers: `bin/runoq`, operators, tests.
 
 | Invocation | Arguments | JSON/stdout contract | Side effects |
 | --- | --- | --- | --- |
-| `plan.sh` | `<repo> <plan-file> [--auto-confirm] [--dry-run]` | JSON object `{ status, issues, issue_map }` on success; decomposition JSON on dry run | calls `plan-decomposer` agent, creates GitHub issues via `gh-issue-queue.sh create` |
+| `plan.sh` | `<repo> <plan-file> [--auto-confirm] [--dry-run]` | JSON object `{ status, issues, issue_map }` on success; decomposition JSON on dry run | calls `milestone-decomposer` and `task-decomposer`, creates GitHub issues via `gh-issue-queue.sh create` |
 
 Pipeline phases:
 
-1. **Decompose**: calls the `plan-decomposer` agent to produce a structured decomposition with `items` (epics and tasks), each containing `key`, `type`, `title`, `body`, `priority`, `estimated_complexity`, `complexity_rationale`, dependency keys, and parent/children relationships.
+1. **Decompose**: calls `milestone-decomposer` to produce milestone items, then `task-decomposer` once per milestone to produce the final epic/task hierarchy with `key`, `type`, `title`, `body`, `priority`, `estimated_complexity`, `complexity_rationale`, dependency keys, and parent/children relationships.
 2. **Present**: displays the proposed issue hierarchy to the operator with complexity, dependency, and bar-setter annotations. Shows warnings if the agent produced any.
 3. **Create**: creates epics first, then tasks in order, resolving dependency keys to real issue numbers. Passes `--complexity-rationale` when present.
 
@@ -61,7 +61,7 @@ Notes:
 - `--auto-confirm` skips interactive confirmation.
 - `--dry-run` outputs the decomposition JSON without creating issues.
 - Epic issues are created with `--type epic`; child tasks reference their parent via `--parent-epic`.
-- Agent invocation artifacts are persisted under `log/claude/plan-decomposer-<timestamp>/`, including the request payload, live raw Claude stream, stderr, progress events, and extracted final response.
+- Agent invocation artifacts are persisted under `log/claude/milestone-decomposer-<timestamp>/` and `log/claude/task-decomposer-<timestamp>/`, including the request payload, live raw Claude stream, stderr, progress events, and extracted final response.
 
 ## `plan-dispatch.sh`
 

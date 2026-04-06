@@ -30,7 +30,7 @@ flowchart LR
 
 - Human operator: decides when to initialize a repo, confirm plan slicing, run the queue, inspect output, and triage maintenance findings.
 - GitHub repository: hosts issues, PRs, labels, comments, collaborator permissions, and the long-lived operational audit trail.
-- Claude CLI: runs the `plan-decomposer`, `bar-setter`, `mention-responder`, `diff-reviewer`, and `maintenance-reviewer` agents.
+- Claude CLI: runs the `milestone-decomposer`, `task-decomposer`, `plan-reviewer-*`, `milestone-reviewer`, `bar-setter`, `mention-responder`, `diff-reviewer`, and `maintenance-reviewer` agents.
 - Target repository: provides the source tree, git remote, package scripts, `.gitignore`, and optional `tsconfig.json`.
 
 ## Subsystem View
@@ -152,7 +152,7 @@ flowchart LR
 | `scripts/issue-runner.sh` | Drive codex rounds, track token budget, call verify.sh, package payloads, pass criteria_commit to verification | Phase dispatch, PR lifecycle, queue decisions |
 | `scripts/maintenance.sh` | Partition derivation, maintenance tracking issue lifecycle, findings storage, triage-to-issue filing | Code modification |
 | `scripts/mentions.sh` | Mention polling, permission gating, deny comments, deduplication via state | Queue dispatch decisions |
-| Claude skills and agents | Plan decomposition (plan-decomposer agent, produces epic/task hierarchy with complexity rationale), acceptance criteria authoring (bar-setter, opus), code review (diff-reviewer, opus), mention response (mention-responder, sonnet), maintenance review reasoning (maintenance-reviewer, opus) | Deterministic GitHub or filesystem contracts already defined in scripts |
+| Claude skills and agents | Planning decomposition and review (`milestone-decomposer`, `task-decomposer`, `plan-reviewer-*`, `milestone-reviewer`), acceptance criteria authoring (bar-setter, opus), code review (diff-reviewer, opus), mention response (mention-responder, sonnet), maintenance review reasoning (maintenance-reviewer, opus) | Deterministic GitHub or filesystem contracts already defined in scripts |
 
 ## Boundaries And Responsibilities
 
@@ -199,7 +199,7 @@ Use this table when deciding where a change belongs:
 
 | Concern | Owning layer |
 | --- | --- |
-| Plan decomposition and issue creation | `plan.sh` (orchestrates decomposition and deterministic issue creation), `plan-decomposer` agent (produces epic/task hierarchy), `gh-issue-queue.sh` (creates issues and sub-issue links) |
+| Plan decomposition and issue creation | `tick.sh` and `plan-dispatch.sh` for iterative planning, `plan.sh` for deprecated one-shot compatibility, `milestone-decomposer` and `task-decomposer` for decomposition, `plan-reviewer-*` and `milestone-reviewer` for gated review, `gh-issue-queue.sh` for milestone/task materialization |
 | Queue logic and dependency ordering | `gh-issue-queue.sh`, `dispatch-safety.sh`, `run.sh` |
 | Phase dispatch and decision table | `orchestrator.sh` |
 | Dev-round execution and codex loop | `issue-runner.sh` |

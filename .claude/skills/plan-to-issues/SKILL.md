@@ -1,13 +1,14 @@
 ---
 name: plan-to-issues
-description: Slice a local plan document into GitHub issues organized into an epic/task hierarchy. Superseded by scripts/plan.sh + plan-decomposer agent.
+description: Slice a local plan document into GitHub issues organized into an epic/task hierarchy. Superseded by scripts/plan.sh + milestone-decomposer/task-decomposer agents.
 ---
 
 # plan-to-issues
 
-> **Note:** This skill is superseded by `scripts/plan.sh` + the `plan-decomposer` agent.
-> Use `runoq plan <file>` instead, which calls the plan-decomposer agent for AI decomposition
-> and handles confirmation + issue creation deterministically in a shell script.
+> **Note:** This skill is superseded by `scripts/plan.sh` plus the `milestone-decomposer`
+> and `task-decomposer` agents. Use `runoq plan <file>` instead, which first slices the
+> plan into milestones, then expands each milestone into tasks while handling confirmation
+> and issue creation deterministically in a shell script.
 > This skill definition is retained for reference.
 
 Use this skill to slice a local plan document into GitHub issues, organized into an epic/task hierarchy when appropriate.
