@@ -36,7 +36,22 @@ EOF
 
 @test "live planning smoke reports init failure without shell crash" {
   key_path="$TEST_TMPDIR/app-key.pem"
+  git_helper_dir="$TEST_TMPDIR/git-bin"
+  real_git="$(command -v git)"
   printf 'not-a-real-key\n' >"$key_path"
+  mkdir -p "$git_helper_dir"
+  cat >"$git_helper_dir/git" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${1:-}" == "-C" && "\${3:-}" == "push" ]]; then
+  exit 0
+fi
+if [[ "\${1:-}" == "push" ]]; then
+  exit 0
+fi
+exec "$real_git" "\$@"
+EOF
+  chmod +x "$git_helper_dir/git"
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<'EOF'
 [
@@ -57,6 +72,10 @@ EOF
     "stdout": ""
   },
   {
+    "contains": ["api", "user", "--jq", ".login"],
+    "stdout": "operator"
+  },
+  {
     "contains": ["repo", "view", "owner/runoq-live-eval-"],
     "stdout": "{\"name\":\"runoq-live-eval-test\"}"
   },
@@ -67,12 +86,14 @@ EOF
 ]
 EOF
   use_fake_gh "$scenario"
+  export PATH="$git_helper_dir:$PATH"
   export RUNOQ_SMOKE=1
   export RUNOQ_SMOKE_REPO_OWNER="owner"
   export RUNOQ_SMOKE_APP_ID="123"
   export RUNOQ_SMOKE_INSTALLATION_ID="456"
   export RUNOQ_SMOKE_APP_KEY="$key_path"
   export RUNOQ_CLAUDE_BIN="sh"
+  export RUNOQ_SMOKE_RETRY_DELAY_SECONDS=0
 
   run "$RUNOQ_ROOT/scripts/smoke-planning.sh" run
 

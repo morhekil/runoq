@@ -230,6 +230,80 @@ EOF
   [ "$status" -eq 1 ]
 }
 
+@test "managed repo creation retries git push while the new repo propagates" {
+  scenario="$TEST_TMPDIR/scenario.json"
+  target_dir="$TEST_TMPDIR/target"
+  git_helper_dir="$TEST_TMPDIR/git-bin"
+  push_count_file="$TEST_TMPDIR/git-push.count"
+  real_git="$(command -v git)"
+  make_git_repo "$target_dir"
+  mkdir -p "$git_helper_dir"
+  cat >"$git_helper_dir/git" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+count_file="$push_count_file"
+if [[ "\${1:-}" == "-C" && "\${3:-}" == "push" ]]; then
+  count=0
+  [[ -f "\$count_file" ]] && count="\$(cat "\$count_file")"
+  count="\$((count + 1))"
+  printf '%s' "\$count" >"\$count_file"
+  if [[ "\$count" -eq 1 ]]; then
+    printf 'ERROR: Repository not found.\n' >&2
+    exit 128
+  fi
+  exit 0
+fi
+if [[ "\${1:-}" == "push" ]]; then
+  count=0
+  [[ -f "\$count_file" ]] && count="\$(cat "\$count_file")"
+  count="\$((count + 1))"
+  printf '%s' "\$count" >"\$count_file"
+  if [[ "\$count" -eq 1 ]]; then
+    printf 'ERROR: Repository not found.\n' >&2
+    exit 128
+  fi
+  exit 0
+fi
+exec "$real_git" "\$@"
+EOF
+  chmod +x "$git_helper_dir/git"
+  write_fake_gh_scenario "$scenario" <<'EOF'
+[
+  {
+    "contains": ["repo", "create", "owner/runoq-live-eval-run-123"],
+    "stdout": "https://github.com/owner/runoq-live-eval-run-123"
+  },
+  {
+    "contains": ["repo", "view", "owner/runoq-live-eval-run-123"],
+    "stdout": "{\"name\":\"runoq-live-eval-run-123\"}"
+  },
+  {
+    "contains": ["repo", "edit", "owner/runoq-live-eval-run-123"],
+    "stdout": ""
+  }
+]
+EOF
+  use_fake_gh "$scenario"
+
+  run bash -lc '
+    set -euo pipefail
+    export PATH="'"$git_helper_dir"':$PATH"
+    export RUNOQ_ROOT="'"$RUNOQ_ROOT"'"
+    export RUNOQ_CONFIG="'"$RUNOQ_CONFIG"'"
+    export GH_BIN="'"$GH_BIN"'"
+    export RUNOQ_SMOKE_REPO_OWNER=owner
+    export RUNOQ_SMOKE_REPO_PREFIX=runoq-live-eval
+    export RUNOQ_SMOKE_RETRY_DELAY_SECONDS=0
+    source "'"$RUNOQ_ROOT"'/scripts/lib/smoke-common.sh"
+    create_managed_repo "'"$target_dir"'" run-123
+  '
+
+  [ "$status" -eq 0 ]
+  run cat "$push_count_file"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2" ]
+}
+
 @test "operator_gh runs without inherited bot token" {
   helper="$TEST_TMPDIR/gh-env"
   cat >"$helper" <<'EOF'

@@ -116,6 +116,57 @@ operator_login() {
   operator_gh api user --jq '.login'
 }
 
+smoke_retry_delay_seconds() {
+  printf '%s\n' "${RUNOQ_SMOKE_RETRY_DELAY_SECONDS:-3}"
+}
+
+wait_for_managed_repo() {
+  local repo="$1"
+  local attempts="${RUNOQ_SMOKE_CREATE_REPO_ATTEMPTS:-10}"
+  local delay
+  local attempt
+  delay="$(smoke_retry_delay_seconds)"
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    if operator_gh repo view "$repo" --json name >/dev/null 2>&1; then
+      return 0
+    fi
+    smoke_log "waiting for managed repo ${repo} propagation (attempt ${attempt}/${attempts})"
+    sleep "$delay"
+  done
+  return 1
+}
+
+push_managed_repo() {
+  local target_dir="$1"
+  local repo="$2"
+  local attempts="${RUNOQ_SMOKE_CREATE_REPO_ATTEMPTS:-10}"
+  local delay remote_url output status attempt
+  delay="$(smoke_retry_delay_seconds)"
+  remote_url="https://github.com/${repo}.git"
+
+  if git -C "$target_dir" remote get-url origin >/dev/null 2>&1; then
+    git -C "$target_dir" remote set-url origin "$remote_url"
+  else
+    git -C "$target_dir" remote add origin "$remote_url"
+  fi
+
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    set +e
+    output="$(GIT_TERMINAL_PROMPT=0 git -C "$target_dir" push -u origin HEAD:main 2>&1)"
+    status="$?"
+    set -e
+    if [[ "$status" -eq 0 ]]; then
+      return 0
+    fi
+    smoke_log "seed push to ${repo} failed on attempt ${attempt}/${attempts}: ${output}"
+    if (( attempt < attempts )); then
+      sleep "$delay"
+    fi
+  done
+
+  runoq::die "Failed to push seeded repo ${repo}: ${output}"
+}
+
 resolve_tool_bin() {
   local candidate="$1"
   local resolved=""
@@ -691,16 +742,18 @@ create_managed_repo() {
   repo_name="$(runoq::branch_slug "${prefix}-${run_id}")"
   repo="${owner}/${repo_name}"
   gh_bin="$(smoke_gh_bin)"
-  if ! create_output="$(operator_gh repo create "$repo" "--${visibility}" --source "$target_dir" --remote origin --push 2>&1)"; then
+  if ! create_output="$(operator_gh repo create "$repo" "--${visibility}" 2>&1)"; then
     runoq::die "Failed to create managed repo ${repo}: ${create_output}"
   fi
   if printf '%s' "$create_output" | grep -Eiq '(^|[[:space:]])(GraphQL:|HTTP [0-9]{3}:|error:|failed)' ; then
     runoq::die "Failed to create managed repo ${repo}: ${create_output}"
   fi
-  if ! operator_gh repo view "$repo" --json name >/dev/null 2>&1; then
+  if ! wait_for_managed_repo "$repo"; then
     runoq::die "Failed to create managed repo ${repo}: ${create_output}"
   fi
-  url="$(printf '%s\n' "$create_output" | tail -n1)"
+  push_managed_repo "$target_dir" "$repo"
+  url="$(printf '%s\n' "$create_output" | grep -Eo 'https://github.com/[^[:space:]]+' | tail -n1)"
+  [[ -n "$url" ]] || url="https://github.com/${repo}"
   operator_gh repo edit "$repo" --default-branch main --enable-auto-merge --enable-squash-merge --delete-branch-on-merge >/dev/null
   jq -n --arg repo "$repo" --arg url "$url" '{repo:$repo, url:$url}'
 }
