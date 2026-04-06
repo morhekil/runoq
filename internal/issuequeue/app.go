@@ -810,6 +810,7 @@ func (a *App) writeCreateBody(body string, opts createOptions) (string, error) {
 			return "", err
 		}
 	}
+	body = strings.ReplaceAll(body, `\n`, "\n")
 	if _, err := fmt.Fprintf(file, "-->\n\n%s\n", body); err != nil {
 		return "", err
 	}

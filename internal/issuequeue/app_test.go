@@ -528,6 +528,49 @@ func TestAssignFailsWhenGHReturnsEmpty(t *testing.T) {
 	}
 }
 
+func TestCreateBodyInterpretsEscapedNewlines(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t, []string{
+		"create", "owner/repo", "Test issue", `## Acceptance Criteria\n\n- [ ] Milestones proposed.`,
+		"--type", "task",
+		"--priority", "1",
+		"--estimated-complexity", "low",
+	})
+	var bodyText string
+	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+		t.Helper()
+		command := req.Name + " " + strings.Join(req.Args, " ")
+		if strings.Contains(command, "issue create") {
+			for i := range len(req.Args) {
+				if req.Args[i] == "--body-file" {
+					data, err := os.ReadFile(req.Args[i+1])
+					if err != nil {
+						t.Fatalf("read body file: %v", err)
+					}
+					bodyText = string(data)
+					break
+				}
+			}
+			_, _ = req.Stdout.Write([]byte("https://github.com/owner/repo/issues/99"))
+			return nil
+		}
+		t.Fatalf("unexpected command: %s", command)
+		return nil
+	})
+
+	code := app.Run(t.Context())
+	if code != 0 {
+		t.Fatalf("Run returned %d stderr=%q", code, app.stderr.(*bytes.Buffer).String())
+	}
+	if strings.Contains(bodyText, `\n`) {
+		t.Fatalf("body contains literal \\n instead of actual newlines:\n%s", bodyText)
+	}
+	if !strings.Contains(bodyText, "## Acceptance Criteria\n\n- [ ] Milestones proposed.") {
+		t.Fatalf("body missing expected content with real newlines:\n%s", bodyText)
+	}
+}
+
 func TestCreatePlanningDoesNotAssign(t *testing.T) {
 	t.Parallel()
 
