@@ -62,36 +62,16 @@ proposal_comment_body() {
   local technical_json="$2"
   local product_json="$3"
   local warning="${4:-}"
+  local proposal_json
+  proposal_json="$(cat "$proposal_path")"
 
-  {
-    printf '## Review scores\n\n'
-    printf '| Reviewer | Score | Verdict |\n'
-    printf '|----------|-------|---------|\n'
-    printf '| Technical | %s | %s |\n' \
-      "$(printf '%s' "$technical_json" | jq -r '.score')" \
-      "$(printf '%s' "$technical_json" | jq -r '.verdict')"
-    printf '| Product | %s | %s |\n\n' \
-      "$(printf '%s' "$product_json" | jq -r '.score')" \
-      "$(printf '%s' "$product_json" | jq -r '.verdict')"
-    if [[ -n "$warning" ]]; then
-      printf '> **Warning:** %s\n\n' "$warning"
-    fi
-    local warning_lines
-    warning_lines="$(jq -r '(.warnings // [])[] // empty' "$proposal_path" 2>/dev/null)"
-    if [[ -n "$warning_lines" ]]; then
-      printf '**Warnings from decomposer:**\n'
-      while IFS= read -r line; do
-        [[ -n "$line" ]] && printf '- %s\n' "$line"
-      done <<< "$warning_lines"
-      printf '\n'
-    fi
-    printf '## Proposed milestones\n\n'
-    runoq::format_plan_proposal "$proposal_path"
-    printf '\n<details>\n<summary>Raw JSON payload</summary>\n\n'
-    printf '```json\n'
-    cat "$proposal_path"
-    printf '\n```\n\n</details>\n'
-  }
+  jq -cn \
+    --argjson proposal "$proposal_json" \
+    --argjson technical "$technical_json" \
+    --argjson product "$product_json" \
+    --arg warning "$warning" \
+    '{proposal:$proposal, technical:$technical, product:$product, warning:$warning}' \
+    | "$(runoq::root)/scripts/tick-fmt.sh" proposal-comment-body
 }
 
 main() {

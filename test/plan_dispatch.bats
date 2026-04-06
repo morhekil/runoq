@@ -72,6 +72,58 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+@test "plan dispatch renders decomposer warnings that start with a dash" {
+  fixture_dir="$TEST_TMPDIR/fixtures"
+  write_plan_dispatch_fixture "$fixture_dir"
+  cat >"$fixture_dir/milestone-decomposer.json" <<'EOF'
+{"items":[
+  {"key":"m1","title":"Core formatter","type":"implementation","goal":"Formatter works","criteria":["Formats input"],"scope":["core"],"sequencing_rationale":"Foundational","priority":1}
+],"warnings":["- M2 depends on external API availability","- M3 scope may grow"]}
+EOF
+  cat >"$fixture_dir/plan-reviewer-technical.txt" <<'EOF'
+<!-- runoq:payload:plan-review-technical -->
+REVIEW-TYPE: plan-technical
+VERDICT: PASS
+SCORE: 34/35
+CHECKLIST:
+- [ ] None.
+EOF
+  cat >"$fixture_dir/plan-reviewer-product.txt" <<'EOF'
+<!-- runoq:payload:plan-review-product -->
+REVIEW-TYPE: plan-product
+VERDICT: PASS
+SCORE: 28/30
+CHECKLIST:
+- [ ] None.
+EOF
+
+  scenario="$TEST_TMPDIR/scenario.json"
+  write_fake_gh_scenario "$scenario" <<'EOF'
+[
+  {
+    "contains": ["issue", "comment", "42", "--repo", "owner/repo"],
+    "stdout": ""
+  }
+]
+EOF
+  use_fake_gh "$scenario" "$TEST_TMPDIR/gh.state" "$TEST_TMPDIR/gh.log" "$TEST_TMPDIR/capture"
+  export RUNOQ_CLAUDE_BIN="$RUNOQ_ROOT/test/helpers/fixture-claude"
+  export RUNOQ_TEST_AGENT_FIXTURE_DIR="$fixture_dir"
+  export RUNOQ_TEST_AGENT_STATE_DIR="$TEST_TMPDIR/agent-state"
+  export FAKE_CLAUDE_LOG="$TEST_TMPDIR/claude.log"
+  export RUNOQ_LOG_ROOT="$TEST_TMPDIR/log"
+  plan_file="$TEST_TMPDIR/plan.md"
+  printf '%s\n' '# Plan' >"$plan_file"
+
+  run "$RUNOQ_ROOT/scripts/plan-dispatch.sh" owner/repo 42 milestone "$plan_file"
+
+  [ "$status" -eq 0 ]
+  run grep -F 'M2 depends on external API availability' "$TEST_TMPDIR/capture/0.body"
+  [ "$status" -eq 0 ]
+  run grep -F 'M3 scope may grow' "$TEST_TMPDIR/capture/0.body"
+  [ "$status" -eq 0 ]
+}
+
 @test "plan dispatch re-invokes decomposer with merged checklist when review iterates" {
   fixture_dir="$TEST_TMPDIR/fixtures"
   write_plan_dispatch_fixture "$fixture_dir"

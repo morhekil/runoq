@@ -32,10 +32,7 @@ has_label() {
 
 extract_proposal_json_from_text() {
   local text="$1"
-  local tmp
-  tmp="$(mktemp "${TMPDIR:-/tmp}/runoq-proposal-text.XXXXXX")"
-  printf '%s' "$text" >"$tmp"
-  runoq::extract_marked_json_block "$tmp" 'runoq:payload:plan-proposal' 2>/dev/null || true
+  printf '%s' "$text" | "$(runoq::root)/scripts/tick-fmt.sh" extract-json 'runoq:payload:plan-proposal' 2>/dev/null || true
 }
 
 extract_fenced_json_from_text() {
@@ -100,49 +97,13 @@ adjustment_json_from_issue_view() {
 
 human_comment_selection() {
   local issue_view_json="$1"
-  local comments approved rejected
-  comments="$(printf '%s' "$issue_view_json" | jq -r '.comments // [] | map(select((.body // "" | contains("runoq:event") | not))) | .[].body // empty')"
-  approved=""
-  rejected=""
-  while IFS= read -r comment; do
-    [[ -n "$comment" ]] || continue
-    local lower
-    lower="$(printf '%s' "$comment" | tr '[:upper:]' '[:lower:]')"
-    if [[ "$lower" =~ approve[[:space:]]+items?[^0-9]*([0-9][0-9 ,and]*) ]]; then
-      approved="$approved $(printf '%s' "${BASH_REMATCH[1]}" | grep -oE '[0-9]+')"
-    fi
-    if [[ "$lower" =~ (drop|reject|remove(d)?)[^0-9]*([0-9][0-9 ,and]*) ]]; then
-      rejected="$rejected $(printf '%s' "${BASH_REMATCH[3]}" | grep -oE '[0-9]+')"
-    fi
-    if [[ "$lower" =~ items?[[:space:]]*([0-9][0-9 ,and]*)[[:space:]]+(removed|dropped|rejected) ]]; then
-      rejected="$rejected $(printf '%s' "${BASH_REMATCH[1]}" | grep -oE '[0-9]+')"
-    fi
-  done <<<"$comments"
-  jq -cn \
-    --arg approved "$approved" \
-    --arg rejected "$rejected" '
-    {
-      approved: [($approved | scan("[0-9]+")) | tonumber],
-      rejected: [($rejected | scan("[0-9]+")) | tonumber]
-    }'
+  printf '%s' "$issue_view_json" | "$(runoq::root)/scripts/tick-fmt.sh" human-comment-selection
 }
 
 select_items_from_proposal() {
   local proposal_json="$1"
   local selection_json="$2"
-  printf '%s' "$proposal_json" | jq --argjson selection "$selection_json" '
-    .items |= (
-      to_entries
-      | map(
-          . as $entry
-          | select(
-              ((($selection.approved | length) == 0) or (($selection.approved | index($entry.key + 1)) != null))
-              and (($selection.rejected | index($entry.key + 1)) == null)
-            )
-        )
-      | map(.value)
-    )
-  '
+  printf '%s' "$proposal_json" | "$(runoq::root)/scripts/tick-fmt.sh" select-items --selection "$selection_json"
 }
 
 latest_human_comment_unanswered() {
@@ -329,7 +290,7 @@ handle_approved_planning() {
       title="$(printf '%s' "$item" | jq -r '.title')"
       priority="$(printf '%s' "$item" | jq -r '.priority // 1')"
       milestone_type="$(printf '%s' "$item" | jq -r '.type')"
-      body="$(printf '%s' "$item" | jq -r '"## Context\n\nGoal: " + (.goal // "") + "\n\nScope: " + ((.scope // []) | join(", ")) + "\n\n## Acceptance Criteria\n\n" + ((.criteria // []) | map("- [ ] " + .) | join("\n"))')"
+      body="$(printf '%s' "$item" | "$(runoq::root)/scripts/tick-fmt.sh" milestone-body)"
       create_output="$("$issue_queue_script" create "$repo" "$title" "$body" --type epic --priority "$priority" --estimated-complexity low --milestone-type "$milestone_type")"
       created_number="$(printf '%s' "$create_output" | jq -r '.url | capture("(?<n>[0-9]+)$").n')"
       runoq::info "created epic #$created_number: $title"
@@ -482,11 +443,7 @@ handle_milestone_complete() {
   fi
   if [[ "$adjustment_count" -gt 0 ]]; then
     runoq::info "creating adjustment review issue"
-    body="$(printf '%s' "$reviewer_json" | jq -r '
-      "## Acceptance Criteria\n\n- [ ] Review proposed adjustments.\n\n" +
-      (.proposed_adjustments | to_entries | map("\(.key + 1). \(.value.type): \(.value.title // .value.description // "")") | join("\n")) +
-      "\n\n```json\n" + (. | tostring) + "\n```"
-    ')"
+    body="$(printf '%s' "$reviewer_json" | "$(runoq::root)/scripts/tick-fmt.sh" adjustment-review-body)"
     create_output="$("$issue_queue_script" create "$repo" "Review milestone adjustments" "$body" --type adjustment --priority 1 --estimated-complexity low --parent-epic "$current_epic_number")"
     local adj_issue_number
     adj_issue_number="$(printf '%s' "$create_output" | jq -r '.url | capture("(?<n>[0-9]+)$").n')"
