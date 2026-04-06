@@ -249,7 +249,8 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.ready')" = "false" ]
   [ "$(printf '%s' "$output" | jq -r '.gh_authenticated')" = "true" ]
-  [ "$(printf '%s' "$output" | jq -r '.missing | length')" = "4" ]
+  [ "$(printf '%s' "$output" | jq -r '.missing | length')" = "5" ]
+  [[ "$(printf '%s' "$output" | jq -r '.missing | join(" ")')" == *"RUNOQ_SMOKE_INSTALLATION_ID"* ]]
 }
 
 @test "live lifecycle smoke preflight accepts explicit managed repo configuration" {
@@ -268,6 +269,7 @@ EOF
   export RUNOQ_SMOKE=1
   export RUNOQ_SMOKE_REPO_OWNER="owner"
   export RUNOQ_SMOKE_APP_ID="123"
+  export RUNOQ_SMOKE_INSTALLATION_ID="456"
   export RUNOQ_SMOKE_APP_KEY="$key_path"
   export RUNOQ_CLAUDE_BIN="sh"
   export RUNOQ_SMOKE_CODEX_BIN="sh"
@@ -297,7 +299,8 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r '.ready')" = "false" ]
   [ "$(printf '%s' "$output" | jq -r '.gh_authenticated')" = "true" ]
-  [ "$(printf '%s' "$output" | jq -r '.missing | length')" -ge 4 ]
+  [ "$(printf '%s' "$output" | jq -r '.missing | length')" -ge 5 ]
+  [[ "$(printf '%s' "$output" | jq -r '.missing | join(" ")')" == *"RUNOQ_SMOKE_INSTALLATION_ID"* ]]
 }
 
 @test "live tick smoke preflight accepts explicit managed repo configuration" {
@@ -316,6 +319,7 @@ EOF
   export RUNOQ_SMOKE=1
   export RUNOQ_SMOKE_REPO_OWNER="owner"
   export RUNOQ_SMOKE_APP_ID="123"
+  export RUNOQ_SMOKE_INSTALLATION_ID="456"
   export RUNOQ_SMOKE_APP_KEY="$key_path"
 
   run "$RUNOQ_ROOT/scripts/smoke-tick.sh" preflight

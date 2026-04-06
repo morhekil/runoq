@@ -15,6 +15,8 @@ They intentionally serve different purposes and should not be conflated.
 
 All lanes use environment variables from `.env.smoke-sandbox` at the repo root. Source it before running any live smoke test.
 
+For any lane that provisions or bootstraps a managed repo, `RUNOQ_SMOKE_INSTALLATION_ID` is required. This is the GitHub App installation ID, not the App ID. You can find it in the install URL after clicking **Install App** for your GitHub App, for example `https://github.com/settings/installations/<installation-id>` or `https://github.com/organizations/<org>/settings/installations/<installation-id>`.
+
 ## Lane Overview
 
 ### Sandbox smoke
@@ -139,6 +141,7 @@ Set all of the following:
 - `RUNOQ_SMOKE_LIFECYCLE=1` when using the Bats wrapper
 - `RUNOQ_SMOKE_REPO_OWNER=<owner-or-org-for-managed-repos>`
 - `RUNOQ_SMOKE_APP_ID=<github-app-id>`
+- `RUNOQ_SMOKE_INSTALLATION_ID=<github-app-installation-id>`
 - `RUNOQ_SMOKE_APP_KEY=/absolute/path/to/app-key.pem`
 
 Optional:
@@ -175,6 +178,7 @@ Set all of the following:
 - `RUNOQ_SMOKE_TICK=1` when using the Bats wrapper
 - `RUNOQ_SMOKE_REPO_OWNER=<owner-or-org-for-managed-repos>`
 - `RUNOQ_SMOKE_APP_ID=<github-app-id>`
+- `RUNOQ_SMOKE_INSTALLATION_ID=<github-app-installation-id>`
 - `RUNOQ_SMOKE_APP_KEY=/absolute/path/to/app-key.pem`
 
 Optional:
@@ -204,6 +208,7 @@ Set all of the following:
 - `RUNOQ_SMOKE_PLANNING=1` when using the Bats wrapper
 - `RUNOQ_SMOKE_REPO_OWNER=<owner-or-org-for-managed-repos>`
 - `RUNOQ_SMOKE_APP_ID=<github-app-id>`
+- `RUNOQ_SMOKE_INSTALLATION_ID=<github-app-installation-id>`
 - `RUNOQ_SMOKE_APP_KEY=/absolute/path/to/app-key.pem`
 
 Optional:

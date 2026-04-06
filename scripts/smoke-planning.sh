@@ -48,6 +48,10 @@ planning_preflight_json() {
     missing="$(append_missing "$missing" "Missing RUNOQ_SMOKE_APP_ID.")"
   fi
 
+  if [[ -z "${RUNOQ_SMOKE_INSTALLATION_ID:-}" ]]; then
+    missing="$(append_missing "$missing" "Missing RUNOQ_SMOKE_INSTALLATION_ID.")"
+  fi
+
   if [[ -z "${RUNOQ_SMOKE_APP_KEY:-}" ]]; then
     missing="$(append_missing "$missing" "Missing RUNOQ_SMOKE_APP_KEY.")"
   fi

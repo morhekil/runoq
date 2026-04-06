@@ -186,6 +186,8 @@ export RUNOQ_SMOKE_PERMISSION_USER="<your-github-username>"
 export RUNOQ_SMOKE_PERMISSION_LEVEL="write"
 ```
 
+The same `RUNOQ_SMOKE_INSTALLATION_ID` is also required by the managed live smoke lanes (`smoke-lifecycle.sh`, `smoke-planning.sh`, and `smoke-tick.sh`) because they write `.runoq/identity.json` into the temporary target repo before bootstrapping it.
+
 You can put these in a file and source it:
 
 ```bash

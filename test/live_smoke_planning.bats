@@ -8,6 +8,32 @@ export RUNOQ_CLAUDE_BIN
 
 load test_helper
 
+@test "live planning smoke preflight requires installation id for managed repo auth" {
+  key_path="$TEST_TMPDIR/app-key.pem"
+  printf 'not-a-real-key\n' >"$key_path"
+  scenario="$TEST_TMPDIR/scenario.json"
+  write_fake_gh_scenario "$scenario" <<'EOF'
+[
+  {
+    "contains": ["auth", "status"],
+    "stdout": ""
+  }
+]
+EOF
+  use_fake_gh "$scenario"
+  export RUNOQ_SMOKE=1
+  export RUNOQ_SMOKE_REPO_OWNER="owner"
+  export RUNOQ_SMOKE_APP_ID="123"
+  export RUNOQ_SMOKE_APP_KEY="$key_path"
+  export RUNOQ_CLAUDE_BIN="sh"
+
+  run "$RUNOQ_ROOT/scripts/smoke-planning.sh" preflight
+
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | jq -r '.ready')" = "false" ]
+  [[ "$(printf '%s' "$output" | jq -r '.missing | join(" ")')" == *"RUNOQ_SMOKE_INSTALLATION_ID"* ]]
+}
+
 @test "live planning smoke reports init failure without shell crash" {
   key_path="$TEST_TMPDIR/app-key.pem"
   printf 'not-a-real-key\n' >"$key_path"
