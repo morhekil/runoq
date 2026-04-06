@@ -20,10 +20,20 @@ require_file() {
 call_agent() {
   local agent="$1"
   local payload="$2"
+  shift 2 || true
   local claude_bin="${RUNOQ_CLAUDE_BIN:-claude}"
   local attempt response_path
+  local -a args
+  args=(--agent "$agent" --add-dir "$(runoq::root)")
+  while [[ $# -gt 0 ]]; do
+    if [[ -n "${1:-}" ]]; then
+      args+=(--add-dir "$1")
+    fi
+    shift || true
+  done
+  args+=(-- "$payload")
   for attempt in 1 2; do
-    runoq::captured_exec claude "$(runoq::target_root)" "$claude_bin" --agent "$agent" --add-dir "$(runoq::root)" -- "$payload" >/dev/null
+    runoq::captured_exec claude "$(runoq::target_root)" "$claude_bin" "${args[@]}" >/dev/null
     response_path="$RUNOQ_LAST_CLAUDE_CAPTURE_DIR/response.txt"
     if grep -q '[^[:space:]]' "$response_path"; then
       printf '%s\n' "$response_path"
@@ -81,6 +91,16 @@ main() {
 
   local max_rounds
   max_rounds="$(runoq::config_get '.planning.maxDecompositionRounds // 3')"
+  local plan_dir milestone_dir prior_findings_dir
+  plan_dir="$(dirname "$plan_file")"
+  milestone_dir=""
+  prior_findings_dir=""
+  if [[ -n "$milestone_file" ]]; then
+    milestone_dir="$(dirname "$milestone_file")"
+  fi
+  if [[ -n "$prior_findings_file" ]]; then
+    prior_findings_dir="$(dirname "$prior_findings_file")"
+  fi
 
   local round=1
   local merged_checklist=""
@@ -121,7 +141,7 @@ main() {
       '
     )"
 
-    response_path="$(call_agent "$decomposer" "$payload")"
+    response_path="$(call_agent "$decomposer" "$payload" "$plan_dir" "$milestone_dir" "$prior_findings_dir")"
     proposal_json="$(read_json_output "$response_path" "$marker")" ||
       runoq::die "Invalid ${decomposer} output"
     proposal_tmp="$(mktemp "${TMPDIR:-/tmp}/runoq-plan-proposal.XXXXXX")"
@@ -129,8 +149,8 @@ main() {
 
     local review_payload tech_path product_path
     review_payload="$(jq -cn --arg proposalPath "$proposal_tmp" --arg planPath "$plan_file" --arg reviewType "$review_type" '{proposalPath:$proposalPath, planPath:$planPath, reviewType:$reviewType}')"
-    tech_path="$(call_agent plan-reviewer-technical "$review_payload")"
-    product_path="$(call_agent plan-reviewer-product "$review_payload")"
+    tech_path="$(call_agent plan-reviewer-technical "$review_payload" "$plan_dir" "$(dirname "$proposal_tmp")")"
+    product_path="$(call_agent plan-reviewer-product "$review_payload" "$plan_dir" "$(dirname "$proposal_tmp")")"
     technical_json="$(runoq::parse_verdict_block "$tech_path")"
     product_json="$(runoq::parse_verdict_block "$product_path")"
 
