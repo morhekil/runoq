@@ -9,6 +9,7 @@ import (
 	"github.com/saruman/runoq/internal/issuequeue"
 	"github.com/saruman/runoq/internal/issuerunner"
 	"github.com/saruman/runoq/internal/orchestrator"
+	"github.com/saruman/runoq/internal/tick"
 	"github.com/saruman/runoq/internal/state"
 	"github.com/saruman/runoq/internal/verify"
 	"github.com/saruman/runoq/internal/worktree"
@@ -99,6 +100,16 @@ func main() {
 			os.Stderr,
 		)
 		os.Exit(orchestratorApp.Run(context.Background()))
+	}
+
+	if len(args) > 0 && args[0] == "__tick_fmt" {
+		tickApp := tick.New(
+			args[1:],
+			os.Stdin,
+			os.Stdout,
+			os.Stderr,
+		)
+		os.Exit(tickApp.Run(context.Background()))
 	}
 
 	cliApp := cli.New(
