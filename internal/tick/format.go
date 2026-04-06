@@ -1,6 +1,7 @@
 package tick
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -39,6 +40,14 @@ type ItemSelection struct {
 	Rejected []int `json:"rejected"`
 }
 
+// ProposalCommentInput is the input for building a full proposal review comment.
+type ProposalCommentInput struct {
+	Proposal  Proposal    `json:"proposal"`
+	Technical ReviewScore `json:"technical"`
+	Product   ReviewScore `json:"product"`
+	Warning   string      `json:"warning,omitzero"`
+}
+
 // FormatPlanProposal renders proposal items as numbered markdown sections.
 func FormatPlanProposal(p Proposal) string {
 	var b strings.Builder
@@ -75,6 +84,46 @@ func FormatPlanProposal(p Proposal) string {
 			}
 		}
 	}
+
+	return b.String()
+}
+
+// FormatProposalCommentBody renders the full proposal review comment with
+// score table, warnings, formatted milestones, and collapsed JSON payload.
+func FormatProposalCommentBody(input ProposalCommentInput) string {
+	var b strings.Builder
+
+	// Review scores table
+	b.WriteString("## Review scores\n\n")
+	b.WriteString("| Reviewer | Score | Verdict |\n")
+	b.WriteString("|----------|-------|---------|\n")
+	fmt.Fprintf(&b, "| Technical | %s | %s |\n", input.Technical.Score, input.Technical.Verdict)
+	fmt.Fprintf(&b, "| Product | %s | %s |\n\n", input.Product.Score, input.Product.Verdict)
+
+	// Process-level warning (e.g. max rounds reached)
+	if input.Warning != "" {
+		fmt.Fprintf(&b, "> **Warning:** %s\n\n", input.Warning)
+	}
+
+	// Decomposer warnings
+	if len(input.Proposal.Warnings) > 0 {
+		b.WriteString("**Warnings from decomposer:**\n")
+		for _, w := range input.Proposal.Warnings {
+			fmt.Fprintf(&b, "- %s\n", w)
+		}
+		b.WriteString("\n")
+	}
+
+	// Proposal content
+	b.WriteString("## Proposed milestones\n\n")
+	b.WriteString(FormatPlanProposal(input.Proposal))
+
+	// Collapsed JSON payload
+	b.WriteString("\n<details>\n<summary>Raw JSON payload</summary>\n\n")
+	b.WriteString("```json\n")
+	proposalJSON, _ := json.MarshalIndent(input.Proposal, "", "  ")
+	b.Write(proposalJSON)
+	b.WriteString("\n```\n\n</details>\n")
 
 	return b.String()
 }

@@ -107,6 +107,83 @@ func TestFormatPlanProposalEmptySections(t *testing.T) {
 	}
 }
 
+func TestFormatProposalCommentBody(t *testing.T) {
+	t.Parallel()
+
+	input := ProposalCommentInput{
+		Proposal: Proposal{
+			Items: []ProposalItem{
+				{Title: "Core formatter", Type: "implementation", Goal: "Ship it", Criteria: []string{"Works"}, Priority: new(1)},
+			},
+			Warnings: []string{"- M2 depends on external API", "M3 scope may grow"},
+		},
+		Technical: ReviewScore{Verdict: "PASS", Score: "32/35"},
+		Product:   ReviewScore{Verdict: "PASS", Score: "27/30"},
+	}
+
+	got := FormatProposalCommentBody(input)
+
+	// Review scores table
+	if !containsString(got, "| Technical | 32/35 | PASS |") {
+		t.Error("missing technical score row")
+	}
+	if !containsString(got, "| Product | 27/30 | PASS |") {
+		t.Error("missing product score row")
+	}
+
+	// Warnings rendered with dash-prefixed text (the printf bug scenario)
+	if !containsString(got, "- - M2 depends on external API") {
+		t.Error("warning starting with dash not rendered correctly")
+	}
+	if !containsString(got, "- M3 scope may grow") {
+		t.Error("normal warning not rendered")
+	}
+
+	// Proposal content included
+	if !containsString(got, "### 1. Core formatter") {
+		t.Error("missing proposal content")
+	}
+
+	// JSON in collapsed details
+	if !containsString(got, "<details>") {
+		t.Error("missing details tag")
+	}
+	if !containsString(got, "```json") {
+		t.Error("missing json code fence")
+	}
+}
+
+func TestFormatProposalCommentBodyWithWarning(t *testing.T) {
+	t.Parallel()
+
+	input := ProposalCommentInput{
+		Proposal:  Proposal{Items: []ProposalItem{{Title: "X", Type: "implementation"}}},
+		Technical: ReviewScore{Verdict: "PASS", Score: "30/35"},
+		Product:   ReviewScore{Verdict: "PASS", Score: "25/30"},
+		Warning:   "max review rounds reached",
+	}
+
+	got := FormatProposalCommentBody(input)
+	if !containsString(got, "> **Warning:** max review rounds reached") {
+		t.Error("missing warning blockquote")
+	}
+}
+
+func TestFormatProposalCommentBodyNoWarnings(t *testing.T) {
+	t.Parallel()
+
+	input := ProposalCommentInput{
+		Proposal:  Proposal{Items: []ProposalItem{{Title: "X", Type: "implementation"}}},
+		Technical: ReviewScore{Verdict: "PASS", Score: "30/35"},
+		Product:   ReviewScore{Verdict: "PASS", Score: "25/30"},
+	}
+
+	got := FormatProposalCommentBody(input)
+	if containsString(got, "Warnings from decomposer") {
+		t.Error("should not include warnings section when no warnings")
+	}
+}
+
 func containsString(s, substr string) bool {
 	return len(s) >= len(substr) && searchString(s, substr)
 }
