@@ -241,7 +241,7 @@ func (a *App) phaseInit(ctx context.Context, root string, env []string, repo str
 		return "", a.handleInitFailure(ctx, root, env, repo, issueNumber, "failed to persist INIT state", branch, worktree, &prNumber)
 	}
 
-	_ = a.postAuditComment(ctx, root, env, repo, prNumber, "init", fmt.Sprintf("Orchestrator initialized. Branch: `%s`", branch))
+	_ = a.postAuditCommentWithState(ctx, root, env, repo, prNumber, "init", stateJSON, fmt.Sprintf("Orchestrator initialized. Branch: `%s`", branch))
 	return stateJSON, nil
 }
 
@@ -484,6 +484,16 @@ func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo 
 	if err := a.saveState(ctx, root, env, issueNumber, nextState); err != nil {
 		return "", issueRunnerResult{}, err
 	}
+
+	developBody := fmt.Sprintf(
+		"## Develop - round %d\n\n| Field | Value |\n|-------|-------|\n| **Status** | %s |\n| **Commit range** | `%s` |\n| **Cumulative tokens** | %d |\n| **Verification** | %s |\n",
+		round, result.Status, result.CommitRange, result.CumulativeTokens, yesNo(result.VerificationPassed),
+	)
+	if strings.TrimSpace(result.Summary) != "" {
+		developBody += "\n**Summary**: " + result.Summary + "\n"
+	}
+	_ = a.postAuditCommentWithState(ctx, root, env, repo, state.PRNumber, "develop", nextState, developBody)
+
 	return nextState, result, nil
 }
 
@@ -617,8 +627,6 @@ func (a *App) phaseReview(ctx context.Context, root string, env []string, repo s
 	if strings.TrimSpace(reviewChecklist) != "" {
 		reviewBody += "\n### Checklist\n" + reviewChecklist + "\n"
 	}
-	_ = a.postAuditComment(ctx, root, env, repo, state.PRNumber, "review", reviewBody)
-
 	reviewState, err := updateStateJSON(stateJSON, func(state map[string]any) {
 		state["phase"] = "REVIEW"
 		state["verdict"] = verdict
@@ -628,6 +636,9 @@ func (a *App) phaseReview(ctx context.Context, root string, env []string, repo s
 	if err != nil {
 		return "", err
 	}
+
+	_ = a.postAuditCommentWithState(ctx, root, env, repo, state.PRNumber, "review", reviewState, reviewBody)
+
 	if err := a.saveState(ctx, root, env, issueNumber, reviewState); err != nil {
 		return "", err
 	}
@@ -688,6 +699,7 @@ func (a *App) phaseFinalize(ctx context.Context, root string, env []string, repo
 		Score    string   `json:"score"`
 		Round    int      `json:"round"`
 		Caveats  []string `json:"caveats"`
+		Summary  string   `json:"summary"`
 	}
 	if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
 		return "", fmt.Errorf("failed to parse state for finalize: %v", err)
@@ -767,8 +779,6 @@ func (a *App) phaseFinalize(ctx context.Context, root string, env []string, repo
 	if len(state.Caveats) > 0 {
 		finalizeBody += "\n**Caveats**: " + strings.Join(state.Caveats, ", ") + "\n"
 	}
-	_ = a.postAuditComment(ctx, root, env, repo, state.PRNumber, "finalize", finalizeBody)
-
 	finalizeState, err := updateStateJSON(stateJSON, func(state map[string]any) {
 		state["phase"] = "FINALIZE"
 		state["finalize_verdict"] = finalizeVerdict
@@ -777,6 +787,13 @@ func (a *App) phaseFinalize(ctx context.Context, root string, env []string, repo
 	if err != nil {
 		return "", err
 	}
+
+	_ = a.postAuditCommentWithState(ctx, root, env, repo, state.PRNumber, "finalize", finalizeState, finalizeBody)
+
+	if err := a.updatePRBody(ctx, env, repo, state.PRNumber, state.Summary, defaultString(strings.TrimSpace(state.Verdict), "FAIL"), defaultString(strings.TrimSpace(state.Score), "0"), max(state.Round, 1), cfg.MaxRounds, state.Caveats); err != nil {
+		a.logInfo("FINALIZE: PR body update failed: %v", err)
+	}
+
 	if err := a.saveState(ctx, root, env, issueNumber, finalizeState); err != nil {
 		return "", err
 	}

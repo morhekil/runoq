@@ -407,6 +407,7 @@ func TestRunLowComplexityReviewReadyAutoMergesAndCleansUp(t *testing.T) {
 	var savedStates []string
 	var calls []string
 	var updatedPRBody string
+	var capturedCommentBodies []string
 
 	app := New([]string{"run", "owner/repo", "--issue", "42"}, []string{
 		"RUNOQ_ROOT=" + root,
@@ -463,6 +464,11 @@ func TestRunLowComplexityReviewReadyAutoMergesAndCleansUp(t *testing.T) {
 			savedStates = append(savedStates, string(payload))
 			return nil
 		case strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") && strings.HasPrefix(strings.Join(req.Args, " "), "comment owner/repo 87 "):
+			commentFile := req.Args[len(req.Args)-1]
+			body, err := os.ReadFile(commentFile)
+			if err == nil {
+				capturedCommentBodies = append(capturedCommentBodies, string(body))
+			}
 			return nil
 		case req.Name == "gh" && strings.Join(req.Args, " ") == "issue view 42 --repo owner/repo --json body":
 			_, _ = io.WriteString(req.Stdout, `{"body":"## Acceptance Criteria\n\n- [ ] Works."}`)
@@ -546,6 +552,16 @@ func TestRunLowComplexityReviewReadyAutoMergesAndCleansUp(t *testing.T) {
 	}
 	if !strings.Contains(updatedPRBody, "Closes #42") {
 		t.Fatalf("expected linked issue preserved in PR body, got %q", updatedPRBody)
+	}
+	// Verify audit comments contain state blocks
+	stateBlockCount := 0
+	for _, body := range capturedCommentBodies {
+		if strings.Contains(body, "<!-- runoq:state:") {
+			stateBlockCount++
+		}
+	}
+	if stateBlockCount == 0 {
+		t.Fatalf("expected audit comments to contain state blocks, got %d comments: %v", len(capturedCommentBodies), capturedCommentBodies)
 	}
 }
 

@@ -280,10 +280,6 @@ func formatAuditComment(event string, stateJSON string, body string) string {
 	return b.String()
 }
 
-func (a *App) postAuditComment(ctx context.Context, root string, env []string, repo string, prNumber int, event string, body string) error {
-	return a.postAuditCommentWithState(ctx, root, env, repo, prNumber, event, "", body)
-}
-
 func (a *App) postAuditCommentWithState(ctx context.Context, root string, env []string, repo string, prNumber int, event string, stateJSON string, body string) error {
 	commentFile, err := os.CreateTemp("", "runoq-audit.*")
 	if err != nil {
