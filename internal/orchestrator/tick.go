@@ -701,32 +701,13 @@ func (t *tickRunner) issueAssign(ctx context.Context, repo, issueNumber string) 
 	t.issueQueueRun(ctx, "assign", repo, issueNumber)
 }
 
-// --- Shell helpers (interim — for scripts not yet ported) ---
+// --- GH helpers ---
 
 func (t *tickRunner) ghOutput(ctx context.Context, args ...string) (string, error) {
 	return shell.CommandOutput(ctx, t.cfg.ExecCommand, shell.CommandRequest{
 		Name: "gh",
 		Args: args,
 		Env:  t.cfg.Env,
-	})
-}
-
-func (t *tickRunner) scriptOutput(ctx context.Context, script string, args ...string) (string, error) {
-	return shell.CommandOutput(ctx, t.cfg.ExecCommand, shell.CommandRequest{
-		Name:   script,
-		Args:   args,
-		Env:    t.cfg.Env,
-		Stderr: t.cfg.Stderr,
-	})
-}
-
-func (t *tickRunner) runScript(ctx context.Context, script string, args ...string) error {
-	return t.cfg.ExecCommand(ctx, shell.CommandRequest{
-		Name:   script,
-		Args:   args,
-		Env:    t.cfg.Env,
-		Stdout: t.cfg.Stdout,
-		Stderr: t.cfg.Stderr,
 	})
 }
 

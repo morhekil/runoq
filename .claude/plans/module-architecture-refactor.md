@@ -9,12 +9,15 @@
 - [x] M5: Port tick state machine to Go (commit 1eb0907)
 - [x] M6: Eliminate Go→shell→Go roundtrips (issuequeue, dispatch-safety, run)
 
-### Remaining shell calls (not roundtrips — legitimate external agent invocation)
+### All shell calls eliminated
 
-- `plan-dispatch.sh` (2 calls) — Claude agent decomposition loop. Will move to `planning/` when agents/ is wired for streaming.
-- `plan-comment-handler.sh` (1 call) — Claude agent response. Will move to `comments/` when agents/ is wired.
+- `plan-dispatch.sh` → ported to `planning.RunDispatch()` (commit 0b3f168)
+- `plan-comment-handler.sh` → ported to `comments.HandleComments()` (commit 565cec7)
+- `gh-issue-queue.sh` → replaced with `issuequeue.New()` direct calls (commit 137a1b2)
+- `dispatch-safety.sh` → replaced with `dispatchsafety.New()` direct call (commit 90fa81c)
+- `run.sh` → replaced with `orchestrator.New().Run()` direct call (commit 90fa81c)
 
-These are not Go→shell→Go roundtrips — they call Claude (external process), which is legitimate. They will be ported when the agents/ package supports the full streaming capture workflow.
+The tick state machine (`internal/orchestrator/tick.go`) has zero shell script references. Only external tool invocations (gh CLI, claude CLI) remain as legitimate `exec` calls.
 
 ### M6 remaining work
 
