@@ -453,7 +453,7 @@ func (t *tickRunner) handleImplementation(ctx context.Context) int {
 
 	t.info("running next issue")
 	runApp := New(
-		[]string{"run"},
+		[]string{"run", t.cfg.Repo},
 		t.cfg.Env, "", t.cfg.Stdout, t.cfg.Stderr,
 	)
 	runApp.SetCommandExecutor(t.cfg.ExecCommand)

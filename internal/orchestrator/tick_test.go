@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -100,5 +101,58 @@ func TestRunTickAllClosedReturnsWaiting(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "All milestones complete") {
 		t.Errorf("stdout = %q", stdout.String())
+	}
+}
+
+func TestHandleImplementationPassesRepoToOrchestrator(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "runoq.json")
+	os.WriteFile(configPath, []byte(`{"labels":{"ready":"runoq:ready","inProgress":"runoq:in-progress","done":"runoq:done","needsReview":"runoq:needs-human-review","blocked":"runoq:blocked","planApproved":"runoq:plan-approved"}}`), 0o644)
+
+	// Epic #9 with a task child #10 — tick should reach handleImplementation
+	issueList := `[
+		{"number":9,"title":"M1","state":"OPEN","body":"<!-- runoq:meta\ntype: epic\npriority: 1\n-->","labels":[],"url":"u"},
+		{"number":10,"title":"Do thing","state":"OPEN","body":"<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 1\nestimated_complexity: low\n-->","labels":[],"url":"u"}
+	]`
+
+	var queueNextArgs []string
+	stub := &ghStub{
+		rules: []ghStubRule{
+			{contains: "issue list", stdout: issueList},
+			// The queue "next" call from the orchestrator's runCommandEntry
+			{contains: "gh-issue-queue.sh next", stdout: `{"issue":null,"skipped":[]}`},
+			// list for sweep
+			{contains: "gh-issue-queue.sh list", stdout: issueList},
+			// epic-status for sweep
+			{contains: "epic-status", stdout: `{"all_done":false,"pending":[10]}`},
+		},
+	}
+
+	var stdout, stderr bytes.Buffer
+	result := RunTick(t.Context(), TickConfig{
+		Repo:      "owner/repo",
+		PlanFile:  "docs/plan.md",
+		RunoqRoot: tmpDir,
+		Env:       []string{"RUNOQ_CONFIG=" + configPath, "RUNOQ_ROOT=" + tmpDir},
+		ExecCommand: func(ctx context.Context, req shell.CommandRequest) error {
+			if slices.Contains(req.Args, "next") {
+				queueNextArgs = req.Args
+			}
+			return stub.exec(ctx, req)
+		},
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+
+	_ = result
+
+	if len(queueNextArgs) == 0 {
+		t.Fatalf("orchestrator run was never invoked (gh-issue-queue.sh next not called); stderr:\n%s", stderr.String())
+	}
+
+	if !slices.Contains(queueNextArgs, "owner/repo") {
+		t.Errorf("orchestrator did not receive repo; queue next args = %v", queueNextArgs)
 	}
 }
