@@ -9,6 +9,7 @@ export RUNOQ_CLAUDE_BIN
 load test_helper
 
 @test "live planning smoke preflight requires installation id for managed repo auth" {
+  unset RUNOQ_SMOKE_INSTALLATION_ID
   key_path="$TEST_TMPDIR/app-key.pem"
   printf 'not-a-real-key\n' >"$key_path"
   scenario="$TEST_TMPDIR/scenario.json"

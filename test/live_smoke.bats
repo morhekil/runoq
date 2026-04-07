@@ -3,6 +3,7 @@
 load test_helper
 
 @test "live smoke preflight requires explicit sandbox configuration" {
+  unset RUNOQ_SMOKE RUNOQ_SMOKE_REPO RUNOQ_SMOKE_APP_ID RUNOQ_SMOKE_INSTALLATION_ID RUNOQ_SMOKE_APP_KEY RUNOQ_SMOKE_PERMISSION_USER
   run "$RUNOQ_ROOT/scripts/smoke-sandbox.sh" preflight
 
   [ "$status" -eq 0 ]
@@ -516,6 +517,7 @@ EOF
 }
 
 @test "live lifecycle smoke preflight requires explicit managed repo configuration" {
+  unset RUNOQ_SMOKE RUNOQ_SMOKE_REPO_OWNER RUNOQ_SMOKE_APP_ID RUNOQ_SMOKE_INSTALLATION_ID RUNOQ_SMOKE_APP_KEY RUNOQ_SMOKE_PERMISSION_USER RUNOQ_SMOKE_REPO RUNOQ_SMOKE_LIFECYCLE RUNOQ_SMOKE_TICK
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<'EOF'
 [
@@ -568,6 +570,7 @@ EOF
 }
 
 @test "live tick smoke preflight requires explicit managed repo configuration" {
+  unset RUNOQ_SMOKE RUNOQ_SMOKE_REPO_OWNER RUNOQ_SMOKE_APP_ID RUNOQ_SMOKE_INSTALLATION_ID RUNOQ_SMOKE_APP_KEY RUNOQ_SMOKE_PERMISSION_USER RUNOQ_SMOKE_REPO RUNOQ_SMOKE_LIFECYCLE RUNOQ_SMOKE_TICK
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<'EOF'
 [
