@@ -5,7 +5,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -170,26 +169,25 @@ func TestSelectNextTaskSkipsClosedAndNonTaskTypes(t *testing.T) {
 	}
 }
 
-func TestHandleImplementationCallsRunQueueWithRepo(t *testing.T) {
+func TestTickSelectsTaskAndCallsRunIssue(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "runoq.json")
 	os.WriteFile(configPath, []byte(`{"labels":{"ready":"runoq:ready","inProgress":"runoq:in-progress","done":"runoq:done","needsReview":"runoq:needs-human-review","blocked":"runoq:blocked","planApproved":"runoq:plan-approved"}}`), 0o644)
 
-	// Epic #9 with a task child #10 — tick should reach handleImplementation
+	// Epic #9 with task children #10 (priority 2) and #11 (priority 1)
 	issueList := `[
 		{"number":9,"title":"M1","state":"OPEN","body":"<!-- runoq:meta\ntype: epic\npriority: 1\n-->","labels":[],"url":"u"},
-		{"number":10,"title":"Do thing","state":"OPEN","body":"<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 1\nestimated_complexity: low\n-->","labels":[],"url":"u"}
+		{"number":10,"title":"Second task","state":"OPEN","body":"<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 2\nestimated_complexity: low\n-->","labels":[],"url":"u"},
+		{"number":11,"title":"First task","state":"OPEN","body":"<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 1\nestimated_complexity: low\n-->","labels":[],"url":"u"}
 	]`
 
-	var queueNextArgs []string
+	var eligibilityIssue string
 	stub := &ghStub{
 		rules: []ghStubRule{
 			{contains: "issue list", stdout: issueList},
-			{contains: "gh-issue-queue.sh next", stdout: `{"issue":null,"skipped":[]}`},
-			{contains: "gh-issue-queue.sh list", stdout: issueList},
-			{contains: "epic-status", stdout: `{"all_done":false,"pending":[10]}`},
+			{contains: "eligibility", stdout: `{"allowed":true,"issue":11,"branch":"runoq/11-first-task","reasons":[]}`},
 		},
 	}
 
@@ -200,8 +198,15 @@ func TestHandleImplementationCallsRunQueueWithRepo(t *testing.T) {
 		RunoqRoot: tmpDir,
 		Env:       []string{"RUNOQ_CONFIG=" + configPath, "RUNOQ_ROOT=" + tmpDir},
 		ExecCommand: func(ctx context.Context, req shell.CommandRequest) error {
-			if slices.Contains(req.Args, "next") {
-				queueNextArgs = req.Args
+			cmd := req.Name + " " + strings.Join(req.Args, " ")
+			if strings.Contains(cmd, "eligibility") {
+				// Capture which issue the phase machine was called with
+				for i, arg := range req.Args {
+					if i > 0 && req.Args[i-1] == "owner/repo" {
+						eligibilityIssue = arg
+						break
+					}
+				}
 			}
 			return stub.exec(ctx, req)
 		},
@@ -211,11 +216,15 @@ func TestHandleImplementationCallsRunQueueWithRepo(t *testing.T) {
 
 	_ = result
 
-	if len(queueNextArgs) == 0 {
-		t.Fatalf("RunQueue was never invoked (gh-issue-queue.sh next not called); stderr:\n%s", stderr.String())
+	// Tick should have selected #11 (priority 1) and called RunIssue with it
+	if eligibilityIssue != "11" {
+		t.Errorf("expected RunIssue called with issue 11, got eligibility for issue %q; stderr:\n%s", eligibilityIssue, stderr.String())
 	}
 
-	if !slices.Contains(queueNextArgs, "owner/repo") {
-		t.Errorf("RunQueue did not receive repo; queue next args = %v", queueNextArgs)
+	// Should NOT have called gh-issue-queue.sh next (no queue selection)
+	for _, call := range stub.calls {
+		if strings.Contains(call, "gh-issue-queue.sh next") {
+			t.Errorf("tick should not call queue next, but did: %s", call)
+		}
 	}
 }

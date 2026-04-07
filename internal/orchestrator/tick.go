@@ -63,6 +63,16 @@ func (t *tickRunner) run(ctx context.Context) int {
 	t.detail("repo", t.cfg.Repo)
 	t.detail("plan", t.cfg.PlanFile)
 
+	// One-time setup: auth, identity, reconcile
+	t.step("Setting up")
+	setupApp := New(nil, t.cfg.Env, "", io.Discard, t.cfg.Stderr)
+	setupApp.SetCommandExecutor(t.cfg.ExecCommand)
+	t.cfg.Env = setupApp.Setup(ctx, t.cfg.Repo)
+
+	dsApp := dispatchsafety.New(nil, t.cfg.Env, "", io.Discard, io.Discard)
+	dsApp.SetCommandExecutor(t.cfg.ExecCommand)
+	dsApp.Reconcile(ctx, t.cfg.Repo)
+
 	t.step("Fetching issues")
 	raw, err := t.ghOutput(ctx, "issue", "list", "--repo", t.cfg.Repo, "--state", "all", "--limit", "200", "--json", "number,title,body,labels,state,url")
 	if err != nil {
@@ -151,7 +161,7 @@ func (t *tickRunner) run(ctx context.Context) int {
 
 	if hasOpenTask {
 		t.step(fmt.Sprintf("Dispatching implementation for epic #%d", epicNumber))
-		return t.handleImplementation(ctx)
+		return t.handleImplementation(ctx, epicNumber)
 	}
 
 	if openChildren == 0 {
@@ -442,19 +452,45 @@ func (t *tickRunner) handlePlanningDispatch(ctx context.Context, planningChild *
 	return 0
 }
 
-func (t *tickRunner) handleImplementation(ctx context.Context) int {
-	t.info("reconciling dispatch safety")
-	dsApp := dispatchsafety.New(nil, t.cfg.Env, "", io.Discard, io.Discard)
-	dsApp.SetCommandExecutor(t.cfg.ExecCommand)
-	dsApp.Reconcile(ctx, t.cfg.Repo) // best-effort, ignore errors
+func (t *tickRunner) handleImplementation(ctx context.Context, epicNumber int) int {
+	task := t.selectNextTask(epicNumber)
+	if task == nil {
+		t.warn("all tasks blocked")
+		fmt.Fprintln(t.cfg.Stdout, "All tasks blocked")
+		return 2
+	}
 
-	t.info("running next issue")
+	t.detail("selected", fmt.Sprintf("#%d %s", task.Number, task.Title))
+
+	metadata := IssueMetadata{
+		Number:              task.Number,
+		Title:               task.Title,
+		Body:                task.Body,
+		URL:                 task.URL,
+		EstimatedComplexity: planning.MetadataValue(task.Body, "estimated_complexity"),
+		Type:                planning.MetadataValue(task.Body, "type"),
+	}
+	if rationale := planning.MetadataValue(task.Body, "complexity_rationale"); rationale != "" {
+		metadata.ComplexityRationale = &rationale
+	}
+
 	runApp := New(nil, t.cfg.Env, "", t.cfg.Stdout, t.cfg.Stderr)
 	runApp.SetCommandExecutor(t.cfg.ExecCommand)
-	runApp.RunQueue(ctx, t.cfg.Repo) // may fail, that's OK
+	stateJSON, err := runApp.RunIssue(ctx, t.cfg.Repo, task.Number, false, task.Title, metadata)
+	if err != nil {
+		return t.fail("issue #%d: %v", task.Number, err)
+	}
 
-	t.success("Executed issue")
-	fmt.Fprintln(t.cfg.Stdout, "Executed issue")
+	phase := "unknown"
+	var state map[string]any
+	if err := json.Unmarshal([]byte(stateJSON), &state); err == nil {
+		if value, ok := state["phase"].(string); ok && strings.TrimSpace(value) != "" {
+			phase = value
+		}
+	}
+
+	t.success(fmt.Sprintf("Issue #%d — phase: %s", task.Number, phase))
+	fmt.Fprintf(t.cfg.Stdout, "Issue #%d — phase: %s\n", task.Number, phase)
 	return 0
 }
 
