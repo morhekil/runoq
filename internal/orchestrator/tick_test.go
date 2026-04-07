@@ -232,6 +232,37 @@ func TestFindInProgressTaskReturnsNilWhenNone(t *testing.T) {
 	}
 }
 
+func TestResolveDependsOnMapsKeysToNumbers(t *testing.T) {
+	t.Parallel()
+
+	keyToNumber := map[string]string{"store": "10", "types": "9"}
+
+	result := resolveDependsOn([]string{"types", "store"}, keyToNumber)
+	if result != "9,10" {
+		t.Fatalf("expected '9,10', got %q", result)
+	}
+}
+
+func TestResolveDependsOnSkipsUnknownKeys(t *testing.T) {
+	t.Parallel()
+
+	keyToNumber := map[string]string{"store": "10"}
+
+	result := resolveDependsOn([]string{"store", "unknown"}, keyToNumber)
+	if result != "10" {
+		t.Fatalf("expected '10', got %q", result)
+	}
+}
+
+func TestResolveDependsOnReturnsEmptyForNoDeps(t *testing.T) {
+	t.Parallel()
+
+	result := resolveDependsOn(nil, map[string]string{"store": "10"})
+	if result != "" {
+		t.Fatalf("expected empty, got %q", result)
+	}
+}
+
 func TestTickSelectsTaskAndCallsRunIssue(t *testing.T) {
 	t.Parallel()
 

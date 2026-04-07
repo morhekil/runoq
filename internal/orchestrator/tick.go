@@ -317,6 +317,7 @@ func (t *tickRunner) handleApprovedPlanning(ctx context.Context, reviewView stri
 		t.issueSetStatus(ctx, t.cfg.Repo, reviewParent, "done")
 	} else {
 		t.info("creating task issues under epic #" + reviewParent)
+		keyToNumber := make(map[string]string)
 		for _, item := range filtered.Items {
 			body := item.Body
 			priority := "1"
@@ -324,8 +325,21 @@ func (t *tickRunner) handleApprovedPlanning(ctx context.Context, reviewView stri
 				priority = fmt.Sprintf("%d", *item.Priority)
 			}
 			complexity := cmp.Or(item.EstimatedComplexity, "medium")
-			t.issueCreate(ctx, t.cfg.Repo, item.Title, body, "--type", "task", "--priority", priority, "--estimated-complexity", complexity, "--complexity-rationale", item.ComplexityRationale, "--parent-epic", reviewParent)
-			t.info(fmt.Sprintf("created task: %s (%s)", item.Title, complexity))
+			createOpts := []string{"--type", "task", "--priority", priority, "--estimated-complexity", complexity, "--complexity-rationale", item.ComplexityRationale, "--parent-epic", reviewParent}
+
+			if deps := resolveDependsOn(item.DependsOnKeys, keyToNumber); deps != "" {
+				createOpts = append(createOpts, "--depends-on", deps)
+			}
+
+			issueNum, err := t.issueCreate(ctx, t.cfg.Repo, item.Title, body, createOpts...)
+			if err != nil {
+				t.info(fmt.Sprintf("failed to create task: %s: %v", item.Title, err))
+				continue
+			}
+			if item.Key != "" {
+				keyToNumber[item.Key] = issueNum
+			}
+			t.info(fmt.Sprintf("created task #%s: %s (%s)", issueNum, item.Title, complexity))
 		}
 		t.info(fmt.Sprintf("closing review #%d", reviewNumber))
 		t.issueSetStatus(ctx, t.cfg.Repo, fmt.Sprintf("%d", reviewNumber), "done")
@@ -844,6 +858,19 @@ func (t *tickRunner) ghOutput(ctx context.Context, args ...string) (string, erro
 		Args: args,
 		Env:  t.cfg.Env,
 	})
+}
+
+// resolveDependsOn maps dependency keys to issue numbers, returning a
+// comma-separated string suitable for --depends-on. Returns "" if no
+// dependencies resolve.
+func resolveDependsOn(keys []string, keyToNumber map[string]string) string {
+	var nums []string
+	for _, key := range keys {
+		if num, ok := keyToNumber[key]; ok {
+			nums = append(nums, num)
+		}
+	}
+	return strings.Join(nums, ",")
 }
 
 func extractIssueNumber(ghOutput string) string {
