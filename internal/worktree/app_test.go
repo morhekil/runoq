@@ -144,6 +144,57 @@ func TestCreateFailsWhenPathExists(t *testing.T) {
 	}
 }
 
+func TestCreateRecoversStaleBranchAndWorktree(t *testing.T) {
+	t.Parallel()
+
+	remoteDir := filepath.Join(t.TempDir(), "remote.git")
+	localDir := filepath.Join(t.TempDir(), "local")
+	makeRemoteBackedRepo(t, remoteDir, localDir)
+
+	configFile := writeWorktreeConfig(t)
+	env := []string{
+		"RUNOQ_CONFIG=" + configFile,
+		"TARGET_ROOT=" + localDir,
+	}
+
+	// First create succeeds
+	code, stdout, stderr := runApp(t, []string{"create", "42", "Implement queue"}, env, localDir)
+	if code != 0 {
+		t.Fatalf("first create failed: code=%d stderr=%q", code, stderr)
+	}
+	var result struct {
+		Worktree string `json:"worktree"`
+		Branch   string `json:"branch"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("parse first create: %v", err)
+	}
+
+	// Simulate kill: remove worktree directory but leave git metadata and branch
+	if err := os.RemoveAll(result.Worktree); err != nil {
+		t.Fatalf("remove worktree dir: %v", err)
+	}
+
+	// Second create should recover: prune stale metadata, delete stale branch, create fresh
+	code, stdout, stderr = runApp(t, []string{"create", "42", "Implement queue"}, env, localDir)
+	if code != 0 {
+		t.Fatalf("second create (recovery) failed: code=%d stderr=%q", code, stderr)
+	}
+	var result2 struct {
+		Worktree string `json:"worktree"`
+		Branch   string `json:"branch"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result2); err != nil {
+		t.Fatalf("parse second create: %v", err)
+	}
+	if result2.Branch != result.Branch {
+		t.Fatalf("expected same branch %q, got %q", result.Branch, result2.Branch)
+	}
+	if _, err := os.Stat(result2.Worktree); err != nil {
+		t.Fatalf("worktree dir should exist after recovery: %v", err)
+	}
+}
+
 func runApp(t *testing.T, args []string, env []string, cwd string) (int, string, string) {
 	t.Helper()
 

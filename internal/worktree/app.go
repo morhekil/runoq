@@ -146,6 +146,26 @@ func (a *App) runCreate(ctx context.Context, issue string, title string) int {
 		return shell.Failf(a.stderr, "Failed to inspect worktree path %s: %v", path, err)
 	}
 
+	// Prune stale worktree metadata (directory removed but git still tracks it)
+	_ = a.execCommand(ctx, shell.CommandRequest{
+		Name:   "git",
+		Args:   []string{"-C", targetRoot, "worktree", "prune"},
+		Dir:    a.cwd,
+		Env:    a.env,
+		Stdout: io.Discard,
+		Stderr: io.Discard,
+	})
+
+	// Delete stale local branch from a previous killed run
+	_ = a.execCommand(ctx, shell.CommandRequest{
+		Name:   "git",
+		Args:   []string{"-C", targetRoot, "branch", "-D", branch},
+		Dir:    a.cwd,
+		Env:    a.env,
+		Stdout: io.Discard,
+		Stderr: io.Discard,
+	})
+
 	if err := a.execCommand(ctx, shell.CommandRequest{
 		Name:   "git",
 		Args:   []string{"-C", targetRoot, "worktree", "add", path, "-b", branch, baseRef},
