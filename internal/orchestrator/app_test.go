@@ -1081,6 +1081,52 @@ func TestMentionTriagePropagatesScriptExitCodeAndStderr(t *testing.T) {
 	}
 }
 
+func TestSetupReturnsAuthedEnvAndConfiguresIdentity(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+	writeRuntimeConfig(t, root)
+
+	var identityCalled, remoteCalled bool
+	app := New(nil, []string{
+		"RUNOQ_ROOT=" + root,
+		"TARGET_ROOT=" + root,
+	}, root, io.Discard, io.Discard)
+	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
+		cmd := commandLine(req)
+		switch {
+		case req.Name == "bash" && strings.Contains(cmd, "gh-auth.sh"):
+			_, _ = io.WriteString(req.Stdout, "ok\ntest-token-123")
+			return nil
+		case req.Name == "bash" && strings.Contains(cmd, "configure_git_bot_identity"):
+			identityCalled = true
+			return nil
+		case req.Name == "bash" && strings.Contains(cmd, "configure_git_bot_remote"):
+			remoteCalled = true
+			return nil
+		default:
+			return nil
+		}
+	})
+
+	env := app.Setup(ctx, "owner/repo")
+	if env == nil {
+		t.Fatal("Setup returned nil env")
+	}
+
+	// Should have GH_TOKEN from auth
+	token, ok := shell.EnvLookup(env, "GH_TOKEN")
+	if !ok || token != "test-token-123" {
+		t.Fatalf("expected GH_TOKEN=test-token-123, got %q (ok=%v)", token, ok)
+	}
+
+	if !identityCalled {
+		t.Error("expected configureGitBotIdentity to be called")
+	}
+	if !remoteCalled {
+		t.Error("expected configureGitBotRemote to be called")
+	}
+}
+
 func TestRunIssueExportedMethodSkipsQueueSelection(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()

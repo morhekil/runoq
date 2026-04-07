@@ -126,6 +126,31 @@ func (a *App) runCommandEntry(ctx context.Context, root string, env []string, ar
 	return 0
 }
 
+// Setup performs one-time authentication and git identity configuration.
+// Returns the updated env with GH_TOKEN set. The returned env should be
+// used for all subsequent operations. Returns the original env if auth fails.
+func (a *App) Setup(ctx context.Context, repo string) []string {
+	root := a.runoqRoot()
+	if root == "" {
+		return a.env
+	}
+
+	env := append([]string(nil), a.env...)
+	if authEnv := a.prepareAuth(ctx, root, env); authEnv != nil {
+		env = authEnv
+	}
+
+	targetRoot, err := a.targetRoot(ctx, env)
+	if err != nil {
+		return env
+	}
+
+	a.configureGitBotIdentity(ctx, root, env, targetRoot)
+	a.configureGitBotRemote(ctx, root, env, targetRoot, repo)
+
+	return env
+}
+
 // RunQueue performs auth/identity setup and processes the issue queue.
 // Unlike runCommandEntry, it does NOT run dispatch-safety reconciliation
 // (the caller is expected to handle that separately).
