@@ -50,7 +50,8 @@ type config struct {
 		NeedsReview string `json:"needsReview"`
 		Blocked     string `json:"blocked"`
 	} `json:"labels"`
-	BranchPrefix string `json:"branchPrefix"`
+	BranchPrefix   string `json:"branchPrefix"`
+	WorktreePrefix string `json:"worktreePrefix"`
 }
 
 type reconcileAction struct {
@@ -266,15 +267,7 @@ func (a *App) reconcileStateFile(ctx context.Context, repo string, file string) 
 	}
 	if phase == "FAILED" {
 		issueNumber, _ := intValue(state["issue"])
-		// Clean up failed state: close PR, remove worktree, delete state file
-		prNum := rawStringOr(state["pr_number"], "")
-		if prNum != "" && prNum != "0" {
-			_ = a.runGh(ctx, io.Discard, "pr", "close", prNum, "--repo", repo, "--delete-branch")
-		}
-		// Remove worktree via script (best-effort)
-		if issueNumber > 0 {
-			_ = a.runWorktreeRemove(ctx, strconv.Itoa(issueNumber))
-		}
+		a.cleanupIssueArtifacts(ctx, repo, issueNumber)
 		_ = os.Remove(file)
 		return reconcileAction{
 			Issue:  issueNumber,
@@ -694,19 +687,75 @@ func (a *App) configPath() (string, error) {
 	return "", errors.New("RUNOQ_CONFIG is required")
 }
 
-func (a *App) runWorktreeRemove(ctx context.Context, issue string) error {
-	root, err := a.runoqRoot()
-	if err != nil {
-		return err
+// cleanupIssueArtifacts removes all artifacts for a failed issue so it can
+// be re-dispatched. Discovers artifacts by convention (prefix + issue number)
+// using filesystem operations, only calling gh for PR closure.
+func (a *App) cleanupIssueArtifacts(ctx context.Context, repo string, issueNumber int) {
+	targetRoot, _ := shell.EnvLookup(a.env, "TARGET_ROOT")
+	if targetRoot == "" {
+		return
 	}
-	return a.execCommand(ctx, shell.CommandRequest{
-		Name:   filepath.Join(root, "scripts", "worktree.sh"),
-		Args:   []string{"remove", issue},
-		Dir:    a.cwd,
-		Env:    a.env,
-		Stdout: io.Discard,
-		Stderr: io.Discard,
-	})
+
+	cfg, _ := a.loadConfig()
+
+	issueStr := strconv.Itoa(issueNumber)
+
+	// 1. Remove worktree directory (pure filesystem)
+	worktreePrefix := cfg.WorktreePrefix
+	if worktreePrefix == "" {
+		worktreePrefix = "runoq-wt-"
+	}
+	if parent, err := filepath.Abs(filepath.Join(targetRoot, "..")); err == nil {
+		_ = os.RemoveAll(filepath.Join(parent, worktreePrefix+issueStr))
+	}
+
+	// 2. Prune stale worktree metadata in .git/worktrees/
+	worktreesDir := filepath.Join(targetRoot, ".git", "worktrees")
+	if entries, err := os.ReadDir(worktreesDir); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() && strings.HasPrefix(entry.Name(), worktreePrefix+issueStr) {
+				_ = os.RemoveAll(filepath.Join(worktreesDir, entry.Name()))
+			}
+		}
+	}
+
+	// 3. Delete local branch refs matching prefix + issue number
+	branchPrefix := cfg.BranchPrefix
+	if branchPrefix == "" {
+		branchPrefix = "runoq/"
+	}
+	branchRefDir := filepath.Join(targetRoot, ".git", "refs", "heads")
+	refPrefix := issueStr + "-"
+	for _, segment := range strings.Split(branchPrefix, "/") {
+		if segment != "" {
+			branchRefDir = filepath.Join(branchRefDir, segment)
+		}
+	}
+	if entries, err := os.ReadDir(branchRefDir); err == nil {
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), refPrefix) {
+				_ = os.Remove(filepath.Join(branchRefDir, entry.Name()))
+			}
+		}
+	}
+
+	// 4. Close open PRs for this issue's branches (GitHub API — unavoidable)
+	// gh pr list doesn't support prefix matching on --head, so list all open
+	// PRs and filter by branch prefix client-side.
+	prsOut, _ := a.ghOutputQuiet(ctx, "pr", "list", "--repo", repo, "--state", "open",
+		"--json", "number,headRefName", "--limit", "50")
+	var prs []struct {
+		Number      int    `json:"number"`
+		HeadRefName string `json:"headRefName"`
+	}
+	if json.Unmarshal([]byte(prsOut), &prs) == nil {
+		matchPrefix := branchPrefix + issueStr + "-"
+		for _, pr := range prs {
+			if strings.HasPrefix(pr.HeadRefName, matchPrefix) {
+				_ = a.runGh(ctx, io.Discard, "pr", "close", strconv.Itoa(pr.Number), "--repo", repo, "--delete-branch")
+			}
+		}
+	}
 }
 
 func (a *App) runoqRoot() (string, error) {
