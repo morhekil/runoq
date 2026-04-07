@@ -292,60 +292,43 @@ func TestPlanUsesConfiguredPathWhenArgOmitted(t *testing.T) {
 	}
 }
 
-func TestTickSubcommandRoutesToTickScript(t *testing.T) {
+func TestTickSubcommandCallsRunTick(t *testing.T) {
 	t.Parallel()
 
-	executor := &scriptedExecutor{
-		t: t,
-		matchers: []callMatcher{
-			{
-				name: "git",
-				args: []string{"rev-parse", "--show-toplevel"},
-				result: callResult{
-					stdout: "/tmp/project\n",
-				},
-			},
-			{
-				name: "git",
-				args: []string{"-C", "/tmp/project", "remote", "get-url", "origin"},
-				result: callResult{
-					stdout: "git@github.com:owner/repo.git\n",
-				},
-			},
-			{
-				name: "/runoq/scripts/tick.sh",
-				args: []string{},
-			},
-		},
-	}
+	targetRoot := t.TempDir()
+	// Create runoq.json with plan path
+	os.WriteFile(filepath.Join(targetRoot, "runoq.json"), []byte(`{"plan":"docs/prd.md"}`), 0o644)
 
+	var ghCalled bool
 	var stdout strings.Builder
 	var stderr strings.Builder
 	app := New(
 		[]string{"tick"},
-		[]string{"RUNOQ_ROOT=/runoq", "PATH=/usr/bin"},
-		"/tmp/project",
+		[]string{"RUNOQ_ROOT=/runoq", "RUNOQ_CONFIG=/runoq/config/runoq.json", "TARGET_ROOT=" + targetRoot, "RUNOQ_REPO=owner/repo"},
+		targetRoot,
 		&stdout,
 		&stderr,
 		"",
 	)
-	app.SetCommandExecutor(executor.run)
+	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
+		if req.Name == "gh" {
+			ghCalled = true
+			if req.Stdout != nil {
+				// Return all-closed epic so tick reports "All milestones complete"
+				req.Stdout.Write([]byte(`[{"number":1,"title":"Done","state":"CLOSED","body":"<!-- runoq:meta\ntype: epic\n-->","labels":[],"url":"u"}]`))
+			}
+			return nil
+		}
+		// Allow any other command to pass
+		return nil
+	})
 
 	code := app.Run(context.Background())
-	if code != 0 {
-		t.Fatalf("expected exit code 0, got %d (stderr=%q)", code, stderr.String())
+	if !ghCalled {
+		t.Fatal("expected gh to be called by RunTick, not tick.sh")
 	}
-
-	if len(executor.calls) != 3 {
-		t.Fatalf("expected 3 command calls, got %d", len(executor.calls))
-	}
-
-	tickCall := executor.calls[2]
-	if value, ok := shell.EnvLookup(tickCall.Env, "TARGET_ROOT"); !ok || value != "/tmp/project" {
-		t.Fatalf("TARGET_ROOT mismatch: %q", value)
-	}
-	if value, ok := shell.EnvLookup(tickCall.Env, "REPO"); !ok || value != "owner/repo" {
-		t.Fatalf("REPO mismatch: %q", value)
+	if code != 2 {
+		t.Fatalf("expected exit 2 (all milestones complete), got %d; stderr=%q", code, stderr.String())
 	}
 }
 

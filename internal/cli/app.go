@@ -13,8 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/saruman/runoq/internal/shell"
+	"github.com/saruman/runoq/internal/orchestrator"
 	"github.com/saruman/runoq/internal/report"
+	"github.com/saruman/runoq/internal/shell"
 )
 
 const usageText = `Usage:
@@ -182,7 +183,7 @@ func (a *App) Run(ctx context.Context) int {
 		if code != 0 {
 			return code
 		}
-		return a.runScript(ctx, targetEnv, runoqRoot, "tick.sh", args)
+		return a.runTick(ctx, targetEnv, runoqRoot)
 	case "loop":
 		targetEnv, code := a.prepareTargetContext(ctx, runoqRoot, env)
 		if code != 0 {
@@ -442,6 +443,46 @@ func (a *App) runMaintenance(ctx context.Context, env []string, runoqRoot string
 	return 0
 }
 
+func (a *App) runTick(ctx context.Context, env []string, runoqRoot string) int {
+	repo, _ := shell.EnvLookup(env, "REPO")
+	targetRoot, _ := shell.EnvLookup(env, "TARGET_ROOT")
+
+	// Read plan file from project config
+	planFile, err := readProjectPlanFile(targetRoot)
+	if err != nil {
+		return shell.Fail(a.stderr, err.Error())
+	}
+
+	// Read plan-approved label from runoq config
+	configPath, _ := shell.EnvLookup(env, "RUNOQ_CONFIG")
+	planApprovedLabel := readConfigLabel(configPath, "planApproved")
+
+	return orchestrator.RunTick(ctx, orchestrator.TickConfig{
+		Repo:              repo,
+		PlanFile:          planFile,
+		RunoqRoot:         runoqRoot,
+		PlanApprovedLabel: planApprovedLabel,
+		Env:               env,
+		ExecCommand:       a.execCommand,
+		Stdout:            a.stdout,
+		Stderr:            a.stderr,
+	})
+}
+
+func readConfigLabel(configPath string, key string) string {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return ""
+	}
+	var cfg struct {
+		Labels map[string]string `json:"labels"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return ""
+	}
+	return cfg.Labels[key]
+}
+
 func (a *App) runLoop(ctx context.Context, env []string, runoqRoot string, args []string) int {
 	backoff := 30
 	for i := 0; i < len(args); i++ {
@@ -459,7 +500,7 @@ func (a *App) runLoop(ctx context.Context, env []string, runoqRoot string, args 
 	defer cancel()
 
 	for {
-		code := a.runScript(loopCtx, env, runoqRoot, "tick.sh", nil)
+		code := a.runTick(loopCtx, env, runoqRoot)
 
 		select {
 		case <-loopCtx.Done():
