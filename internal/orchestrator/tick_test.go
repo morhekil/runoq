@@ -232,6 +232,44 @@ func TestFindInProgressTaskReturnsNilWhenNone(t *testing.T) {
 	}
 }
 
+func TestTickOutputIncludesTimestamps(t *testing.T) {
+	t.Parallel()
+
+	var stderr bytes.Buffer
+	runner := &tickRunner{
+		cfg: TickConfig{Stderr: &stderr},
+	}
+	runner.step("Test step")
+	output := stderr.String()
+	// Should contain a timestamp like [15:04:05]
+	if !strings.Contains(output, "[") || !strings.Contains(output, "]") {
+		t.Fatalf("expected timestamp in step output, got %q", output)
+	}
+	if !strings.Contains(output, "Test step") {
+		t.Fatalf("expected step message, got %q", output)
+	}
+}
+
+func TestTickSuccessIncludesElapsed(t *testing.T) {
+	t.Parallel()
+
+	var stderr bytes.Buffer
+	runner := &tickRunner{
+		cfg: TickConfig{Stderr: &stderr},
+	}
+	runner.step("First")
+	stderr.Reset()
+	runner.success("Done")
+	output := stderr.String()
+	if !strings.Contains(output, "Done") {
+		t.Fatalf("expected success message, got %q", output)
+	}
+	// Should contain elapsed time
+	if !strings.Contains(output, "s)") {
+		t.Fatalf("expected elapsed time in success output, got %q", output)
+	}
+}
+
 func TestResolveDependsOnMapsKeysToNumbers(t *testing.T) {
 	t.Parallel()
 

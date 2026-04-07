@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/saruman/runoq/agents"
 	"github.com/saruman/runoq/comments"
@@ -56,8 +57,9 @@ func RunTick(ctx context.Context, cfg TickConfig) int {
 }
 
 type tickRunner struct {
-	cfg    TickConfig
-	issues []issue
+	cfg        TickConfig
+	issues     []issue
+	lastStepAt time.Time
 }
 
 func (t *tickRunner) run(ctx context.Context) int {
@@ -884,13 +886,33 @@ func extractIssueNumber(ghOutput string) string {
 
 // --- Output helpers ---
 
-func (t *tickRunner) step(msg string)        { fmt.Fprintf(t.cfg.Stderr, "\033[1;36m▸ %s\033[0m\n", msg) }
+func (t *tickRunner) elapsed() string {
+	if t.lastStepAt.IsZero() {
+		return ""
+	}
+	return fmt.Sprintf(" (%.1fs)", time.Since(t.lastStepAt).Seconds())
+}
+
+func (t *tickRunner) step(msg string) {
+	ts := time.Now().Format("15:04:05")
+	fmt.Fprintf(t.cfg.Stderr, "\033[1;36m▸ [%s] %s\033[0m\n", ts, msg)
+	t.lastStepAt = time.Now()
+}
+
 func (t *tickRunner) info(msg string)        { fmt.Fprintf(t.cfg.Stderr, "\033[2m  %s\033[0m\n", msg) }
 func (t *tickRunner) detail(key, val string) { fmt.Fprintf(t.cfg.Stderr, "\033[2m  %s:\033[0m %s\n", key, val) }
-func (t *tickRunner) success(msg string)     { fmt.Fprintf(t.cfg.Stderr, "\033[1;32m✔ %s\033[0m\n", msg) }
-func (t *tickRunner) warn(msg string)        { fmt.Fprintf(t.cfg.Stderr, "\033[1;33m⚠ %s\033[0m\n", msg) }
+
+func (t *tickRunner) success(msg string) {
+	ts := time.Now().Format("15:04:05")
+	fmt.Fprintf(t.cfg.Stderr, "\033[1;32m✔ [%s] %s%s\033[0m\n", ts, msg, t.elapsed())
+}
+
+func (t *tickRunner) warn(msg string) {
+	fmt.Fprintf(t.cfg.Stderr, "\033[1;33m⚠ %s\033[0m\n", msg)
+}
 
 func (t *tickRunner) fail(format string, args ...any) int {
-	fmt.Fprintf(t.cfg.Stderr, "\033[1;31mrunoq: %s\033[0m\n", fmt.Sprintf(format, args...))
+	ts := time.Now().Format("15:04:05")
+	fmt.Fprintf(t.cfg.Stderr, "\033[1;31m✘ [%s] runoq: %s%s\033[0m\n", ts, fmt.Sprintf(format, args...), t.elapsed())
 	return 1
 }
