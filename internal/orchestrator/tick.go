@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/saruman/runoq/comments"
+	"github.com/saruman/runoq/internal/dispatchsafety"
 	"github.com/saruman/runoq/internal/issuequeue"
 	"github.com/saruman/runoq/internal/shell"
 	"github.com/saruman/runoq/planning"
@@ -401,13 +402,21 @@ func (t *tickRunner) handlePlanningDispatch(ctx context.Context, planningChild *
 }
 
 func (t *tickRunner) handleImplementation(ctx context.Context) int {
-	dispatchSafetyScript := filepath.Join(t.cfg.RunoqRoot, "scripts", "dispatch-safety.sh")
-	runScript := filepath.Join(t.cfg.RunoqRoot, "scripts", "run.sh")
-
 	t.info("reconciling dispatch safety")
-	t.runScript(ctx, dispatchSafetyScript, "reconcile", t.cfg.Repo)
+	dsApp := dispatchsafety.New(
+		[]string{"reconcile", t.cfg.Repo},
+		t.cfg.Env, "", io.Discard, io.Discard,
+	)
+	dsApp.SetCommandExecutor(t.cfg.ExecCommand)
+	dsApp.Run(ctx) // best-effort, ignore errors
+
 	t.info("running next issue")
-	t.runScript(ctx, runScript)
+	runApp := New(
+		[]string{"run"},
+		t.cfg.Env, "", t.cfg.Stdout, t.cfg.Stderr,
+	)
+	runApp.SetCommandExecutor(t.cfg.ExecCommand)
+	runApp.Run(ctx) // may fail, that's OK
 
 	t.success("Executed issue")
 	fmt.Fprintln(t.cfg.Stdout, "Executed issue")
