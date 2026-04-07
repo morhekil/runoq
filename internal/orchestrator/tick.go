@@ -27,6 +27,7 @@ type TickConfig struct {
 	RunoqRoot         string
 	PlanApprovedLabel string
 	ReadyLabel        string
+	InProgressLabel   string
 	Env               []string
 	ExecCommand       shell.CommandExecutor
 	Stdout            io.Writer
@@ -454,6 +455,12 @@ func (t *tickRunner) handlePlanningDispatch(ctx context.Context, planningChild *
 }
 
 func (t *tickRunner) handleImplementation(ctx context.Context, epicNumber int) int {
+	// Prefer resuming an in-progress task over selecting a new one
+	if inProgress := t.findInProgressTask(epicNumber); inProgress != nil {
+		t.detail("resuming", fmt.Sprintf("#%d %s", inProgress.Number, inProgress.Title))
+		return t.dispatchTask(ctx, inProgress)
+	}
+
 	task := t.selectNextTask(epicNumber)
 	if task == nil {
 		t.warn("all tasks blocked")
@@ -462,7 +469,10 @@ func (t *tickRunner) handleImplementation(ctx context.Context, epicNumber int) i
 	}
 
 	t.detail("selected", fmt.Sprintf("#%d %s", task.Number, task.Title))
+	return t.dispatchTask(ctx, task)
+}
 
+func (t *tickRunner) dispatchTask(ctx context.Context, task *issue) int {
 	metadata := IssueMetadata{
 		Number:              task.Number,
 		Title:               task.Title,
@@ -614,6 +624,31 @@ func (t *tickRunner) planningNeedsDispatch(ctx context.Context, iss *issue) bool
 	var v struct{ Body string `json:"body"` }
 	json.Unmarshal([]byte(view), &v)
 	return !strings.Contains(v.Body, "runoq:payload:plan-proposal")
+}
+
+// findInProgressTask finds an open task child of the given epic that has the in-progress label.
+// Returns nil if no in-progress task is found.
+func (t *tickRunner) findInProgressTask(epicNumber int) *issue {
+	if t.cfg.InProgressLabel == "" {
+		return nil
+	}
+	epicStr := fmt.Sprintf("%d", epicNumber)
+	for i := range t.issues {
+		iss := &t.issues[i]
+		if iss.State != "OPEN" {
+			continue
+		}
+		if planning.MetadataValue(iss.Body, "parent_epic") != epicStr {
+			continue
+		}
+		if planning.MetadataValue(iss.Body, "type") != "task" {
+			continue
+		}
+		if t.issueHasLabel(iss, t.cfg.InProgressLabel) {
+			return iss
+		}
+	}
+	return nil
 }
 
 // selectNextTask finds the highest-priority unblocked task child of the given epic.

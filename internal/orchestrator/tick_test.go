@@ -192,6 +192,46 @@ func TestSelectNextTaskSkipsClosedAndNonTaskTypes(t *testing.T) {
 	}
 }
 
+func TestFindInProgressTaskReturnsInProgressIssue(t *testing.T) {
+	t.Parallel()
+
+	runner := &tickRunner{
+		cfg: TickConfig{InProgressLabel: "runoq:in-progress"},
+		issues: []issue{
+			{Number: 9, Title: "Epic", State: "OPEN", Body: "<!-- runoq:meta\ntype: epic\npriority: 1\n-->"},
+			// Ready task
+			{Number: 10, Title: "Ready task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 1\n-->", Labels: []label{{Name: "runoq:ready"}}},
+			// In-progress task
+			{Number: 11, Title: "In-progress task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 2\n-->", Labels: []label{{Name: "runoq:in-progress"}}},
+		},
+	}
+
+	task := runner.findInProgressTask(9)
+	if task == nil {
+		t.Fatal("findInProgressTask returned nil, expected #11")
+	}
+	if task.Number != 11 {
+		t.Errorf("findInProgressTask selected #%d, expected #11", task.Number)
+	}
+}
+
+func TestFindInProgressTaskReturnsNilWhenNone(t *testing.T) {
+	t.Parallel()
+
+	runner := &tickRunner{
+		cfg: TickConfig{InProgressLabel: "runoq:in-progress"},
+		issues: []issue{
+			{Number: 9, Title: "Epic", State: "OPEN", Body: "<!-- runoq:meta\ntype: epic\npriority: 1\n-->"},
+			{Number: 10, Title: "Ready task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 1\n-->", Labels: []label{{Name: "runoq:ready"}}},
+		},
+	}
+
+	task := runner.findInProgressTask(9)
+	if task != nil {
+		t.Fatalf("findInProgressTask returned #%d, expected nil", task.Number)
+	}
+}
+
 func TestTickSelectsTaskAndCallsRunIssue(t *testing.T) {
 	t.Parallel()
 

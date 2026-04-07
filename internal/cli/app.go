@@ -458,6 +458,7 @@ func (a *App) runTick(ctx context.Context, env []string, runoqRoot string) int {
 	configPath, _ := shell.EnvLookup(env, "RUNOQ_CONFIG")
 	planApprovedLabel := readConfigLabel(configPath, "planApproved")
 	readyLabel := readConfigLabel(configPath, "ready")
+	inProgressLabel := readConfigLabel(configPath, "inProgress")
 
 	return orchestrator.RunTick(ctx, orchestrator.TickConfig{
 		Repo:              repo,
@@ -465,6 +466,7 @@ func (a *App) runTick(ctx context.Context, env []string, runoqRoot string) int {
 		RunoqRoot:         runoqRoot,
 		PlanApprovedLabel: planApprovedLabel,
 		ReadyLabel:        readyLabel,
+		InProgressLabel:   inProgressLabel,
 		Env:               env,
 		ExecCommand:       a.execCommand,
 		Stdout:            a.stdout,
