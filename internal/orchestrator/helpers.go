@@ -368,6 +368,7 @@ func finalizeDecision(state struct {
 	Score    string   `json:"score"`
 	Round    int      `json:"round"`
 	Caveats  []string `json:"caveats"`
+	Summary  string   `json:"summary"`
 }, cfg queueConfig, complexity string) (finalizeVerdict string, issueStatus string, finalizeReason string, complexityOK bool) {
 	if state.Verdict != "PASS" {
 		return "needs-review", "needs-review", fmt.Sprintf("Review verdict was %s (not PASS).", defaultString(state.Verdict, "FAIL")), false
@@ -477,4 +478,94 @@ func envOrDefault(env []string, key string, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+const (
+	markerSummaryStart = "<!-- runoq:summary:start -->"
+	markerSummaryEnd   = "<!-- runoq:summary:end -->"
+	markerStatePrefix  = "<!-- runoq:state:"
+	markerStateSuffix  = " -->"
+)
+
+// parseStateFromComments scans PR comments JSON (array of objects with "body" field)
+// and returns the state JSON from the latest <!-- runoq:state:{...} --> block.
+// Returns empty string if no state block is found.
+func parseStateFromComments(commentsJSON string) (string, error) {
+	var comments []struct {
+		Body string `json:"body"`
+	}
+	if err := json.Unmarshal([]byte(commentsJSON), &comments); err != nil {
+		return "", err
+	}
+
+	var latest string
+	for _, c := range comments {
+		for line := range strings.SplitSeq(c.Body, "\n") {
+			if strings.HasPrefix(line, markerStatePrefix) && strings.HasSuffix(line, markerStateSuffix) {
+				latest = line[len(markerStatePrefix) : len(line)-len(markerStateSuffix)]
+			}
+		}
+	}
+	return latest, nil
+}
+
+func replaceMarkerContent(body, startMarker, endMarker, content string) string {
+	startIdx := strings.Index(body, startMarker)
+	endIdx := strings.Index(body, endMarker)
+	if startIdx < 0 || endIdx < 0 || endIdx <= startIdx {
+		return body
+	}
+	return body[:startIdx+len(startMarker)] + "\n" + content + "\n" + body[endIdx:]
+}
+
+func (a *App) updatePRBody(ctx context.Context, env []string, repo string, prNumber int, summary string, verdict string, score string, round int, maxRounds int, caveats []string) error {
+	bodyJSON, err := a.ghOutput(ctx, env, "pr", "view", strconv.Itoa(prNumber), "--repo", repo, "--json", "body")
+	if err != nil {
+		return err
+	}
+	var prBody struct {
+		Body string `json:"body"`
+	}
+	if err := json.Unmarshal([]byte(bodyJSON), &prBody); err != nil {
+		return err
+	}
+
+	updatedBody := prBody.Body
+
+	if strings.TrimSpace(summary) != "" {
+		updatedBody = replaceMarkerContent(updatedBody, markerSummaryStart, markerSummaryEnd, summary)
+	}
+
+	updatedBody += fmt.Sprintf(
+		"\n## Final Status\n| Field | Value |\n|-------|-------|\n| **Verdict** | %s |\n| **Score** | %s |\n| **Rounds** | %d / %d |\n",
+		defaultString(verdict, "FAIL"),
+		defaultString(score, "0"),
+		max(round, 1),
+		maxRounds,
+	)
+
+	if len(caveats) > 0 {
+		updatedBody += "\n## Areas for Human Attention\n"
+		for _, caveat := range caveats {
+			updatedBody += "- " + caveat + "\n"
+		}
+	}
+
+	tmpFile, err := os.CreateTemp("", "runoq-pr-body.*")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = os.Remove(tmpFile.Name())
+	}()
+	if _, err := io.WriteString(tmpFile, updatedBody); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Close(); err != nil {
+		return err
+	}
+
+	_, err = a.ghOutput(ctx, env, "pr", "edit", strconv.Itoa(prNumber), "--repo", repo, "--body-file", tmpFile.Name())
+	return err
 }

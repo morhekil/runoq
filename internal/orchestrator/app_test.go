@@ -25,6 +25,68 @@ func (e fakeExitError) ExitCode() int {
 	return e.code
 }
 
+func TestParseStateFromCommentsExtractsLatest(t *testing.T) {
+	comments := `[
+		{"body": "<!-- runoq:event:init -->\n<!-- runoq:state:{\"phase\":\"INIT\",\"pr_number\":87} -->\n> Posted by orchestrator"},
+		{"body": "<!-- runoq:event:develop -->\n<!-- runoq:state:{\"phase\":\"DEVELOP\",\"round\":1,\"pr_number\":87} -->\n> Posted by orchestrator"}
+	]`
+	stateJSON, err := parseStateFromComments(comments)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stateJSON, `"phase":"DEVELOP"`) {
+		t.Fatalf("expected latest state (DEVELOP), got %q", stateJSON)
+	}
+	if !strings.Contains(stateJSON, `"round":1`) {
+		t.Fatalf("expected round in state, got %q", stateJSON)
+	}
+}
+
+func TestParseStateFromCommentsNoStateBlock(t *testing.T) {
+	comments := `[
+		{"body": "<!-- runoq:event:init -->\n> Posted by orchestrator — init phase\n\nOrchestrator initialized."}
+	]`
+	stateJSON, err := parseStateFromComments(comments)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stateJSON != "" {
+		t.Fatalf("expected empty state for old-format comments, got %q", stateJSON)
+	}
+}
+
+func TestParseStateFromCommentsEmpty(t *testing.T) {
+	stateJSON, err := parseStateFromComments("[]")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stateJSON != "" {
+		t.Fatalf("expected empty state for no comments, got %q", stateJSON)
+	}
+}
+
+func TestReplaceMarkerContent(t *testing.T) {
+	body := "## Summary\n<!-- runoq:summary:start -->\nPending.\n<!-- runoq:summary:end -->\n\n## Linked Issue\nCloses #42\n"
+	updated := replaceMarkerContent(body, "<!-- runoq:summary:start -->", "<!-- runoq:summary:end -->", "Implemented queue processing.")
+	if !strings.Contains(updated, "Implemented queue processing.") {
+		t.Fatalf("expected updated summary, got %q", updated)
+	}
+	if strings.Contains(updated, "Pending.") {
+		t.Fatalf("expected old summary removed, got %q", updated)
+	}
+	if !strings.Contains(updated, "Closes #42") {
+		t.Fatalf("expected linked issue preserved, got %q", updated)
+	}
+}
+
+func TestReplaceMarkerContentNoMarkers(t *testing.T) {
+	body := "No markers here."
+	updated := replaceMarkerContent(body, "<!-- start -->", "<!-- end -->", "replacement")
+	if updated != body {
+		t.Fatalf("expected unchanged body, got %q", updated)
+	}
+}
+
 func TestMetadataFromIssueViewFallsBackToBodyBlock(t *testing.T) {
 	meta := metadataFromIssueView(issueView{
 		Number: 42,
@@ -304,6 +366,7 @@ func TestRunLowComplexityReviewReadyAutoMergesAndCleansUp(t *testing.T) {
 	var stderr bytes.Buffer
 	var savedStates []string
 	var calls []string
+	var updatedPRBody string
 
 	app := New([]string{"run", "owner/repo", "--issue", "42"}, []string{
 		"RUNOQ_ROOT=" + root,
@@ -373,6 +436,17 @@ func TestRunLowComplexityReviewReadyAutoMergesAndCleansUp(t *testing.T) {
 			return nil
 		case strings.HasSuffix(req.Name, "/worktree.sh") && strings.Join(req.Args, " ") == "remove 42":
 			return nil
+		case req.Name == "gh" && strings.Join(req.Args, " ") == "pr view 87 --repo owner/repo --json body":
+			_, _ = io.WriteString(req.Stdout, `{"body":"## Summary\n<!-- runoq:summary:start -->\nPending.\n<!-- runoq:summary:end -->\n\n## Linked Issue\nCloses #42\n"}`)
+			return nil
+		case req.Name == "gh" && len(req.Args) >= 5 && strings.Join(req.Args[:5], " ") == "pr edit 87 --repo owner/repo" && strings.HasPrefix(strings.Join(req.Args[5:], " "), "--body-file"):
+			bodyFile := req.Args[6]
+			body, err := os.ReadFile(bodyFile)
+			if err != nil {
+				t.Fatalf("read PR body file: %v", err)
+			}
+			updatedPRBody = string(body)
+			return nil
 		default:
 			t.Fatalf("unexpected command: %s", commandLine(req))
 			return nil
@@ -417,6 +491,21 @@ func TestRunLowComplexityReviewReadyAutoMergesAndCleansUp(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "FINALIZE: removing worktree for issue #42 (auto-merged)") {
 		t.Fatalf("expected finalize cleanup log, got %q", stderr.String())
+	}
+	if !strings.Contains(updatedPRBody, "Verification passed on round 1; ready for review") {
+		t.Fatalf("expected summary in updated PR body, got %q", updatedPRBody)
+	}
+	if strings.Contains(updatedPRBody, "Pending.") {
+		t.Fatalf("expected Pending placeholder replaced in PR body, got %q", updatedPRBody)
+	}
+	if !strings.Contains(updatedPRBody, "## Final Status") {
+		t.Fatalf("expected Final Status section in PR body, got %q", updatedPRBody)
+	}
+	if !strings.Contains(updatedPRBody, "PASS") {
+		t.Fatalf("expected verdict in PR body, got %q", updatedPRBody)
+	}
+	if !strings.Contains(updatedPRBody, "Closes #42") {
+		t.Fatalf("expected linked issue preserved in PR body, got %q", updatedPRBody)
 	}
 }
 
@@ -514,6 +603,11 @@ func TestRunLowComplexityIterateReentersDevelopWithChecklist(t *testing.T) {
 		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "set-status owner/repo 42 done":
 			return nil
 		case strings.HasSuffix(req.Name, "/worktree.sh") && strings.Join(req.Args, " ") == "remove 42":
+			return nil
+		case req.Name == "gh" && strings.Join(req.Args, " ") == "pr view 87 --repo owner/repo --json body":
+			_, _ = io.WriteString(req.Stdout, `{"body":"## Summary\n<!-- runoq:summary:start -->\nPending.\n<!-- runoq:summary:end -->\n\n## Linked Issue\nCloses #42\n"}`)
+			return nil
+		case req.Name == "gh" && len(req.Args) >= 5 && strings.Join(req.Args[:5], " ") == "pr edit 87 --repo owner/repo" && strings.HasPrefix(strings.Join(req.Args[5:], " "), "--body-file"):
 			return nil
 		default:
 			t.Fatalf("unexpected command: %s", commandLine(req))
