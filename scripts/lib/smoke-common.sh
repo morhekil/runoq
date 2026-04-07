@@ -1404,7 +1404,7 @@ run_lifecycle() {
   set +e
   (
     cd "$target_dir"
-    "$root/bin/runoq" init
+    "$root/bin/runoq" init --plan docs/plan.md
   ) >"$init_log" 2>&1
   run_exit="$?"
   set -e
