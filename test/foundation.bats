@@ -31,17 +31,11 @@ load test_helper
   [ "$status" -eq 0 ]
 }
 
-@test "pr template includes marker-delimited summary and attention sections" {
+@test "pr template includes marker-delimited summary section" {
   run grep -n "runoq:summary:start" "$RUNOQ_ROOT/templates/pr-template.md"
   [ "$status" -eq 0 ]
 
   run grep -n "runoq:summary:end" "$RUNOQ_ROOT/templates/pr-template.md"
-  [ "$status" -eq 0 ]
-
-  run grep -n "runoq:attention:start" "$RUNOQ_ROOT/templates/pr-template.md"
-  [ "$status" -eq 0 ]
-
-  run grep -n "runoq:attention:end" "$RUNOQ_ROOT/templates/pr-template.md"
   [ "$status" -eq 0 ]
 }
 

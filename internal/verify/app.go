@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/saruman/runoq/internal/gitops"
 	"github.com/saruman/runoq/internal/shell"
 )
 
@@ -27,6 +28,7 @@ type App struct {
 	stdout      io.Writer
 	stderr      io.Writer
 	execCommand shell.CommandExecutor
+	openRepo    func(ctx context.Context, root string) gitops.Repo
 }
 
 type groundTruth struct {
@@ -49,7 +51,7 @@ type integrateResult struct {
 }
 
 func New(args []string, env []string, cwd string, stdout io.Writer, stderr io.Writer) *App {
-	return &App{
+	a := &App{
 		args:        append([]string(nil), args...),
 		env:         append([]string(nil), env...),
 		cwd:         cwd,
@@ -57,6 +59,10 @@ func New(args []string, env []string, cwd string, stdout io.Writer, stderr io.Wr
 		stderr:      stderr,
 		execCommand: shell.RunCommand,
 	}
+	a.openRepo = func(ctx context.Context, root string) gitops.Repo {
+		return gitops.OpenCLI(ctx, root, a.execCommand)
+	}
+	return a
 }
 
 func (a *App) SetCommandExecutor(execFn shell.CommandExecutor) {
@@ -121,24 +127,15 @@ func (a *App) runRound(ctx context.Context, worktree string, branch string, base
 		failures = append(failures, "file lists do not match ground truth")
 	}
 
-	localSHA, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
-		Name: "git",
-		Args: []string{"-C", worktree, "rev-parse", "HEAD"},
-		Dir:  a.cwd,
-		Env:  a.env,
-	})
+	repo := a.openRepo(ctx, worktree)
+
+	localSHA, err := repo.ResolveHEAD()
 	if err != nil {
 		return shell.Failf(a.stderr, "Failed to resolve local HEAD: %v", err)
 	}
 
-	remoteSHA, _ := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
-		Name: "git",
-		Args: []string{"-C", worktree, "ls-remote", "origin", branch},
-		Dir:  a.cwd,
-		Env:  a.env,
-	})
-	remoteSHA = parseRemoteSHA(remoteSHA)
-	if remoteSHA == "" || remoteSHA != localSHA {
+	remoteSHA, remoteExists, _ := repo.RemoteRefExists("origin", branch)
+	if !remoteExists || remoteSHA != localSHA {
 		failures = append(failures, "branch tip is not pushed to origin")
 	}
 
@@ -234,46 +231,40 @@ func (a *App) readPayload(payloadFile string) (map[string]any, error) {
 }
 
 func (a *App) groundTruth(ctx context.Context, worktree string, baseSHA string) (groundTruth, error) {
-	commitsOut, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
-		Name: "git",
-		Args: []string{"-C", worktree, "rev-list", "--reverse", baseSHA + "..HEAD"},
-		Dir:  a.cwd,
-		Env:  a.env,
-	})
+	repo := a.openRepo(ctx, worktree)
+
+	commits, err := repo.CommitLog(baseSHA, "HEAD")
 	if err != nil {
 		return groundTruth{}, err
 	}
-	diffOut, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
-		Name: "git",
-		Args: []string{"-C", worktree, "diff", "--name-status", baseSHA + "..HEAD"},
-		Dir:  a.cwd,
-		Env:  a.env,
-	})
+	changes, err := repo.DiffNameStatus(baseSHA, "HEAD")
 	if err != nil {
 		return groundTruth{}, err
 	}
 
+	shas := make([]string, 0, len(commits))
+	for _, c := range commits {
+		shas = append(shas, c.SHA)
+	}
+
 	gt := groundTruth{
-		CommitsPushed: splitNonEmptyLines(commitsOut),
+		CommitsPushed: shas,
 		FilesChanged:  []string{},
 		FilesAdded:    []string{},
 		FilesDeleted:  []string{},
 	}
+	if len(gt.CommitsPushed) == 0 {
+		gt.CommitsPushed = []string{}
+	}
 
-	for _, line := range splitNonEmptyLines(diffOut) {
-		parts := strings.Split(line, "\t")
-		if len(parts) < 2 {
-			continue
-		}
-		status := parts[0]
-		path := parts[len(parts)-1]
-		switch status {
+	for _, fc := range changes {
+		switch fc.Status {
 		case "A":
-			gt.FilesAdded = append(gt.FilesAdded, path)
+			gt.FilesAdded = append(gt.FilesAdded, fc.Path)
 		case "D":
-			gt.FilesDeleted = append(gt.FilesDeleted, path)
+			gt.FilesDeleted = append(gt.FilesDeleted, fc.Path)
 		default:
-			gt.FilesChanged = append(gt.FilesChanged, path)
+			gt.FilesChanged = append(gt.FilesChanged, fc.Path)
 		}
 	}
 
@@ -331,40 +322,27 @@ func (a *App) runCheckCommand(ctx context.Context, worktree string, command stri
 }
 
 func (a *App) commitExists(ctx context.Context, worktree string, sha string) bool {
-	err := a.execCommand(ctx, shell.CommandRequest{
-		Name:   "git",
-		Args:   []string{"-C", worktree, "rev-parse", "--verify", sha + "^{commit}"},
-		Dir:    a.cwd,
-		Env:    a.env,
-		Stdout: io.Discard,
-		Stderr: io.Discard,
-	})
-	return err == nil
+	repo := a.openRepo(ctx, worktree)
+	exists, _ := repo.CommitExists(sha)
+	return exists
 }
 
 func (a *App) criteriaFiles(ctx context.Context, worktree string, criteriaCommit string) []string {
-	out, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
-		Name: "git",
-		Args: []string{"-C", worktree, "diff-tree", "--no-commit-id", "--name-only", "-r", criteriaCommit},
-		Dir:  a.cwd,
-		Env:  a.env,
-	})
+	repo := a.openRepo(ctx, worktree)
+	files, err := repo.DiffTreeFiles(criteriaCommit)
 	if err != nil {
 		return []string{}
 	}
-	return splitNonEmptyLines(out)
+	if files == nil {
+		return []string{}
+	}
+	return files
 }
 
 func (a *App) isCriteriaTampered(ctx context.Context, worktree string, criteriaCommit string, cfile string) bool {
-	err := a.execCommand(ctx, shell.CommandRequest{
-		Name:   "git",
-		Args:   []string{"-C", worktree, "diff", "--quiet", criteriaCommit, "HEAD", "--", cfile},
-		Dir:    a.cwd,
-		Env:    a.env,
-		Stdout: io.Discard,
-		Stderr: io.Discard,
-	})
-	return err != nil
+	repo := a.openRepo(ctx, worktree)
+	changed, _ := repo.FileChanged(criteriaCommit, "HEAD", cfile)
+	return changed
 }
 
 func payloadCommitsForExistenceCheck(payload map[string]any) []string {
@@ -430,32 +408,6 @@ func rawStringOr(value any, fallback string) string {
 func rawBoolIsTrue(value any) bool {
 	typed, ok := value.(bool)
 	return ok && typed
-}
-
-func splitNonEmptyLines(input string) []string {
-	trimmed := strings.TrimSpace(input)
-	if trimmed == "" {
-		return []string{}
-	}
-	lines := strings.Split(trimmed, "\n")
-	out := make([]string, 0, len(lines))
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			out = append(out, line)
-		}
-	}
-	return out
-}
-
-func parseRemoteSHA(input string) string {
-	for _, line := range splitNonEmptyLines(input) {
-		fields := strings.Fields(line)
-		if len(fields) >= 1 {
-			return fields[0]
-		}
-	}
-	return ""
 }
 
 func lastNLines(input string, n int) string {

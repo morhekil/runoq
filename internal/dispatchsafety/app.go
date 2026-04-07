@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/saruman/runoq/internal/gitops"
 	"github.com/saruman/runoq/internal/shell"
 )
 
@@ -548,60 +549,29 @@ func (a *App) branchHasConflicts(ctx context.Context, branch string) (bool, erro
 		return false, nil
 	}
 
-	targetRoot, err := a.targetRoot(ctx)
+	repo, err := a.targetRepo(ctx)
 	if err != nil {
 		return false, err
 	}
 
-	gitDirInfo, statErr := os.Stat(filepath.Join(targetRoot, ".git"))
+	gitDirInfo, statErr := os.Stat(filepath.Join(repo.Root(), ".git"))
 	if statErr != nil || !gitDirInfo.IsDir() {
 		return false, nil
 	}
 
-	remoteOut, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
-		Name: "git",
-		Args: []string{"-C", targetRoot, "ls-remote", "--heads", "origin", branch},
-		Dir:  a.cwd,
-		Env:  a.env,
-	})
-	if err != nil {
-		return false, nil
-	}
-	remoteSHA := firstField(remoteOut)
-	if remoteSHA == "" {
+	remoteSHA, exists, err := repo.RemoteRefExists("origin", branch)
+	if err != nil || !exists {
 		return false, nil
 	}
 
-	_ = a.execCommand(ctx, shell.CommandRequest{
-		Name:   "git",
-		Args:   []string{"-C", targetRoot, "fetch", "origin", "main", branch},
-		Dir:    a.cwd,
-		Env:    a.env,
-		Stdout: io.Discard,
-		Stderr: io.Discard,
-	})
+	_ = repo.Fetch("origin", "main", branch)
 
-	mergeBase, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
-		Name: "git",
-		Args: []string{"-C", targetRoot, "merge-base", "origin/main", remoteSHA},
-		Dir:  a.cwd,
-		Env:  a.env,
-	})
+	mergeBase, err := repo.MergeBase("origin/main", remoteSHA)
 	if err != nil || strings.TrimSpace(mergeBase) == "" {
 		return false, nil
 	}
 
-	mergeTree, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
-		Name: "git",
-		Args: []string{"-C", targetRoot, "merge-tree", strings.TrimSpace(mergeBase), "origin/main", remoteSHA},
-		Dir:  a.cwd,
-		Env:  a.env,
-	})
-	if err != nil {
-		return false, err
-	}
-
-	return strings.Contains(mergeTree, "<<<<<<<"), nil
+	return repo.MergeHasConflicts(strings.TrimSpace(mergeBase), "origin/main", remoteSHA)
 }
 
 func (a *App) branchIsPushed(ctx context.Context, branch string) (bool, error) {
@@ -609,26 +579,21 @@ func (a *App) branchIsPushed(ctx context.Context, branch string) (bool, error) {
 		return false, nil
 	}
 
-	targetRoot, err := a.targetRoot(ctx)
+	repo, err := a.targetRepo(ctx)
 	if err != nil {
 		return false, err
 	}
 
-	gitDirInfo, statErr := os.Stat(filepath.Join(targetRoot, ".git"))
+	gitDirInfo, statErr := os.Stat(filepath.Join(repo.Root(), ".git"))
 	if statErr != nil || !gitDirInfo.IsDir() {
 		return false, nil
 	}
 
-	output, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
-		Name: "git",
-		Args: []string{"-C", targetRoot, "ls-remote", "--heads", "origin", branch},
-		Dir:  a.cwd,
-		Env:  a.env,
-	})
+	_, exists, err := repo.RemoteRefExists("origin", branch)
 	if err != nil {
 		return false, nil
 	}
-	return strings.TrimSpace(output) != "", nil
+	return exists, nil
 }
 
 func (a *App) issueComment(ctx context.Context, repo string, issueNumber int, body string) error {
@@ -809,22 +774,24 @@ func (a *App) runoqRoot() (string, error) {
 	return "", errors.New("RUNOQ_ROOT is required")
 }
 
-func (a *App) targetRoot(ctx context.Context) (string, error) {
+func (a *App) targetRoot(_ context.Context) (string, error) {
 	if value, ok := shell.EnvLookup(a.env, "TARGET_ROOT"); ok && strings.TrimSpace(value) != "" {
 		return value, nil
 	}
 
-	output, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
-		Name:   "git",
-		Args:   []string{"rev-parse", "--show-toplevel"},
-		Dir:    a.cwd,
-		Env:    a.env,
-		Stderr: io.Discard,
-	})
-	if err != nil || strings.TrimSpace(output) == "" {
+	root, err := gitops.FindRoot(a.cwd)
+	if err != nil {
 		return "", contractError{message: "Run runoq from inside a git repository."}
 	}
-	return strings.TrimSpace(output), nil
+	return root, nil
+}
+
+func (a *App) targetRepo(ctx context.Context) (gitops.Repo, error) {
+	root, err := a.targetRoot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return gitops.OpenCLI(ctx, root, a.execCommand), nil
 }
 
 func (a *App) stateDir(ctx context.Context) (string, error) {
@@ -1039,16 +1006,6 @@ func rawStringOr(value any, fallback string) string {
 	default:
 		return fmt.Sprint(typed)
 	}
-}
-
-func firstField(input string) string {
-	for line := range strings.SplitSeq(strings.TrimSpace(input), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) > 0 {
-			return fields[0]
-		}
-	}
-	return ""
 }
 
 func stringPtr(value string) *string {

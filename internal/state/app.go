@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"github.com/saruman/runoq/internal/gitops"
 	"github.com/saruman/runoq/internal/shell"
 )
 
@@ -366,22 +367,16 @@ func (a *App) runValidatePayload(ctx context.Context, args []string) int {
 }
 
 func (a *App) groundTruth(ctx context.Context, worktree string, baseSHA string) (groundTruth, error) {
-	revList, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
-		Name: "git",
-		Args: []string{"-C", worktree, "rev-list", "--reverse", baseSHA + "..HEAD"},
-		Dir:  a.cwd,
-		Env:  a.env,
-	})
+	repo := gitops.OpenCLI(ctx, worktree, a.execCommand)
+
+	commitLog, err := repo.CommitLog(baseSHA, "HEAD")
 	if err != nil {
 		return groundTruth{}, err
 	}
 
-	commits := make([]string, 0)
-	for _, line := range strings.Split(revList, "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			commits = append(commits, line)
-		}
+	commits := make([]string, 0, len(commitLog))
+	for _, c := range commitLog {
+		commits = append(commits, c.SHA)
 	}
 
 	commitRange := ""
@@ -389,12 +384,7 @@ func (a *App) groundTruth(ctx context.Context, worktree string, baseSHA string) 
 		commitRange = commits[0] + ".." + commits[len(commits)-1]
 	}
 
-	diff, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
-		Name: "git",
-		Args: []string{"-C", worktree, "diff", "--name-status", baseSHA + "..HEAD"},
-		Dir:  a.cwd,
-		Env:  a.env,
-	})
+	diffChanges, err := repo.DiffNameStatus(baseSHA, "HEAD")
 	if err != nil {
 		return groundTruth{}, err
 	}
@@ -402,24 +392,14 @@ func (a *App) groundTruth(ctx context.Context, worktree string, baseSHA string) 
 	filesChanged := make([]string, 0)
 	filesAdded := make([]string, 0)
 	filesDeleted := make([]string, 0)
-	for _, line := range strings.Split(diff, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		parts := strings.Split(line, "\t")
-		if len(parts) < 2 {
-			continue
-		}
-		status := parts[0]
-		path := parts[len(parts)-1]
-		switch status {
+	for _, fc := range diffChanges {
+		switch fc.Status {
 		case "A":
-			filesAdded = append(filesAdded, path)
+			filesAdded = append(filesAdded, fc.Path)
 		case "D":
-			filesDeleted = append(filesDeleted, path)
+			filesDeleted = append(filesDeleted, fc.Path)
 		default:
-			filesChanged = append(filesChanged, path)
+			filesChanged = append(filesChanged, fc.Path)
 		}
 	}
 
@@ -473,16 +453,11 @@ func (a *App) stateDir(ctx context.Context, stateDirArg string) (string, int) {
 	return filepath.Join(targetRoot, ".runoq", "state"), 0
 }
 
-func (a *App) targetRoot(ctx context.Context) (string, int) {
+func (a *App) targetRoot(_ context.Context) (string, int) {
 	if value, ok := shell.EnvLookup(a.env, "TARGET_ROOT"); ok && strings.TrimSpace(value) != "" {
 		return value, 0
 	}
-	root, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
-		Name: "git",
-		Args: []string{"rev-parse", "--show-toplevel"},
-		Dir:  a.cwd,
-		Env:  a.env,
-	})
+	root, err := gitops.FindRoot(a.cwd)
 	if err != nil {
 		return "", shell.Fail(a.stderr, "Run runoq from inside a git repository.")
 	}

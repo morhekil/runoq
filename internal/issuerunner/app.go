@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/saruman/runoq/internal/gitops"
 	"github.com/saruman/runoq/internal/shell"
 )
 
@@ -102,12 +103,8 @@ func (a *App) runIssue(ctx context.Context, payloadPath string) int {
 	}
 
 	// Get baseline hash
-	baseline, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
-		Name: "git",
-		Args: []string{"-C", input.Worktree, "log", "-1", "--format=%H"},
-		Dir:  a.cwd,
-		Env:  a.env,
-	})
+	repo := gitops.OpenCLI(ctx, input.Worktree, a.execCommand)
+	baseline, err := repo.ResolveHEAD()
 	if err != nil {
 		return shell.Failf(a.stderr, "failed to get baseline: %v", err)
 	}
@@ -122,13 +119,13 @@ func (a *App) runIssue(ctx context.Context, payloadPath string) int {
 	}
 
 	// Run the development loop
-	result := a.developmentLoop(ctx, &input, state, specRequirements)
+	result := a.developmentLoop(ctx, &input, state, specRequirements, repo)
 
 	// Emit output
 	return shell.WriteJSON(a.stdout, a.stderr, result)
 }
 
-func (a *App) developmentLoop(ctx context.Context, input *inputPayload, state *roundState, specRequirements string) *outputPayload {
+func (a *App) developmentLoop(ctx context.Context, input *inputPayload, state *roundState, specRequirements string, repo gitops.Repo) *outputPayload {
 	startRound := state.round
 
 	for round := startRound; round <= input.MaxRounds; round++ {
@@ -143,10 +140,7 @@ func (a *App) developmentLoop(ctx context.Context, input *inputPayload, state *r
 		}
 
 		// Record per-round baseline for commit tracking.
-		roundBaseline, _ := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
-			Name: "git", Args: []string{"-C", input.Worktree, "log", "-1", "--format=%H"},
-			Dir: a.cwd, Env: a.env,
-		})
+		roundBaseline, _ := repo.ResolveHEAD()
 
 		// Build prompt and invoke codex.
 		prompt := a.buildCodexPrompt(input, state, specRequirements)
@@ -182,7 +176,7 @@ func (a *App) developmentLoop(ctx context.Context, input *inputPayload, state *r
 		}
 
 		// Extract commits.
-		a.extractCommits(ctx, input, state)
+		a.extractCommits(ctx, input, state, repo)
 
 		// Track tokens.
 		state.cumulativeTokens += roundTokens
@@ -474,31 +468,20 @@ func (a *App) validatePayload(ctx context.Context, worktree, baseline, lastMsgFi
 }
 
 // extractCommits updates state with commit info from baseline..HEAD.
-func (a *App) extractCommits(ctx context.Context, input *inputPayload, state *roundState) {
-	out, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
-		Name: "git",
-		Args: []string{"-C", input.Worktree, "log", "--reverse", "--format=%H %s", state.baseline + "..HEAD"},
-		Dir:  a.cwd,
-		Env:  a.env,
-	})
+func (a *App) extractCommits(ctx context.Context, input *inputPayload, state *roundState, repo gitops.Repo) {
+	commits, err := repo.CommitLog(state.baseline, "HEAD")
 	if err != nil {
 		return
 	}
 
 	var subjects []string
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			subjects = append(subjects, line)
-		}
+	for _, c := range commits {
+		subjects = append(subjects, c.SHA+" "+c.Subject)
 	}
 	state.commitSubjects = subjects
 
 	// Update head hash.
-	if head, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
-		Name: "git", Args: []string{"-C", input.Worktree, "log", "-1", "--format=%H"},
-		Dir: a.cwd, Env: a.env,
-	}); err == nil {
+	if head, err := repo.ResolveHEAD(); err == nil {
 		state.headHash = head
 	}
 }

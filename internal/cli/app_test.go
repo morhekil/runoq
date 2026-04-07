@@ -76,13 +76,6 @@ func TestRunRunSubcommandRoutesToRunScript(t *testing.T) {
 		matchers: []callMatcher{
 			{
 				name: "git",
-				args: []string{"rev-parse", "--show-toplevel"},
-				result: callResult{
-					stdout: "/tmp/project\n",
-				},
-			},
-			{
-				name: "git",
 				args: []string{"-C", "/tmp/project", "remote", "get-url", "origin"},
 				result: callResult{
 					stdout: "git@github.com:owner/repo.git\n",
@@ -106,7 +99,7 @@ func TestRunRunSubcommandRoutesToRunScript(t *testing.T) {
 	var stderr strings.Builder
 	app := New(
 		[]string{"run", "--issue", "42", "--dry-run"},
-		[]string{"RUNOQ_ROOT=/runoq", "PATH=/usr/bin"},
+		[]string{"RUNOQ_ROOT=/runoq", "TARGET_ROOT=/tmp/project", "PATH=/usr/bin"},
 		"/tmp/project",
 		&stdout,
 		&stderr,
@@ -119,11 +112,11 @@ func TestRunRunSubcommandRoutesToRunScript(t *testing.T) {
 		t.Fatalf("expected exit code 0, got %d (stderr=%q)", code, stderr.String())
 	}
 
-	if len(executor.calls) != 4 {
-		t.Fatalf("expected 4 command calls, got %d", len(executor.calls))
+	if len(executor.calls) != 3 {
+		t.Fatalf("expected 3 command calls, got %d", len(executor.calls))
 	}
 
-	runCall := executor.calls[3]
+	runCall := executor.calls[2]
 	if value, ok := shell.EnvLookup(runCall.Env, "TARGET_ROOT"); !ok || value != "/tmp/project" {
 		t.Fatalf("TARGET_ROOT mismatch: %q", value)
 	}
@@ -149,13 +142,6 @@ func TestRunConfigEmptyFallsBackToDefault(t *testing.T) {
 		matchers: []callMatcher{
 			{
 				name: "git",
-				args: []string{"rev-parse", "--show-toplevel"},
-				result: callResult{
-					stdout: "/tmp/project\n",
-				},
-			},
-			{
-				name: "git",
 				args: []string{"-C", "/tmp/project", "remote", "get-url", "origin"},
 				result: callResult{
 					stdout: "git@github.com:owner/repo.git\n",
@@ -179,7 +165,7 @@ func TestRunConfigEmptyFallsBackToDefault(t *testing.T) {
 	var stderr strings.Builder
 	app := New(
 		[]string{"run", "--dry-run"},
-		[]string{"RUNOQ_ROOT=/runoq", "RUNOQ_CONFIG=", "PATH=/usr/bin"},
+		[]string{"RUNOQ_ROOT=/runoq", "RUNOQ_CONFIG=", "TARGET_ROOT=/tmp/project", "PATH=/usr/bin"},
 		"/tmp/project",
 		&stdout,
 		&stderr,
@@ -192,7 +178,7 @@ func TestRunConfigEmptyFallsBackToDefault(t *testing.T) {
 		t.Fatalf("expected exit code 0, got %d (stderr=%q)", code, stderr.String())
 	}
 
-	runCall := executor.calls[3]
+	runCall := executor.calls[2]
 	if value, ok := shell.EnvLookup(runCall.Env, "RUNOQ_CONFIG"); !ok || value != "/runoq/config/runoq.json" {
 		t.Fatalf("RUNOQ_CONFIG mismatch: %q", value)
 	}

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/saruman/runoq/internal/gitops"
 	"github.com/saruman/runoq/internal/shell"
 )
 
@@ -52,13 +53,7 @@ func (c *Client) EnsureToken(ctx context.Context) error {
 	}
 	c.tokenInit = true
 
-	targetRoot, err := shell.CommandOutput(ctx, c.exec, shell.CommandRequest{
-		Name:   "git",
-		Args:   []string{"rev-parse", "--show-toplevel"},
-		Dir:    c.cwd,
-		Env:    c.env,
-		Stderr: io.Discard,
-	})
+	targetRoot, err := gitops.FindRoot(c.cwd)
 	if err != nil {
 		return nil
 	}

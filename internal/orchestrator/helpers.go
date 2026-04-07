@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/saruman/runoq/internal/gitops"
 	"github.com/saruman/runoq/internal/shell"
 )
 
@@ -236,16 +237,11 @@ func (a *App) targetRoot(ctx context.Context, env []string) (string, error) {
 	if value, ok := shell.EnvLookup(env, "TARGET_ROOT"); ok && strings.TrimSpace(value) != "" {
 		return value, nil
 	}
-	out, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
-		Name: "git",
-		Args: []string{"rev-parse", "--show-toplevel"},
-		Dir:  a.cwd,
-		Env:  env,
-	})
+	root, err := gitops.FindRoot(a.cwd)
 	if err != nil {
 		return "", errors.New("run runoq from inside a git repository")
 	}
-	return out, nil
+	return root, nil
 }
 
 func (a *App) configureGitBotIdentity(ctx context.Context, root string, env []string, dir string) error {

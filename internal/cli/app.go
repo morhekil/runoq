@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/saruman/runoq/internal/gitops"
 	"github.com/saruman/runoq/internal/orchestrator"
 	"github.com/saruman/runoq/internal/report"
 	"github.com/saruman/runoq/internal/shell"
@@ -264,12 +265,7 @@ func (a *App) prepareTargetContext(ctx context.Context, runoqRoot string, env []
 	targetRoot, ok := shell.EnvLookup(env, "TARGET_ROOT")
 	if !ok || strings.TrimSpace(targetRoot) == "" {
 		var err error
-		targetRoot, err = shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
-			Name: "git",
-			Args: []string{"rev-parse", "--show-toplevel"},
-			Dir:  a.cwd,
-			Env:  env,
-		})
+		targetRoot, err = gitops.FindRoot(a.cwd)
 		if err != nil {
 			return nil, shell.Fail(a.stderr, "Run runoq from inside a git repository.")
 		}
@@ -316,12 +312,8 @@ func (a *App) resolveRepo(ctx context.Context, env []string, targetRoot string) 
 		return value, nil
 	}
 
-	originURL, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
-		Name: "git",
-		Args: []string{"-C", targetRoot, "remote", "get-url", "origin"},
-		Dir:  a.cwd,
-		Env:  env,
-	})
+	gitRepo := gitops.OpenCLI(ctx, targetRoot, a.execCommand)
+	originURL, err := gitRepo.RemoteURL("origin")
 	if err != nil {
 		return "", errors.New("no 'origin' remote found: runoq requires a GitHub-hosted repo")
 	}

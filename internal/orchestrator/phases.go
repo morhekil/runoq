@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/saruman/runoq/internal/gitops"
 	"github.com/saruman/runoq/internal/shell"
 )
 
@@ -182,11 +183,12 @@ func (a *App) phaseInit(ctx context.Context, root string, env []string, repo str
 		a.logInfo("INIT: bot remote configuration failed or skipped for worktree")
 	}
 
-	if err := a.runProgram(ctx, env, "git", []string{"-C", worktree, "commit", "--allow-empty", "-m", fmt.Sprintf("runoq: begin work on #%d", issueNumber)}, nil, io.Discard, io.Discard); err != nil {
+	wtRepo := gitops.OpenCLI(ctx, worktree, a.execCommand)
+	if err := wtRepo.CommitEmpty(worktree, fmt.Sprintf("runoq: begin work on #%d", issueNumber)); err != nil {
 		return "", a.handleInitFailure(ctx, root, env, repo, issueNumber, "failed to create the initial worktree commit", branch, worktree, nil)
 	}
 
-	if err := a.runProgram(ctx, env, "git", []string{"-C", worktree, "push", "-u", "origin", branch}, nil, io.Discard, io.Discard); err != nil {
+	if err := wtRepo.Push(worktree, "origin", branch); err != nil {
 		return "", a.handleInitFailure(ctx, root, env, repo, issueNumber, "failed to push the initial worktree branch", branch, worktree, nil)
 	}
 

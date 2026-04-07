@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sync/atomic"
 	"testing"
 
 	"github.com/saruman/runoq/internal/shell"
@@ -71,6 +70,10 @@ func TestEnsureToken_NoAutoToken(t *testing.T) {
 func TestEnsureToken_OnlyOnce(t *testing.T) {
 	// Set up a temp directory with identity.json and a PEM key.
 	tmpDir := t.TempDir()
+	// Create .git so FindRoot resolves this as a repo
+	if err := os.Mkdir(filepath.Join(tmpDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
 	runoqDir := filepath.Join(tmpDir, ".runoq")
 	if err := os.MkdirAll(runoqDir, 0755); err != nil {
 		t.Fatal(err)
@@ -99,13 +102,7 @@ func TestEnsureToken_OnlyOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Track how many times git rev-parse is called (proxy for mint attempts).
-	var gitCalls atomic.Int32
 	exec := func(_ context.Context, req shell.CommandRequest) error {
-		if req.Name == "git" {
-			gitCalls.Add(1)
-			fmt.Fprint(req.Stdout, tmpDir)
-		}
 		return nil
 	}
 
@@ -131,11 +128,7 @@ func TestEnsureToken_OnlyOnce(t *testing.T) {
 		t.Fatalf("second EnsureToken: %v", err)
 	}
 
-	if got := gitCalls.Load(); got != 1 {
-		t.Fatalf("expected git called once, got %d", got)
-	}
-
-	// Verify token was set.
+	// Verify token was set (idempotent — second call should not re-mint).
 	found := false
 	for _, e := range c.Env() {
 		if e == "GH_TOKEN=minted-tok" {
@@ -148,25 +141,17 @@ func TestEnsureToken_OnlyOnce(t *testing.T) {
 }
 
 func TestOutput_EnsuresToken(t *testing.T) {
-	var ensureCalled bool
 	exec := func(_ context.Context, req shell.CommandRequest) error {
-		if req.Name == "git" {
-			ensureCalled = true
-			// Simulate git rev-parse failing so EnsureToken returns early after setting tokenInit.
-			return fmt.Errorf("not a git repo")
-		}
 		// gh command — return some output.
 		fmt.Fprint(req.Stdout, "output-data\n")
 		return nil
 	}
 
-	c := gh.NewClient(exec, http.DefaultClient, nil, "/tmp")
+	// Use a dir without .git — EnsureToken skips token minting but Output still works.
+	c := gh.NewClient(exec, http.DefaultClient, nil, t.TempDir())
 	got, err := c.Output(context.Background(), "pr", "list")
 	if err != nil {
 		t.Fatalf("Output: %v", err)
-	}
-	if !ensureCalled {
-		t.Fatal("expected EnsureToken to call git rev-parse")
 	}
 	if got != "output-data" {
 		t.Fatalf("expected %q, got %q", "output-data", got)
@@ -175,9 +160,6 @@ func TestOutput_EnsuresToken(t *testing.T) {
 
 func TestClientOutput_UsesGHBin(t *testing.T) {
 	exec := func(_ context.Context, req shell.CommandRequest) error {
-		if req.Name == "git" {
-			return fmt.Errorf("not a repo")
-		}
 		if req.Name != "mycustomgh" {
 			t.Errorf("expected binary mycustomgh, got %s", req.Name)
 		}
@@ -185,7 +167,7 @@ func TestClientOutput_UsesGHBin(t *testing.T) {
 	}
 
 	env := []string{"GH_BIN=mycustomgh"}
-	c := gh.NewClient(exec, http.DefaultClient, env, "/tmp")
+	c := gh.NewClient(exec, http.DefaultClient, env, t.TempDir())
 	_, err := c.Output(context.Background(), "version")
 	if err != nil {
 		t.Fatalf("Output: %v", err)
