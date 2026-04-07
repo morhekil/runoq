@@ -154,9 +154,9 @@ func (a *App) phaseInit(ctx context.Context, root string, env []string, repo str
 
 	dispatchEnv := append([]string(nil), env...)
 	dispatchEnv = shell.EnvSet(dispatchEnv, "RUNOQ_NO_AUTO_TOKEN", "1")
-	eligibilityOut, eligibilityErr := a.scriptOutput(ctx, root, dispatchEnv, "dispatch-safety.sh", []string{"eligibility", repo, strconv.Itoa(issueNumber)}, nil)
+	eligibilityOut, eligibilityStderr, eligibilityErr := a.scriptOutputWithStderr(ctx, root, dispatchEnv, "dispatch-safety.sh", []string{"eligibility", repo, strconv.Itoa(issueNumber)}, nil)
 	if eligibilityErr != nil {
-		return "", eligibilityErr
+		return "", fmt.Errorf("eligibility check failed: %s", stderrOrUnknown(eligibilityStderr))
 	}
 
 	var eligibility eligibilityResult
