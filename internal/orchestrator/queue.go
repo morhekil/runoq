@@ -139,11 +139,16 @@ func (a *App) Setup(ctx context.Context, repo string) []string {
 
 	targetRoot, err := a.targetRoot(ctx, env)
 	if err != nil {
+		a.logInfo("Setup: target root resolution failed: %v", err)
 		return env
 	}
 
-	a.configureGitBotIdentity(ctx, root, env, targetRoot)
-	a.configureGitBotRemote(ctx, root, env, targetRoot, repo)
+	if err := a.configureGitBotIdentity(ctx, root, env, targetRoot); err != nil {
+		a.logInfo("Setup: bot identity configuration failed or skipped")
+	}
+	if err := a.configureGitBotRemote(ctx, root, env, targetRoot, repo); err != nil {
+		a.logInfo("Setup: bot remote configuration failed or skipped")
+	}
 
 	return env
 }
