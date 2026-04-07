@@ -449,12 +449,9 @@ func (t *tickRunner) handleImplementation(ctx context.Context) int {
 	dsApp.Reconcile(ctx, t.cfg.Repo) // best-effort, ignore errors
 
 	t.info("running next issue")
-	runApp := New(
-		[]string{"run", t.cfg.Repo},
-		t.cfg.Env, "", t.cfg.Stdout, t.cfg.Stderr,
-	)
+	runApp := New(nil, t.cfg.Env, "", t.cfg.Stdout, t.cfg.Stderr)
 	runApp.SetCommandExecutor(t.cfg.ExecCommand)
-	runApp.Run(ctx) // may fail, that's OK
+	runApp.RunQueue(ctx, t.cfg.Repo) // may fail, that's OK
 
 	t.success("Executed issue")
 	fmt.Fprintln(t.cfg.Stdout, "Executed issue")

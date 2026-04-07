@@ -126,6 +126,31 @@ func (a *App) runCommandEntry(ctx context.Context, root string, env []string, ar
 	return 0
 }
 
+// RunQueue performs auth/identity setup and processes the issue queue.
+// Unlike runCommandEntry, it does NOT run dispatch-safety reconciliation
+// (the caller is expected to handle that separately).
+func (a *App) RunQueue(ctx context.Context, repo string) int {
+	root := a.runoqRoot()
+	if root == "" {
+		return shell.Fail(a.stderr, "Unable to resolve RUNOQ_ROOT for RunQueue.")
+	}
+
+	env := append([]string(nil), a.env...)
+	if authEnv := a.prepareAuth(ctx, root, env); authEnv != nil {
+		env = authEnv
+	}
+
+	targetRoot, err := a.targetRoot(ctx, env)
+	if err != nil {
+		return shell.Fail(a.stderr, err.Error())
+	}
+
+	a.configureGitBotIdentity(ctx, root, env, targetRoot)
+	a.configureGitBotRemote(ctx, root, env, targetRoot, repo)
+
+	return a.runQueue(ctx, root, env, repo)
+}
+
 func (a *App) runQueue(ctx context.Context, root string, env []string, repo string) int {
 	cfg, err := a.loadConfig(root, env)
 	if err != nil {

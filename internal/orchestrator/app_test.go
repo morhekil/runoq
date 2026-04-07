@@ -1081,6 +1081,59 @@ func TestMentionTriagePropagatesScriptExitCodeAndStderr(t *testing.T) {
 	}
 }
 
+func TestRunQueueExportedMethodSkipsArgParsingAndReconcile(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+	writeRuntimeConfig(t, root)
+
+	var stderr bytes.Buffer
+	var calls []string
+
+	app := New(nil, []string{
+		"RUNOQ_ROOT=" + root,
+		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
+		"TARGET_ROOT=" + root,
+	}, root, io.Discard, &stderr)
+	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
+		calls = append(calls, commandLine(req))
+		switch {
+		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
+			_, _ = io.WriteString(req.Stdout, "fail\n")
+			return nil
+		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "configure_git_bot_identity"):
+			return nil
+		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "configure_git_bot_remote"):
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "next owner/repo runoq:ready":
+			_, _ = io.WriteString(req.Stdout, `{"issue":null,"skipped":[]}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "list owner/repo runoq:ready":
+			_, _ = io.WriteString(req.Stdout, `[]`)
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s", commandLine(req))
+			return nil
+		}
+	})
+
+	code := app.RunQueue(ctx, "owner/repo")
+	if code != 0 {
+		t.Fatalf("RunQueue returned %d, stderr=%q", code, stderr.String())
+	}
+
+	// Should NOT have called dispatch-safety reconcile
+	for _, call := range calls {
+		if strings.Contains(call, "dispatch-safety") {
+			t.Fatalf("RunQueue should not run dispatch-safety reconcile, but called: %s", call)
+		}
+	}
+
+	// Should have called the queue
+	if !containsCall(calls, "gh-issue-queue.sh next owner/repo runoq:ready") {
+		t.Fatalf("expected queue next call, got: %v", calls)
+	}
+}
+
 func writeRuntimeConfig(t *testing.T, root string) {
 	t.Helper()
 	configDir := filepath.Join(root, "config")
