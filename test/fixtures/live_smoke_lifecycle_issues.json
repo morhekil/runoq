@@ -41,8 +41,8 @@
       "clamp-overflow"
     ],
     "priority": 3,
-    "estimated_complexity": "medium",
-    "complexity_rationale": "Introduces a new file with argument parsing and requires process-spawning test infrastructure, touching two modules with a different testing pattern than unit tests.",
+    "estimated_complexity": "low",
+    "complexity_rationale": "Single new file with straightforward argument parsing; uses established test pattern.",
     "body": "## Context\n\nExpose the formatter through a CLI script so users can call it from the command line with two integer arguments.\n\n## Acceptance Criteria\n\n- [ ] `src/cli.js` is executable and parses two integer positional arguments from `process.argv`.\n- [ ] Running `node src/cli.js 3 10` prints `\"3/10 complete (30%)\"` to stdout.\n- [ ] Overflow clamping is respected (e.g., `node src/cli.js 7 5` prints `\"5/5 complete (100%)\"`).\n- [ ] Tests cover the CLI success path.\n- [ ] `npm test` and `npm run build` pass.\n\n## Notes\n\nDepends on overflow-clamping being done first. Must use CommonJS and only Node.js built-ins."
   }
 ]
