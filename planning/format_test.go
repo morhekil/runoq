@@ -1,4 +1,4 @@
-package tick
+package planning
 
 import (
 	"encoding/json"
@@ -19,7 +19,7 @@ func loadFixture(t *testing.T, path string) []byte {
 func TestFormatPlanProposal(t *testing.T) {
 	t.Parallel()
 
-	data := loadFixture(t, "../../test/fixtures/tick/milestone-decomposer-output.json")
+	data := loadFixture(t, "../test/fixtures/tick/milestone-decomposer-output.json")
 	var p Proposal
 	if err := json.Unmarshal(data, &p); err != nil {
 		t.Fatalf("unmarshal fixture: %v", err)
@@ -266,7 +266,7 @@ func TestFormatMilestoneBody(t *testing.T) {
 func TestFormatAdjustmentReviewBody(t *testing.T) {
 	t.Parallel()
 
-	data := loadFixture(t, "../../test/fixtures/tick/milestone-reviewer-adjustment.json")
+	data := loadFixture(t, "../test/fixtures/tick/milestone-reviewer-adjustment.json")
 	var input AdjustmentReviewInput
 	if err := json.Unmarshal(data, &input); err != nil {
 		t.Fatalf("unmarshal: %v", err)

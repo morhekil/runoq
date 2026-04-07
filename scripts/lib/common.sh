@@ -425,29 +425,17 @@ runoq::captured_exec() {
 
   runoq::info "[$tool_kind] logs: $capture_dir"
 
-  local stdout_pipe stderr_pipe
-  stdout_pipe="$(mktemp "${TMPDIR:-/tmp}/runoq-capture-stdout.XXXXXX")"
-  stderr_pipe="$(mktemp "${TMPDIR:-/tmp}/runoq-capture-stderr.XXXXXX")"
-  rm -f "$stdout_pipe" "$stderr_pipe"
-  mkfifo "$stdout_pipe" "$stderr_pipe"
-
-  tee "$capture_dir/stdout.log" <"$stdout_pipe" &
-  local stdout_tee_pid=$!
-  tee "$capture_dir/stderr.log" <"$stderr_pipe" >&2 &
-  local stderr_tee_pid=$!
-
   local status=0
   set +e
   (
     cd "$cwd"
     "$real_bin" "$@"
-  ) >"$stdout_pipe" 2>"$stderr_pipe"
+  ) > >(tee "$capture_dir/stdout.log") 2> >(tee "$capture_dir/stderr.log" >&2)
   status=$?
   set -e
 
-  wait "$stdout_tee_pid" 2>/dev/null || true
-  wait "$stderr_tee_pid" 2>/dev/null || true
-  rm -f "$stdout_pipe" "$stderr_pipe"
+  # Small delay to let tee flush (process substitution is async)
+  wait 2>/dev/null || true
 
   cp "$capture_dir/stdout.log" "$capture_dir/response.txt"
   return "$status"

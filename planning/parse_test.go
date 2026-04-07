@@ -1,4 +1,4 @@
-package tick
+package planning
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 func TestParseVerdictBlock(t *testing.T) {
 	t.Parallel()
 
-	text := string(loadFixture(t, "../../test/fixtures/tick/reviewer-technical-pass.txt"))
+	text := string(loadFixture(t, "../test/fixtures/tick/reviewer-technical-pass.txt"))
 	score, err := ParseVerdictBlock(text)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

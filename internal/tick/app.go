@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/saruman/runoq/comments"
+	"github.com/saruman/runoq/planning"
 )
 
 const usageText = `Usage:
@@ -95,11 +96,11 @@ func (a *App) runFormatProposal() int {
 	if err != nil {
 		return a.fail("read stdin: %v", err)
 	}
-	var p Proposal
+	var p planning.Proposal
 	if err := json.Unmarshal(data, &p); err != nil {
 		return a.fail("parse proposal: %v", err)
 	}
-	fmt.Fprint(a.stdout, FormatPlanProposal(p))
+	fmt.Fprint(a.stdout, planning.FormatPlanProposal(p))
 	return 0
 }
 
@@ -108,11 +109,11 @@ func (a *App) runProposalCommentBody() int {
 	if err != nil {
 		return a.fail("read stdin: %v", err)
 	}
-	var input ProposalCommentInput
+	var input planning.ProposalCommentInput
 	if err := json.Unmarshal(data, &input); err != nil {
 		return a.fail("parse input: %v", err)
 	}
-	fmt.Fprint(a.stdout, FormatProposalCommentBody(input))
+	fmt.Fprint(a.stdout, planning.FormatProposalCommentBody(input))
 	return 0
 }
 
@@ -121,11 +122,11 @@ func (a *App) runMilestoneBody() int {
 	if err != nil {
 		return a.fail("read stdin: %v", err)
 	}
-	var item ProposalItem
+	var item planning.ProposalItem
 	if err := json.Unmarshal(data, &item); err != nil {
 		return a.fail("parse item: %v", err)
 	}
-	fmt.Fprint(a.stdout, FormatMilestoneBody(item))
+	fmt.Fprint(a.stdout, planning.FormatMilestoneBody(item))
 	return 0
 }
 
@@ -134,11 +135,11 @@ func (a *App) runAdjustmentReviewBody() int {
 	if err != nil {
 		return a.fail("read stdin: %v", err)
 	}
-	var input AdjustmentReviewInput
+	var input planning.AdjustmentReviewInput
 	if err := json.Unmarshal(data, &input); err != nil {
 		return a.fail("parse input: %v", err)
 	}
-	fmt.Fprint(a.stdout, FormatAdjustmentReviewBody(input))
+	fmt.Fprint(a.stdout, planning.FormatAdjustmentReviewBody(input))
 	return 0
 }
 
@@ -147,7 +148,7 @@ func (a *App) runParseVerdict() int {
 	if err != nil {
 		return a.fail("read stdin: %v", err)
 	}
-	score, err := ParseVerdictBlock(string(data))
+	score, err := planning.ParseVerdictBlock(string(data))
 	if err != nil {
 		return a.fail("%v", err)
 	}
@@ -167,7 +168,7 @@ func (a *App) runExtractJSON() int {
 	if err != nil {
 		return a.fail("read stdin: %v", err)
 	}
-	extracted, err := ExtractMarkedJSONBlock(string(data), marker)
+	extracted, err := planning.ExtractMarkedJSONBlock(string(data), marker)
 	if err != nil {
 		return a.fail("%v", err)
 	}
@@ -202,7 +203,7 @@ func (a *App) runSelectItems() int {
 	if selJSON == "" {
 		return a.fail("select-items requires --selection argument")
 	}
-	var sel ItemSelection
+	var sel comments.ItemSelection
 	if err := json.Unmarshal([]byte(selJSON), &sel); err != nil {
 		return a.fail("parse selection: %v", err)
 	}
@@ -210,11 +211,11 @@ func (a *App) runSelectItems() int {
 	if err != nil {
 		return a.fail("read stdin: %v", err)
 	}
-	var p Proposal
+	var p planning.Proposal
 	if err := json.Unmarshal(data, &p); err != nil {
 		return a.fail("parse proposal: %v", err)
 	}
-	result := SelectItemsFromProposal(p, sel)
+	result := planning.SelectItemsFromProposal(p, sel)
 	enc := json.NewEncoder(a.stdout)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(result); err != nil {
@@ -232,7 +233,7 @@ func (a *App) runMergeChecklists() int {
 	if len(a.args) >= 3 {
 		right = a.args[2]
 	}
-	fmt.Fprintln(a.stdout, MergeChecklists(left, right))
+	fmt.Fprintln(a.stdout, planning.MergeChecklists(left, right))
 	return 0
 }
 
@@ -281,7 +282,7 @@ func (a *App) runReplaceProposalInBody() int {
 	if err != nil {
 		return a.fail("read stdin: %v", err)
 	}
-	result := ReplaceProposalInBody(string(bodyData), string(proposalData))
+	result := planning.ReplaceProposalInBody(string(bodyData), string(proposalData))
 	fmt.Fprint(a.stdout, result)
 	return 0
 }

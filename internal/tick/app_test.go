@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/saruman/runoq/comments"
+	"github.com/saruman/runoq/planning"
 )
 
 func TestFormatProposalSubcommand(t *testing.T) {
@@ -29,10 +30,10 @@ func TestFormatProposalSubcommand(t *testing.T) {
 func TestProposalCommentBodySubcommand(t *testing.T) {
 	t.Parallel()
 
-	input := ProposalCommentInput{
-		Proposal:  Proposal{Items: []ProposalItem{{Title: "X", Type: "task"}}},
-		Technical: ReviewScore{Verdict: "PASS", Score: "30/35"},
-		Product:   ReviewScore{Verdict: "PASS", Score: "25/30"},
+	input := planning.ProposalCommentInput{
+		Proposal:  planning.Proposal{Items: []planning.ProposalItem{{Title: "X", Type: "task"}}},
+		Technical: planning.ReviewScore{Verdict: "PASS", Score: "30/35"},
+		Product:   planning.ReviewScore{Verdict: "PASS", Score: "25/30"},
 	}
 	data, _ := json.Marshal(input)
 	var stdout, stderr bytes.Buffer
@@ -74,7 +75,7 @@ func TestParseVerdictSubcommand(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr.String())
 	}
-	var score ReviewScore
+	var score planning.ReviewScore
 	if err := json.Unmarshal(stdout.Bytes(), &score); err != nil {
 		t.Fatalf("unmarshal output: %v", err)
 	}
@@ -110,7 +111,7 @@ func TestHumanCommentSelectionSubcommand(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr.String())
 	}
-	var sel ItemSelection
+	var sel comments.ItemSelection
 	if err := json.Unmarshal(stdout.Bytes(), &sel); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -130,7 +131,7 @@ func TestSelectItemsSubcommand(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr.String())
 	}
-	var p Proposal
+	var p planning.Proposal
 	if err := json.Unmarshal(stdout.Bytes(), &p); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
