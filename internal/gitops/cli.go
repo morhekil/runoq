@@ -63,11 +63,11 @@ func (r *cliRepo) CommitExists(sha string) (bool, error) {
 }
 
 func (r *cliRepo) BranchExists(branch string) (bool, error) {
-	err := r.gitQuiet("rev-parse", "--verify", "refs/heads/"+branch)
+	gitDir, err := resolveGitDir(r.root)
 	if err != nil {
-		return false, nil
+		return false, err
 	}
-	return true, nil
+	return fsBranchExists(gitDir, branch)
 }
 
 func (r *cliRepo) CommitLog(base, head string) ([]Commit, error) {
@@ -186,13 +186,22 @@ func (r *cliRepo) WorktreeRemove(path string) error {
 }
 
 func (r *cliRepo) WorktreePrune() error {
-	return r.gitQuiet("worktree", "prune")
+	gitDir, err := resolveGitDir(r.root)
+	if err != nil {
+		return err
+	}
+	return fsWorktreePrune(gitDir)
 }
 
 func (r *cliRepo) DeleteBranch(branch string) error {
-	return r.gitQuiet("branch", "-D", branch)
+	gitDir, err := resolveGitDir(r.root)
+	if err != nil {
+		return err
+	}
+	return fsDeleteBranch(gitDir, branch)
 }
 
+// CLI: worktree-scoped config requires git CLI to handle worktree admin dir correctly
 func (r *cliRepo) SetConfig(key, value string) error {
 	return r.gitQuiet("config", key, value)
 }
