@@ -127,6 +127,29 @@ func TestSelectNextTaskPrioritySortAndDependencyFiltering(t *testing.T) {
 	}
 }
 
+func TestSelectNextTaskSkipsNonReadyLabels(t *testing.T) {
+	t.Parallel()
+
+	runner := &tickRunner{
+		cfg: TickConfig{ReadyLabel: "runoq:ready"},
+		issues: []issue{
+			{Number: 9, Title: "Epic", State: "OPEN", Body: "<!-- runoq:meta\ntype: epic\npriority: 1\n-->"},
+			// Task #10: has needs-human-review label — skip
+			{Number: 10, Title: "Needs review", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 1\n-->", Labels: []label{{Name: "runoq:needs-human-review"}}},
+			// Task #11: has ready label — should be selected
+			{Number: 11, Title: "Ready task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 2\n-->", Labels: []label{{Name: "runoq:ready"}}},
+		},
+	}
+
+	task := runner.selectNextTask(9)
+	if task == nil {
+		t.Fatal("selectNextTask returned nil, expected #11")
+	}
+	if task.Number != 11 {
+		t.Errorf("selectNextTask selected #%d, expected #11 (only ready task)", task.Number)
+	}
+}
+
 func TestSelectNextTaskAllBlocked(t *testing.T) {
 	t.Parallel()
 

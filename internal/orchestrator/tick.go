@@ -22,14 +22,15 @@ import (
 
 // TickConfig configures a single tick execution.
 type TickConfig struct {
-	Repo             string
-	PlanFile         string
-	RunoqRoot        string
+	Repo              string
+	PlanFile          string
+	RunoqRoot         string
 	PlanApprovedLabel string
-	Env              []string
-	ExecCommand      shell.CommandExecutor
-	Stdout           io.Writer
-	Stderr           io.Writer
+	ReadyLabel        string
+	Env               []string
+	ExecCommand       shell.CommandExecutor
+	Stdout            io.Writer
+	Stderr            io.Writer
 }
 
 // issue represents a GitHub issue from the issue list.
@@ -635,6 +636,9 @@ func (t *tickRunner) selectNextTask(epicNumber int) *issue {
 			continue
 		}
 		if planning.MetadataValue(iss.Body, "type") != "task" {
+			continue
+		}
+		if t.cfg.ReadyLabel != "" && !t.issueHasLabel(iss, t.cfg.ReadyLabel) {
 			continue
 		}
 		candidates = append(candidates, candidate{
