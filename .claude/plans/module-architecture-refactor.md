@@ -7,7 +7,14 @@
 - [x] M3: Create comments/ package (commit 85d77d5)
 - [x] M4: Create planning/ package (commit 9abd9e8)
 - [x] M5: Port tick state machine to Go (commit 1eb0907)
-- [ ] M6: Eliminate remaining shell roundtrips
+- [x] M6: Eliminate Go→shell→Go roundtrips (issuequeue, dispatch-safety, run)
+
+### Remaining shell calls (not roundtrips — legitimate external agent invocation)
+
+- `plan-dispatch.sh` (2 calls) — Claude agent decomposition loop. Will move to `planning/` when agents/ is wired for streaming.
+- `plan-comment-handler.sh` (1 call) — Claude agent response. Will move to `comments/` when agents/ is wired.
+
+These are not Go→shell→Go roundtrips — they call Claude (external process), which is legitimate. They will be ported when the agents/ package supports the full streaming capture workflow.
 
 ### M6 remaining work
 
