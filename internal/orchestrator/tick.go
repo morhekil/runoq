@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/saruman/runoq/comments"
+	"github.com/saruman/runoq/internal/issuequeue"
 	"github.com/saruman/runoq/internal/shell"
 	"github.com/saruman/runoq/planning"
 )
@@ -163,25 +165,23 @@ func (t *tickRunner) run(ctx context.Context) int {
 func (t *tickRunner) handleBootstrap(ctx context.Context) int {
 	// Call the existing plan-dispatch pipeline via shell scripts
 	// This is an interim step — M6 will replace with direct Go calls
-	issueQueueScript := filepath.Join(t.cfg.RunoqRoot, "scripts", "gh-issue-queue.sh")
+	
 	planDispatchScript := filepath.Join(t.cfg.RunoqRoot, "scripts", "plan-dispatch.sh")
 
 	// Create Project Planning epic
 	t.info("creating Project Planning epic")
-	epicOutput, err := t.scriptOutput(ctx, issueQueueScript, "create", t.cfg.Repo, "Project Planning", "## Acceptance Criteria\n\n- [ ] Milestones proposed.", "--type", "epic", "--priority", "1", "--estimated-complexity", "low")
+	epicNumber, err := t.issueCreate(ctx, t.cfg.Repo, "Project Planning", "## Acceptance Criteria\n\n- [ ] Milestones proposed.", "--type", "epic", "--priority", "1", "--estimated-complexity", "low")
 	if err != nil {
 		return t.fail("create epic: %v", err)
 	}
-	epicNumber := extractIssueNumber(epicOutput)
 	t.detail("epic", "#"+epicNumber)
 
 	// Create planning issue
 	t.info("creating planning issue")
-	planningOutput, err := t.scriptOutput(ctx, issueQueueScript, "create", t.cfg.Repo, "Break plan into milestones", "## Acceptance Criteria\n\n- [ ] Milestones proposed.", "--type", "planning", "--priority", "1", "--estimated-complexity", "low", "--parent-epic", epicNumber)
+	planningNumber, err := t.issueCreate(ctx, t.cfg.Repo, "Break plan into milestones", "## Acceptance Criteria\n\n- [ ] Milestones proposed.", "--type", "planning", "--priority", "1", "--estimated-complexity", "low", "--parent-epic", epicNumber)
 	if err != nil {
 		return t.fail("create planning issue: %v", err)
 	}
-	planningNumber := extractIssueNumber(planningOutput)
 	t.detail("planning issue", "#"+planningNumber)
 
 	// Dispatch milestone decomposition
@@ -191,7 +191,7 @@ func (t *tickRunner) handleBootstrap(ctx context.Context) int {
 	}
 
 	// Assign after proposal is posted
-	t.scriptOutput(ctx, issueQueueScript, "assign", t.cfg.Repo, planningNumber)
+	t.issueAssign(ctx, t.cfg.Repo, planningNumber)
 
 	t.success("Proposal posted on #" + planningNumber)
 	fmt.Fprintf(t.cfg.Stdout, "Created planning milestone. Proposal posted on #%s\n", planningNumber)
@@ -251,7 +251,7 @@ func (t *tickRunner) handleApprovedPlanning(ctx context.Context, reviewView stri
 	t.detail("parent", "#"+reviewParent+" "+parentTitle)
 	t.detail("items to create", fmt.Sprintf("%d", len(filtered.Items)))
 
-	issueQueueScript := filepath.Join(t.cfg.RunoqRoot, "scripts", "gh-issue-queue.sh")
+	
 
 	if parentTitle == "Project Planning" {
 		t.info("creating milestone epics")
@@ -262,11 +262,10 @@ func (t *tickRunner) handleApprovedPlanning(ctx context.Context, reviewView stri
 			if item.Priority != nil {
 				priority = fmt.Sprintf("%d", *item.Priority)
 			}
-			output, err := t.scriptOutput(ctx, issueQueueScript, "create", t.cfg.Repo, item.Title, body, "--type", "epic", "--priority", priority, "--estimated-complexity", "low", "--milestone-type", item.Type)
+			num, err := t.issueCreate(ctx, t.cfg.Repo, item.Title, body, "--type", "epic", "--priority", priority, "--estimated-complexity", "low", "--milestone-type", item.Type)
 			if err != nil {
 				return t.fail("create epic: %v", err)
 			}
-			num := extractIssueNumber(output)
 			t.info(fmt.Sprintf("created epic #%s: %s", num, item.Title))
 			if firstMilestone == "" {
 				firstMilestone = num
@@ -275,11 +274,11 @@ func (t *tickRunner) handleApprovedPlanning(ctx context.Context, reviewView stri
 		}
 		if firstMilestone != "" {
 			t.info("creating planning issue for first milestone #" + firstMilestone)
-			t.scriptOutput(ctx, issueQueueScript, "create", t.cfg.Repo, "Break down "+firstMilestoneTitle+" into tasks", "## Acceptance Criteria\n\n- [ ] Tasks proposed.", "--type", "planning", "--priority", "1", "--estimated-complexity", "low", "--parent-epic", firstMilestone)
+			t.issueCreate(ctx, t.cfg.Repo, "Break down "+firstMilestoneTitle+" into tasks", "## Acceptance Criteria\n\n- [ ] Tasks proposed.", "--type", "planning", "--priority", "1", "--estimated-complexity", "low", "--parent-epic", firstMilestone)
 		}
 		t.info(fmt.Sprintf("closing review #%d and parent #%s", reviewNumber, reviewParent))
-		t.scriptOutput(ctx, issueQueueScript, "set-status", t.cfg.Repo, fmt.Sprintf("%d", reviewNumber), "done")
-		t.scriptOutput(ctx, issueQueueScript, "set-status", t.cfg.Repo, reviewParent, "done")
+		t.issueSetStatus(ctx, t.cfg.Repo, fmt.Sprintf("%d", reviewNumber), "done")
+		t.issueSetStatus(ctx, t.cfg.Repo, reviewParent, "done")
 	} else {
 		t.info("creating task issues under epic #" + reviewParent)
 		for _, item := range filtered.Items {
@@ -289,11 +288,11 @@ func (t *tickRunner) handleApprovedPlanning(ctx context.Context, reviewView stri
 				priority = fmt.Sprintf("%d", *item.Priority)
 			}
 			complexity := cmp.Or(item.EstimatedComplexity, "medium")
-			t.scriptOutput(ctx, issueQueueScript, "create", t.cfg.Repo, item.Title, body, "--type", "task", "--priority", priority, "--estimated-complexity", complexity, "--complexity-rationale", item.ComplexityRationale, "--parent-epic", reviewParent)
+			t.issueCreate(ctx, t.cfg.Repo, item.Title, body, "--type", "task", "--priority", priority, "--estimated-complexity", complexity, "--complexity-rationale", item.ComplexityRationale, "--parent-epic", reviewParent)
 			t.info(fmt.Sprintf("created task: %s (%s)", item.Title, complexity))
 		}
 		t.info(fmt.Sprintf("closing review #%d", reviewNumber))
-		t.scriptOutput(ctx, issueQueueScript, "set-status", t.cfg.Repo, fmt.Sprintf("%d", reviewNumber), "done")
+		t.issueSetStatus(ctx, t.cfg.Repo, fmt.Sprintf("%d", reviewNumber), "done")
 	}
 
 	t.success(fmt.Sprintf("Applied approvals from #%d, created issues", reviewNumber))
@@ -331,7 +330,7 @@ func (t *tickRunner) handleApprovedAdjustment(ctx context.Context, reviewView st
 	}
 	t.detail("adjustments to apply", fmt.Sprintf("%d", len(filtered)))
 
-	issueQueueScript := filepath.Join(t.cfg.RunoqRoot, "scripts", "gh-issue-queue.sh")
+	
 
 	for _, adj := range filtered {
 		switch adj.Type {
@@ -349,22 +348,22 @@ func (t *tickRunner) handleApprovedAdjustment(ctx context.Context, reviewView st
 			title := cmp.Or(adj.Title, adj.Description)
 			t.info("creating new milestone: " + title)
 			desc := cmp.Or(adj.Description, adj.Reason)
-			t.scriptOutput(ctx, issueQueueScript, "create", t.cfg.Repo, title, "## Context\n\n"+desc+"\n\n## Acceptance Criteria\n\n- [ ] "+desc, "--type", "epic", "--priority", "99", "--estimated-complexity", "low")
+			t.issueCreate(ctx, t.cfg.Repo, title, "## Context\n\n"+desc+"\n\n## Acceptance Criteria\n\n- [ ] "+desc, "--type", "epic", "--priority", "99", "--estimated-complexity", "low")
 		default:
 			t.info(fmt.Sprintf("applying %s adjustment", adj.Type))
 		}
 	}
 
 	t.info(fmt.Sprintf("closing review #%d and parent #%s", reviewNumber, reviewParent))
-	t.scriptOutput(ctx, issueQueueScript, "set-status", t.cfg.Repo, fmt.Sprintf("%d", reviewNumber), "done")
-	t.scriptOutput(ctx, issueQueueScript, "set-status", t.cfg.Repo, reviewParent, "done")
+	t.issueSetStatus(ctx, t.cfg.Repo, fmt.Sprintf("%d", reviewNumber), "done")
+	t.issueSetStatus(ctx, t.cfg.Repo, reviewParent, "done")
 
 	// Refresh and seed next planning issue
 	raw, _ := t.ghOutput(ctx, "issue", "list", "--repo", t.cfg.Repo, "--state", "all", "--limit", "200", "--json", "number,title,body,labels,state,url")
 	json.Unmarshal([]byte(raw), &t.issues)
 	if next := t.firstOpenEpic(); next != nil {
 		t.info(fmt.Sprintf("seeding planning issue for next epic #%d", next.Number))
-		t.scriptOutput(ctx, issueQueueScript, "create", t.cfg.Repo, "Break down "+next.Title+" into tasks", "## Acceptance Criteria\n\n- [ ] Tasks proposed.", "--type", "planning", "--priority", "1", "--estimated-complexity", "low", "--parent-epic", fmt.Sprintf("%d", next.Number))
+		t.issueCreate(ctx, t.cfg.Repo, "Break down "+next.Title+" into tasks", "## Acceptance Criteria\n\n- [ ] Tasks proposed.", "--type", "planning", "--priority", "1", "--estimated-complexity", "low", "--parent-epic", fmt.Sprintf("%d", next.Number))
 	}
 
 	t.success(fmt.Sprintf("Applied adjustments from #%d", reviewNumber))
@@ -381,7 +380,7 @@ func (t *tickRunner) handlePlanningDispatch(ctx context.Context, planningChild *
 	t.detail("issue", fmt.Sprintf("#%d", planningChild.Number))
 
 	planDispatchScript := filepath.Join(t.cfg.RunoqRoot, "scripts", "plan-dispatch.sh")
-	issueQueueScript := filepath.Join(t.cfg.RunoqRoot, "scripts", "gh-issue-queue.sh")
+	
 
 	if mode == "milestone" {
 		t.runScript(ctx, planDispatchScript, t.cfg.Repo, fmt.Sprintf("%d", planningChild.Number), "milestone", t.cfg.PlanFile)
@@ -395,7 +394,7 @@ func (t *tickRunner) handlePlanningDispatch(ctx context.Context, planningChild *
 		t.runScript(ctx, planDispatchScript, t.cfg.Repo, fmt.Sprintf("%d", planningChild.Number), "task", t.cfg.PlanFile, milestoneFile.Name())
 	}
 
-	t.scriptOutput(ctx, issueQueueScript, "assign", t.cfg.Repo, fmt.Sprintf("%d", planningChild.Number))
+	t.issueAssign(ctx, t.cfg.Repo, fmt.Sprintf("%d", planningChild.Number))
 	t.success(fmt.Sprintf("Proposal posted on #%d", planningChild.Number))
 	fmt.Fprintf(t.cfg.Stdout, "Proposal posted on #%d\n", planningChild.Number)
 	return 0
@@ -422,7 +421,7 @@ func (t *tickRunner) handleMilestoneComplete(ctx context.Context, epicNumber int
 	t.detail("milestone", fmt.Sprintf("#%d %s", epicNumber, epicTitle))
 
 	capturedExecScript := filepath.Join(t.cfg.RunoqRoot, "scripts", "tick.sh")
-	issueQueueScript := filepath.Join(t.cfg.RunoqRoot, "scripts", "gh-issue-queue.sh")
+	
 
 	// For now, delegate milestone-complete to tick.sh via a special env var
 	// TODO: M6 replaces this with direct agents/ package call
@@ -436,12 +435,11 @@ func (t *tickRunner) handleMilestoneComplete(ctx context.Context, epicNumber int
 	})
 
 	t.info("creating adjustment review issue")
-	output, err := t.scriptOutput(ctx, issueQueueScript, "create", t.cfg.Repo, "Review milestone adjustments", adjustmentBody, "--type", "adjustment", "--priority", "1", "--estimated-complexity", "low", "--parent-epic", fmt.Sprintf("%d", epicNumber))
+	adjNumber, err := t.issueCreate(ctx, t.cfg.Repo, "Review milestone adjustments", adjustmentBody, "--type", "adjustment", "--priority", "1", "--estimated-complexity", "low", "--parent-epic", fmt.Sprintf("%d", epicNumber))
 	if err != nil {
 		return t.fail("create adjustment issue: %v", err)
 	}
-	adjNumber := extractIssueNumber(output)
-	t.scriptOutput(ctx, issueQueueScript, "assign", t.cfg.Repo, adjNumber)
+	t.issueAssign(ctx, t.cfg.Repo, adjNumber)
 
 	t.success(fmt.Sprintf("Milestone #%d reviewed. Adjustments on #%s", epicNumber, adjNumber))
 	fmt.Fprintf(t.cfg.Stdout, "Milestone #%d review complete. Adjustments proposed on #%s\n", epicNumber, adjNumber)
@@ -586,7 +584,38 @@ func sliceContains(s []int, v int) bool {
 	return slices.Contains(s, v)
 }
 
-// --- Shell helpers (interim — replaced by Go package calls in M6) ---
+// --- Issue queue helpers (direct Go calls) ---
+
+func (t *tickRunner) issueQueueRun(ctx context.Context, args ...string) (string, error) {
+	var stdout bytes.Buffer
+	app := issuequeue.New(args, t.cfg.Env, "", &stdout, t.cfg.Stderr)
+	app.SetCommandExecutor(t.cfg.ExecCommand)
+	code := app.Run(ctx)
+	if code != 0 {
+		return stdout.String(), fmt.Errorf("issue-queue %s exited %d", args[0], code)
+	}
+	return stdout.String(), nil
+}
+
+func (t *tickRunner) issueCreate(ctx context.Context, repo, title, body string, opts ...string) (string, error) {
+	args := append([]string{"create", repo, title, body}, opts...)
+	output, err := t.issueQueueRun(ctx, args...)
+	if err != nil {
+		return "", err
+	}
+	return extractIssueNumber(output), nil
+}
+
+func (t *tickRunner) issueSetStatus(ctx context.Context, repo, issueNumber, status string) error {
+	_, err := t.issueQueueRun(ctx, "set-status", repo, issueNumber, status)
+	return err
+}
+
+func (t *tickRunner) issueAssign(ctx context.Context, repo, issueNumber string) {
+	t.issueQueueRun(ctx, "assign", repo, issueNumber)
+}
+
+// --- Shell helpers (interim — for scripts not yet ported) ---
 
 func (t *tickRunner) ghOutput(ctx context.Context, args ...string) (string, error) {
 	return shell.CommandOutput(ctx, t.cfg.ExecCommand, shell.CommandRequest{
