@@ -16,6 +16,34 @@ func loadFixture(t *testing.T, path string) []byte {
 	return data
 }
 
+func TestProposalItemDependsOnKeysRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	input := `{"items":[{"key":"store","title":"Event store","type":"task","depends_on_keys":[]},{"key":"engine","title":"Scoring engine","type":"task","depends_on_keys":["store"]}]}`
+	var p Proposal
+	if err := json.Unmarshal([]byte(input), &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(p.Items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(p.Items))
+	}
+	if len(p.Items[0].DependsOnKeys) != 0 {
+		t.Fatalf("expected no deps for store, got %v", p.Items[0].DependsOnKeys)
+	}
+	if len(p.Items[1].DependsOnKeys) != 1 || p.Items[1].DependsOnKeys[0] != "store" {
+		t.Fatalf("expected engine depends on [store], got %v", p.Items[1].DependsOnKeys)
+	}
+
+	// Round-trip
+	data, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(data), `"depends_on_keys":["store"]`) {
+		t.Fatalf("expected depends_on_keys in output, got %s", data)
+	}
+}
+
 func TestFormatPlanProposal(t *testing.T) {
 	t.Parallel()
 

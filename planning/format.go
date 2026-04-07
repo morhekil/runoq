@@ -20,6 +20,7 @@ type ProposalItem struct {
 	Priority            *int     `json:"priority,omitzero"`
 	EstimatedComplexity string   `json:"estimated_complexity,omitzero"`
 	ComplexityRationale string   `json:"complexity_rationale,omitzero"`
+	DependsOnKeys       []string `json:"depends_on_keys,omitzero"`
 	Body                string   `json:"body,omitzero"`
 }
 
