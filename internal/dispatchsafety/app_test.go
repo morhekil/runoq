@@ -13,51 +13,30 @@ import (
 	"testing"
 )
 
-func TestReconcileResumesRecoverableOrphanedRun(t *testing.T) {
+func TestReconcileSkipsInProgressWithLinkedPRViaRun(t *testing.T) {
+	// Reconcile via Run (arg parsing) — in-progress issue with linked PR is left alone
 	t.Parallel()
 
 	repoRoot := findRepoRoot(t)
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	writeDispatchConfig(t, configPath)
 
-	remoteDir, localDir := newRemoteBackedRepo(t)
-	_ = remoteDir
-	stateDir := filepath.Join(localDir, ".runoq", "state")
-	if err := os.MkdirAll(stateDir, 0o755); err != nil {
-		t.Fatalf("mkdir state dir: %v", err)
-	}
-
-	runCmd(t, localDir, "git", "checkout", "-b", "runoq/42-implement-queue")
-	if err := os.WriteFile(filepath.Join(localDir, "work.txt"), []byte("work\n"), 0o644); err != nil {
-		t.Fatalf("write work file: %v", err)
-	}
-	runCmd(t, localDir, "git", "add", "work.txt")
-	runCmd(t, localDir, "git", "commit", "-m", "Work in progress")
-	runCmd(t, localDir, "git", "push", "-u", "origin", "runoq/42-implement-queue")
-
-	writeIssueStateFile(t, filepath.Join(stateDir, "42.json"), 42, "REVIEW", 2, "runoq/42-implement-queue", "87")
+	_, localDir := newRemoteBackedRepo(t)
 
 	scenarioPath := filepath.Join(t.TempDir(), "scenario.json")
 	writeFakeGHScenario(t, scenarioPath, `[
   {
-    "contains": ["pr", "view", "87", "--repo", "owner/repo", "--json", "number"],
-    "stdout": "{\"number\":87}"
-  },
-  {
-    "contains": ["issue", "comment", "42", "--repo", "owner/repo", "--body", "Detected interrupted run from 2026-03-17T00:00:00Z. Previous phase: REVIEW round 2. Resuming."],
-    "stdout": ""
-  },
-  {
-    "contains": ["pr", "comment", "87", "--repo", "owner/repo", "--body", "Detected interrupted run from 2026-03-17T00:00:00Z. Previous phase: REVIEW round 2. Resuming."],
-    "stdout": ""
-  },
-  {
     "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:in-progress"],
-    "stdout": "[]"
+    "stdout": "[{\"number\":42,\"title\":\"In progress task\",\"labels\":[{\"name\":\"runoq:in-progress\"}]}]"
+  },
+  {
+    "contains": ["pr", "list", "--repo", "owner/repo", "--search", "closes #42"],
+    "stdout": "[{\"number\":87}]"
   }
 ]`)
 
 	logPath := filepath.Join(t.TempDir(), "fake-gh.log")
+	stateDir := filepath.Join(localDir, ".runoq", "state")
 	env := dispatchTestEnv(repoRoot, configPath, localDir, stateDir, scenarioPath, logPath)
 
 	code, stdout, stderr := runApp(t, []string{"reconcile", "owner/repo"}, env, localDir)
@@ -69,24 +48,13 @@ func TestReconcileResumesRecoverableOrphanedRun(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &actions); err != nil {
 		t.Fatalf("unmarshal output: %v", err)
 	}
-	if len(actions) != 1 || actions[0].Action != "resume" || actions[0].Issue != 42 {
-		t.Fatalf("unexpected actions: %+v", actions)
-	}
-
-	logOutput, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read fake gh log: %v", err)
-	}
-	logText := string(logOutput)
-	if !strings.Contains(logText, "pr view 87 --repo owner/repo --json number") {
-		t.Fatalf("missing PR view call in log: %q", logText)
-	}
-	if !strings.Contains(logText, "issue comment 42 --repo owner/repo --body Detected interrupted run from 2026-03-17T00:00:00Z. Previous phase: REVIEW round 2. Resuming.") {
-		t.Fatalf("missing issue comment call in log: %q", logText)
+	if len(actions) != 0 {
+		t.Fatalf("expected no actions for in-progress with PR, got: %+v", actions)
 	}
 }
 
-func TestReconcileMarksUnrecoverableRunForHumanReview(t *testing.T) {
+func TestReconcileResetsStaleInProgressViaRun(t *testing.T) {
+	// Reconcile via Run (arg parsing) — in-progress issue with no PR is reset to ready
 	t.Parallel()
 
 	repoRoot := findRepoRoot(t)
@@ -94,21 +62,15 @@ func TestReconcileMarksUnrecoverableRunForHumanReview(t *testing.T) {
 	writeDispatchConfig(t, configPath)
 
 	_, localDir := newRemoteBackedRepo(t)
-	stateDir := filepath.Join(localDir, ".runoq", "state")
-	if err := os.MkdirAll(stateDir, 0o755); err != nil {
-		t.Fatalf("mkdir state dir: %v", err)
-	}
-	writeIssueStateFile(t, filepath.Join(stateDir, "42.json"), 42, "DEVELOP", 1, "runoq/42-implement-queue", "87")
 
 	scenarioPath := filepath.Join(t.TempDir(), "scenario.json")
 	writeFakeGHScenario(t, scenarioPath, `[
   {
-    "contains": ["pr", "view", "87", "--repo", "owner/repo", "--json", "number"],
-    "exit_code": 1,
-    "stderr": "not found"
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:in-progress"],
+    "stdout": "[{\"number\":42,\"title\":\"Stale task\",\"labels\":[{\"name\":\"runoq:in-progress\"}]}]"
   },
   {
-    "contains": ["pr", "list", "--repo", "owner/repo", "--state", "open", "--head", "runoq/42-implement-queue", "--json", "number"],
+    "contains": ["pr", "list", "--repo", "owner/repo", "--search", "closes #42"],
     "stdout": "[]"
   },
   {
@@ -116,36 +78,25 @@ func TestReconcileMarksUnrecoverableRunForHumanReview(t *testing.T) {
     "stdout": "{\"labels\":[{\"name\":\"runoq:in-progress\"}]}"
   },
   {
-    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "runoq:in-progress", "--add-label", "runoq:needs-human-review"],
+    "contains": ["issue", "edit", "42", "--repo", "owner/repo", "--remove-label", "runoq:in-progress", "--add-label", "runoq:ready"],
     "stdout": ""
   },
   {
-    "contains": ["issue", "comment", "42", "--repo", "owner/repo", "--body", "Detected interrupted run from 2026-03-17T00:00:00Z. Previous phase: DEVELOP round 1. Marking for human review."],
+    "contains": ["issue", "comment", "42", "--repo", "owner/repo"],
     "stdout": ""
-  },
-  {
-    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:in-progress"],
-    "stdout": "[]"
   }
 ]`)
 
 	logPath := filepath.Join(t.TempDir(), "fake-gh.log")
+	stateDir := filepath.Join(localDir, ".runoq", "state")
 	env := dispatchTestEnv(repoRoot, configPath, localDir, stateDir, scenarioPath, logPath)
 
 	code, stdout, stderr := runApp(t, []string{"reconcile", "owner/repo"}, env, localDir)
 	if code != 0 {
 		t.Fatalf("reconcile code=%d stderr=%q", code, stderr)
 	}
-	if !strings.Contains(stdout, `"action": "needs-review"`) {
+	if !strings.Contains(stdout, `"action": "reset-ready"`) {
 		t.Fatalf("unexpected reconcile output: %q", stdout)
-	}
-
-	logOutput, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read fake gh log: %v", err)
-	}
-	if !strings.Contains(string(logOutput), "issue edit 42 --repo owner/repo --remove-label runoq:in-progress --add-label runoq:needs-human-review") {
-		t.Fatalf("missing set-status edit call in log: %q", string(logOutput))
 	}
 }
 
@@ -298,6 +249,101 @@ func TestPlanningEligibilityAllowsMissingAcceptanceCriteria(t *testing.T) {
 	}
 }
 
+func TestReconcileResetsStaleInProgressWithoutPR(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := findRepoRoot(t)
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	writeDispatchConfig(t, configPath)
+
+	_, localDir := newRemoteBackedRepo(t)
+	// No state files at all — reconciliation derives from GitHub
+
+	scenarioPath := filepath.Join(t.TempDir(), "scenario.json")
+	writeFakeGHScenario(t, scenarioPath, `[
+  {
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:in-progress"],
+    "stdout": "[{\"number\":43,\"title\":\"Stale task\",\"labels\":[{\"name\":\"runoq:in-progress\"}]}]"
+  },
+  {
+    "contains": ["pr", "list", "--repo", "owner/repo", "--search", "closes #43"],
+    "stdout": "[]"
+  },
+  {
+    "contains": ["issue", "view", "43", "--repo", "owner/repo", "--json", "labels"],
+    "stdout": "{\"labels\":[{\"name\":\"runoq:in-progress\"}]}"
+  },
+  {
+    "contains": ["issue", "edit", "43", "--repo", "owner/repo", "--remove-label", "runoq:in-progress", "--add-label", "runoq:ready"],
+    "stdout": ""
+  },
+  {
+    "contains": ["issue", "comment", "43", "--repo", "owner/repo"],
+    "stdout": ""
+  }
+]`)
+
+	logPath := filepath.Join(t.TempDir(), "fake-gh.log")
+	stateDir := filepath.Join(localDir, ".runoq", "state")
+	env := dispatchTestEnv(repoRoot, configPath, localDir, stateDir, scenarioPath, logPath)
+
+	var stdout bytes.Buffer
+	app := New(nil, env, localDir, &stdout, &bytes.Buffer{})
+	code := app.Reconcile(context.Background(), "owner/repo")
+	if code != 0 {
+		t.Fatalf("Reconcile returned %d, stdout=%q", code, stdout.String())
+	}
+
+	var actions []reconcileAction
+	if err := json.Unmarshal(stdout.Bytes(), &actions); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	if len(actions) != 1 || actions[0].Action != "reset-ready" || actions[0].Issue != 43 {
+		t.Fatalf("unexpected actions: %+v", actions)
+	}
+}
+
+func TestReconcileSkipsInProgressWithLinkedPR(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := findRepoRoot(t)
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	writeDispatchConfig(t, configPath)
+
+	_, localDir := newRemoteBackedRepo(t)
+
+	scenarioPath := filepath.Join(t.TempDir(), "scenario.json")
+	writeFakeGHScenario(t, scenarioPath, `[
+  {
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:in-progress"],
+    "stdout": "[{\"number\":42,\"title\":\"Has PR\",\"labels\":[{\"name\":\"runoq:in-progress\"}]}]"
+  },
+  {
+    "contains": ["pr", "list", "--repo", "owner/repo", "--search", "closes #42"],
+    "stdout": "[{\"number\":87}]"
+  }
+]`)
+
+	logPath := filepath.Join(t.TempDir(), "fake-gh.log")
+	stateDir := filepath.Join(localDir, ".runoq", "state")
+	env := dispatchTestEnv(repoRoot, configPath, localDir, stateDir, scenarioPath, logPath)
+
+	var stdout bytes.Buffer
+	app := New(nil, env, localDir, &stdout, &bytes.Buffer{})
+	code := app.Reconcile(context.Background(), "owner/repo")
+	if code != 0 {
+		t.Fatalf("Reconcile returned %d", code)
+	}
+
+	var actions []reconcileAction
+	if err := json.Unmarshal(stdout.Bytes(), &actions); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	if len(actions) != 0 {
+		t.Fatalf("expected no actions for in-progress with linked PR, got: %+v", actions)
+	}
+}
+
 func TestReconcileExportedMethodSkipsArgParsing(t *testing.T) {
 	t.Parallel()
 
@@ -305,44 +351,22 @@ func TestReconcileExportedMethodSkipsArgParsing(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	writeDispatchConfig(t, configPath)
 
-	remoteDir, localDir := newRemoteBackedRepo(t)
-	_ = remoteDir
-	stateDir := filepath.Join(localDir, ".runoq", "state")
-	if err := os.MkdirAll(stateDir, 0o755); err != nil {
-		t.Fatalf("mkdir state dir: %v", err)
-	}
-
-	runCmd(t, localDir, "git", "checkout", "-b", "runoq/42-implement-queue")
-	if err := os.WriteFile(filepath.Join(localDir, "work.txt"), []byte("work\n"), 0o644); err != nil {
-		t.Fatalf("write work file: %v", err)
-	}
-	runCmd(t, localDir, "git", "add", "work.txt")
-	runCmd(t, localDir, "git", "commit", "-m", "Work in progress")
-	runCmd(t, localDir, "git", "push", "-u", "origin", "runoq/42-implement-queue")
-
-	writeIssueStateFile(t, filepath.Join(stateDir, "42.json"), 42, "REVIEW", 2, "runoq/42-implement-queue", "87")
+	_, localDir := newRemoteBackedRepo(t)
 
 	scenarioPath := filepath.Join(t.TempDir(), "scenario.json")
 	writeFakeGHScenario(t, scenarioPath, `[
   {
-    "contains": ["pr", "view", "87", "--repo", "owner/repo", "--json", "number"],
-    "stdout": "{\"number\":87}"
-  },
-  {
-    "contains": ["issue", "comment", "42", "--repo", "owner/repo"],
-    "stdout": ""
-  },
-  {
-    "contains": ["pr", "comment", "87", "--repo", "owner/repo"],
-    "stdout": ""
-  },
-  {
     "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:in-progress"],
-    "stdout": "[]"
+    "stdout": "[{\"number\":42,\"title\":\"In progress\",\"labels\":[{\"name\":\"runoq:in-progress\"}]}]"
+  },
+  {
+    "contains": ["pr", "list", "--repo", "owner/repo", "--search", "closes #42"],
+    "stdout": "[{\"number\":87}]"
   }
 ]`)
 
 	logPath := filepath.Join(t.TempDir(), "fake-gh.log")
+	stateDir := filepath.Join(localDir, ".runoq", "state")
 	env := dispatchTestEnv(repoRoot, configPath, localDir, stateDir, scenarioPath, logPath)
 
 	// Call Reconcile directly — no args, no arg parsing
@@ -357,8 +381,8 @@ func TestReconcileExportedMethodSkipsArgParsing(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &actions); err != nil {
 		t.Fatalf("unmarshal output: %v", err)
 	}
-	if len(actions) != 1 || actions[0].Action != "resume" || actions[0].Issue != 42 {
-		t.Fatalf("unexpected actions: %+v", actions)
+	if len(actions) != 0 {
+		t.Fatalf("expected no actions (PR exists), got: %+v", actions)
 	}
 }
 

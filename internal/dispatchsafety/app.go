@@ -113,48 +113,86 @@ func (a *App) Run(ctx context.Context) int {
 	}
 }
 
-// Reconcile checks for interrupted runs and stale labels, posting comments
-// and updating labels as needed. It writes a JSON array of actions to stdout.
+// Reconcile checks for stale in-progress labels by querying GitHub directly.
+// Issues with in-progress label but no linked PR are reset to ready.
+// Issues with a linked PR are left for the tick to resume.
 func (a *App) Reconcile(ctx context.Context, repo string) int {
-	activeIssues, err := a.activeStateIssues()
+	cfg, err := a.loadConfig()
 	if err != nil {
 		return shell.Failf(a.stderr, "%v", err)
 	}
 
-	files, err := a.stateJSONFiles()
-	if err != nil {
-		return shell.Failf(a.stderr, "%v", err)
-	}
-
-	actions := make([]reconcileAction, 0, len(files))
-	for _, file := range files {
-		base := strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
-		if !numericBasenamePattern.MatchString(base) {
-			continue
-		}
-
-		action, ok, commandErr := a.reconcileStateFile(ctx, repo, file)
-		if commandErr != nil {
-			if isExitError(commandErr) {
-				return 1
-			}
-			return shell.Failf(a.stderr, "%v", commandErr)
-		}
-		if ok {
-			actions = append(actions, action)
-		}
-	}
-
-	staleActions, err := a.reconcileStaleLabels(ctx, repo, activeIssues)
+	output, err := a.ghOutput(
+		ctx,
+		"issue", "list",
+		"--repo", repo,
+		"--label", cfg.Labels.InProgress,
+		"--state", "open",
+		"--limit", "200",
+		"--json", "number,title,labels",
+	)
 	if err != nil {
 		if isExitError(err) {
 			return 1
 		}
 		return shell.Failf(a.stderr, "%v", err)
 	}
-	actions = append(actions, staleActions...)
+
+	var issues []map[string]any
+	if err := json.Unmarshal([]byte(output), &issues); err != nil {
+		return shell.Failf(a.stderr, "failed to parse in-progress issues: %v", err)
+	}
+
+	actions := make([]reconcileAction, 0, len(issues))
+	for _, issue := range issues {
+		issueNumber, ok := intValue(issue["number"])
+		if !ok {
+			continue
+		}
+
+		hasLinkedPR, prErr := a.hasLinkedPR(ctx, repo, issueNumber)
+		if prErr != nil && !isExitError(prErr) {
+			return shell.Failf(a.stderr, "%v", prErr)
+		}
+		if hasLinkedPR {
+			continue
+		}
+
+		if err := a.setIssueStatus(ctx, repo, issueNumber, "ready"); err != nil {
+			if isExitError(err) {
+				return 1
+			}
+			return shell.Failf(a.stderr, "%v", err)
+		}
+		message := "Found stale runoq:in-progress label with no linked PR. Reset to runoq:ready."
+		if err := a.issueComment(ctx, repo, issueNumber, message); err != nil {
+			if isExitError(err) {
+				return 1
+			}
+			return shell.Failf(a.stderr, "%v", err)
+		}
+
+		actions = append(actions, reconcileAction{
+			Issue:  issueNumber,
+			Action: "reset-ready",
+		})
+	}
 
 	return shell.WriteJSON(a.stdout, a.stderr, actions)
+}
+
+func (a *App) hasLinkedPR(ctx context.Context, repo string, issueNumber int) (bool, error) {
+	output, err := a.ghOutput(ctx, "pr", "list", "--repo", repo, "--search", fmt.Sprintf("closes #%d", issueNumber), "--json", "number")
+	if err != nil {
+		return false, err
+	}
+	var prs []struct {
+		Number int `json:"number"`
+	}
+	if err := json.Unmarshal([]byte(output), &prs); err != nil {
+		return false, err
+	}
+	return len(prs) > 0, nil
 }
 
 func (a *App) runEligibility(ctx context.Context, repo string, issueArg string) int {
