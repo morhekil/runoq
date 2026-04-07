@@ -1070,23 +1070,29 @@ build_lifecycle_summary() {
     def issue_result($seed):
       ($states | map(select(.issue == $seed.number)) | first) as $state
       | ($issue_statuses | map(select(.number == $seed.number)) | first) as $issue_status
+      | (($issue_status.labels // []) | map(.name)) as $labels
+      | (if $state.phase != null then $state.phase
+         elif ($issue_status.state == "CLOSED" and ($labels | any(. == "runoq:done"))) then "DONE"
+         elif ($labels | any(. == "runoq:needs-human-review")) then "NEEDS-REVIEW"
+         elif ($labels | any(. == "runoq:in-progress")) then "IN-PROGRESS"
+         else null end) as $derived_phase
       | {
           key: $seed.key,
           issue: $seed.number,
           title: $seed.title,
           type: ($seed.type // "task"),
           depends_on: ($seed.depends_on_numbers // []),
-          phase: ($state.phase // null),
+          phase: $derived_phase,
           started_at: ($state.started_at // null),
           updated_at: ($state.updated_at // null),
           verdict: ($state.outcome.verdict // $state.verdict // null),
           rounds_used: ($state.outcome.rounds_used // $state.rounds // null),
           github_state: ($issue_status.state // null),
-          github_labels: (($issue_status.labels // []) | map(.name)),
+          github_labels: $labels,
           url: ($issue_status.url // $seed.url)
         };
     ($seeded | map(issue_result(.))) as $issue_results
-    | ([$issue_results[] | select(.phase == "DONE" and .type != "epic")] | sort_by(.started_at // "9999-99-99T99:99:99Z") | map(.issue)) as $actual_order
+    | ([$issue_results[] | select(.phase == "DONE" and .type != "epic")] | sort_by(.started_at // "9999-99-99T99:99:99Z", .issue) | map(.issue)) as $actual_order
     | ($seeded | map(.number)) as $expected_order
     | ($seeded | map(select(.type != "epic")) | map(.number)) as $expected_tasks
     | (($prs | map(select((.state | ascii_upcase) == "OPEN")) | length)) as $open_prs
