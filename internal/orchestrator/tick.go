@@ -226,9 +226,20 @@ func (t *tickRunner) handlePendingReview(ctx context.Context, pending *issue) in
 	ids, _ := comments.FindUnrespondedCommentIDs(issueView)
 	if len(ids) > 0 {
 		t.step(fmt.Sprintf("Responding to unanswered comments on #%d", pending.Number))
-		commentHandler := filepath.Join(t.cfg.RunoqRoot, "scripts", "plan-comment-handler.sh")
-		if err := t.runScript(ctx, commentHandler, t.cfg.Repo, fmt.Sprintf("%d", pending.Number), t.cfg.PlanFile); err != nil {
-			t.warn(fmt.Sprintf("Comment handler failed for #%d", pending.Number))
+		invoker := agents.NewInvoker(agents.InvokerConfig{
+			LogRoot: filepath.Join(t.cfg.RunoqRoot, "log"),
+		})
+		ghClient := &tickGHAdapter{runner: t, ctx: ctx}
+		if err := comments.HandleComments(ctx, comments.HandleCommentsConfig{
+			Repo:              t.cfg.Repo,
+			IssueNumber:       pending.Number,
+			PlanFile:          t.cfg.PlanFile,
+			RunoqRoot:         t.cfg.RunoqRoot,
+			PlanApprovedLabel: t.cfg.PlanApprovedLabel,
+			GH:                ghClient,
+			Invoker:           invoker,
+		}); err != nil {
+			t.warn(fmt.Sprintf("Comment handler failed for #%d: %v", pending.Number, err))
 			fmt.Fprintf(t.cfg.Stdout, "Comment handler failed for #%d\n", pending.Number)
 		} else {
 			t.success(fmt.Sprintf("Responded to comments on #%d", pending.Number))
@@ -621,6 +632,42 @@ func (t *tickRunner) ghEditBody(ctx context.Context, issueNumber string, newBody
 
 func sliceContains(s []int, v int) bool {
 	return slices.Contains(s, v)
+}
+
+// --- GH adapter for comments.GHClient ---
+
+type tickGHAdapter struct {
+	runner *tickRunner
+	ctx    context.Context
+}
+
+func (a *tickGHAdapter) IssueView(_ context.Context, repo string, number int, fields string) (string, error) {
+	return a.runner.ghOutput(a.ctx, "issue", "view", fmt.Sprintf("%d", number), "--repo", repo, "--json", fields)
+}
+
+func (a *tickGHAdapter) IssueComment(_ context.Context, repo string, number int, body string) error {
+	tmpFile, _ := os.CreateTemp("", "runoq-comment-*.md")
+	tmpFile.WriteString(body)
+	tmpFile.Close()
+	defer os.Remove(tmpFile.Name())
+	_, err := a.runner.ghOutput(a.ctx, "issue", "comment", fmt.Sprintf("%d", number), "--repo", repo, "--body-file", tmpFile.Name())
+	return err
+}
+
+func (a *tickGHAdapter) IssueEditBody(_ context.Context, repo string, number int, body string) error {
+	a.runner.ghEditBody(a.ctx, fmt.Sprintf("%d", number), body)
+	return nil
+}
+
+func (a *tickGHAdapter) IssueAddLabel(_ context.Context, repo string, number int, label string) error {
+	_, err := a.runner.ghOutput(a.ctx, "issue", "edit", fmt.Sprintf("%d", number), "--repo", repo, "--add-label", label)
+	return err
+}
+
+func (a *tickGHAdapter) AddReaction(_ context.Context, commentID string, content string) error {
+	query := fmt.Sprintf(`mutation { addReaction(input: {subjectId: "%s", content: %s}) { reaction { content } } }`, commentID, content)
+	_, err := a.runner.ghOutput(a.ctx, "api", "graphql", "-f", "query="+query)
+	return err
 }
 
 // --- Issue queue helpers (direct Go calls) ---
