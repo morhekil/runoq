@@ -1447,7 +1447,7 @@ run_lifecycle() {
       export RUNOQ_CLAUDE_BIN="$claude_wrapper_path"
       export RUNOQ_RUNTIME_BIN="$runtime_bin"
       export PATH="$tmpdir:$PATH"
-      "$root/bin/runoq" loop --backoff 5
+      "$root/bin/runoq" loop --backoff 5 --max-wait-cycles 3
     ) >"$run_log" 2>&1
     run_exit="$?"
     set -e

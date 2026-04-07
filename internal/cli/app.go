@@ -70,16 +70,17 @@ Exit codes:
   2    Nothing to do, waiting for human input
   1    Error
 `,
-	"loop": `Usage: runoq loop [--backoff N]
+	"loop": `Usage: runoq loop [--backoff N] [--max-wait-cycles N]
 
-Run tick in a loop until interrupted.
+Run tick in a loop until interrupted or complete.
 
 Calls runoq tick repeatedly. On exit 0 (work done), loops immediately.
 On exit 2 (waiting), sleeps for the backoff duration before retrying.
-On exit 1 (error), stops.
+On exit 1 (error), stops. On exit 3 (all milestones complete), stops.
 
 Options:
-  --backoff N   Seconds to wait when tick has no work (default: 30)
+  --backoff N           Seconds to wait when tick has no work (default: 30)
+  --max-wait-cycles N   Stop after N consecutive waiting ticks (default: unlimited)
 `,
 	"run": `Usage: runoq run [--issue N] [--dry-run]
 
@@ -487,13 +488,28 @@ func readConfigLabel(configPath string, key string) string {
 
 func (a *App) runLoop(ctx context.Context, env []string, runoqRoot string, args []string) int {
 	backoff := 30
+	maxWaitCycles := 0 // 0 = unlimited
 	for i := 0; i < len(args); i++ {
-		if args[i] == "--backoff" && i+1 < len(args) {
+		switch args[i] {
+		case "--backoff":
+			if i+1 >= len(args) {
+				return shell.Failf(a.stderr, "Missing --backoff value")
+			}
 			v, err := strconv.Atoi(args[i+1])
 			if err != nil || v < 1 {
 				return shell.Failf(a.stderr, "Invalid --backoff value: %s", args[i+1])
 			}
 			backoff = v
+			i++
+		case "--max-wait-cycles":
+			if i+1 >= len(args) {
+				return shell.Failf(a.stderr, "Missing --max-wait-cycles value")
+			}
+			v, err := strconv.Atoi(args[i+1])
+			if err != nil || v < 1 {
+				return shell.Failf(a.stderr, "Invalid --max-wait-cycles value: %s", args[i+1])
+			}
+			maxWaitCycles = v
 			i++
 		}
 	}
@@ -501,6 +517,7 @@ func (a *App) runLoop(ctx context.Context, env []string, runoqRoot string, args 
 	loopCtx, cancel := signal.NotifyContext(ctx, os.Interrupt)
 	defer cancel()
 
+	waitCycles := 0
 	for {
 		code := a.runTick(loopCtx, env, runoqRoot)
 
@@ -512,8 +529,14 @@ func (a *App) runLoop(ctx context.Context, env []string, runoqRoot string, args 
 
 		switch code {
 		case 0:
-			// Work done, loop immediately
+			// Work done, reset wait counter, loop immediately
+			waitCycles = 0
 		case 2:
+			waitCycles++
+			if maxWaitCycles > 0 && waitCycles >= maxWaitCycles {
+				fmt.Fprintf(a.stderr, "stopping after %d consecutive wait cycles\n", waitCycles)
+				return 0
+			}
 			fmt.Fprintf(a.stderr, "waiting %ds before next tick\n", backoff)
 			select {
 			case <-time.After(time.Duration(backoff) * time.Second):
