@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/saruman/runoq/comments"
 )
 
 const usageText = `Usage:
@@ -178,7 +180,7 @@ func (a *App) runHumanCommentSelection() int {
 	if err != nil {
 		return a.fail("read stdin: %v", err)
 	}
-	sel, err := ParseHumanCommentSelection(string(data))
+	sel, err := comments.ParseHumanCommentSelection(string(data))
 	if err != nil {
 		return a.fail("%v", err)
 	}
@@ -239,7 +241,7 @@ func (a *App) runFindUnrespondedComments() int {
 	if err != nil {
 		return a.fail("read stdin: %v", err)
 	}
-	ids, err := FindUnrespondedCommentIDs(string(data))
+	ids, err := comments.FindUnrespondedCommentIDs(string(data))
 	if err != nil {
 		return a.fail("%v", err)
 	}
@@ -255,7 +257,7 @@ func (a *App) runParseAgentResponse() int {
 	if err != nil {
 		return a.fail("read stdin: %v", err)
 	}
-	resp, err := ParseAgentResponse(string(data))
+	resp, err := comments.ParseAgentResponse(string(data))
 	if err != nil {
 		return a.fail("%v", err)
 	}

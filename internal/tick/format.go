@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/saruman/runoq/comments"
 )
 
 // ProposalItem is a single item in a decomposer proposal.
@@ -34,11 +36,9 @@ type ReviewScore struct {
 	Checklist string `json:"checklist"`
 }
 
-// ItemSelection holds approved/rejected item indices (1-based).
-type ItemSelection struct {
-	Approved []int `json:"approved"`
-	Rejected []int `json:"rejected"`
-}
+// ItemSelection is an alias for comments.ItemSelection during migration.
+// TODO: remove after M4 moves everything to planning/.
+type ItemSelection = comments.ItemSelection
 
 // ProposalCommentInput is the input for building a full proposal review comment.
 type ProposalCommentInput struct {

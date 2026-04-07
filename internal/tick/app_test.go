@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/saruman/runoq/comments"
 )
 
 func TestFormatProposalSubcommand(t *testing.T) {
@@ -163,11 +165,11 @@ func TestParseAgentResponseSubcommand(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr.String())
 	}
-	var resp AgentResponse
+	var resp comments.AgentResponse
 	if err := json.Unmarshal(stdout.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if resp.Action != ActionApprove {
+	if resp.Action != comments.ActionApprove {
 		t.Errorf("action = %q", resp.Action)
 	}
 }
