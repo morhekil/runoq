@@ -1,5 +1,26 @@
 # Module architecture refactor
 
+## Progress
+
+- [x] M1: Split internal/common → internal/shell (commit ecd4b46)
+- [x] M2: Create agents/ package (commit 654650a)
+- [x] M3: Create comments/ package (commit 85d77d5)
+- [x] M4: Create planning/ package (commit 9abd9e8)
+- [x] M5: Port tick state machine to Go (commit 1eb0907)
+- [ ] M6: Eliminate remaining shell roundtrips
+
+### M6 remaining work
+
+The Go tick state machine calls these shell scripts via shell.CommandExecutor:
+
+1. **gh-issue-queue.sh** (~15 calls: create, set-status, assign) — replace with `issuequeue` package direct calls
+2. **plan-dispatch.sh** (2 calls) — port decomposition loop to `planning/` using `agents/` package
+3. **plan-comment-handler.sh** (1 call) — port to `comments/` + `agents/` packages
+4. **dispatch-safety.sh** (1 call) — replace with `dispatchsafety` package direct call
+5. **run.sh** (1 call) — replace with existing `orchestrator` queue runner
+
+Each replacement is independent and can be done incrementally.
+
 ## Context
 
 Go code calls shell scripts that call back into Go (Go→shell→Go roundtrips). Shell scripts should be entry points only. The `internal/common/` package is a grab bag. The tick state machine lives in shell (tick.sh, 27KB). This refactor reorganizes modules around domain boundaries and eliminates internal shell roundtrips.
