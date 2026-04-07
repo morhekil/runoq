@@ -265,13 +265,17 @@ func (a *App) reconcileStateFile(ctx context.Context, repo string, file string) 
 		return reconcileAction{}, false, nil
 	}
 	if phase == "FAILED" {
-		// Clean up failed state: close any lingering PR and remove state file
+		issueNumber, _ := intValue(state["issue"])
+		// Clean up failed state: close PR, remove worktree, delete state file
 		prNum := rawStringOr(state["pr_number"], "")
 		if prNum != "" && prNum != "0" {
 			_ = a.runGh(ctx, io.Discard, "pr", "close", prNum, "--repo", repo, "--delete-branch")
 		}
+		// Remove worktree via script (best-effort)
+		if issueNumber > 0 {
+			_ = a.runWorktreeRemove(ctx, strconv.Itoa(issueNumber))
+		}
 		_ = os.Remove(file)
-		issueNumber, _ := intValue(state["issue"])
 		return reconcileAction{
 			Issue:  issueNumber,
 			Action: "cleanup-failed",
@@ -688,6 +692,21 @@ func (a *App) configPath() (string, error) {
 		return filepath.Join(a.cwd, "config", "runoq.json"), nil
 	}
 	return "", errors.New("RUNOQ_CONFIG is required")
+}
+
+func (a *App) runWorktreeRemove(ctx context.Context, issue string) error {
+	root, err := a.runoqRoot()
+	if err != nil {
+		return err
+	}
+	return a.execCommand(ctx, shell.CommandRequest{
+		Name:   filepath.Join(root, "scripts", "worktree.sh"),
+		Args:   []string{"remove", issue},
+		Dir:    a.cwd,
+		Env:    a.env,
+		Stdout: io.Discard,
+		Stderr: io.Discard,
+	})
 }
 
 func (a *App) runoqRoot() (string, error) {
