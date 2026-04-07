@@ -50,22 +50,6 @@ type prCreateResult struct {
 	Number any `json:"number"`
 }
 
-type queueSelectionResult struct {
-	Issue   *queueSelectionIssue  `json:"issue"`
-	Skipped []queueSelectionIssue `json:"skipped"`
-}
-
-type queueSelectionIssue struct {
-	Number         int      `json:"number"`
-	Title          string   `json:"title"`
-	BlockedReasons []string `json:"blocked_reasons"`
-}
-
-type queueListedIssue struct {
-	Number int    `json:"number"`
-	Title  string `json:"title"`
-	Type   string `json:"type"`
-}
 
 type epicStatusResult struct {
 	AllDone bool  `json:"all_done"`

@@ -662,71 +662,37 @@ func TestRunNonLowComplexityCriteriaNeedsReviewHandoffSkipsDevelop(t *testing.T)
 	}
 }
 
-func TestRunQueueDryRunSelectsIssueAndLogsSkippedDetails(t *testing.T) {
+func TestRunCommandEntryRequiresIssueFlag(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
 	writeRuntimeConfig(t, root)
 
-	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	var calls []string
-
-	app := New([]string{"run", "owner/repo", "--dry-run"}, []string{
+	app := New([]string{"run", "owner/repo"}, []string{
 		"RUNOQ_ROOT=" + root,
 		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 		"TARGET_ROOT=" + root,
-	}, root, &stdout, &stderr)
+	}, root, io.Discard, &stderr)
 	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
-		calls = append(calls, commandLine(req))
 		switch {
 		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
 			_, _ = io.WriteString(req.Stdout, "fail\n")
 			return nil
-		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "configure_git_bot_identity"):
+		case req.Name == "bash":
 			return nil
-		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "configure_git_bot_remote"):
-			return nil
-		case strings.HasSuffix(req.Name, "/dispatch-safety.sh") && strings.Join(req.Args, " ") == "reconcile owner/repo":
-			return nil
-		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "next owner/repo runoq:ready":
-			_, _ = io.WriteString(req.Stdout, `{"issue":{"number":42,"title":"Implement queue"},"skipped":[{"number":41,"title":"Epic","blocked_reasons":["epic issues are not directly dispatchable"]}]}`)
-			return nil
-		case req.Name == "gh" && strings.Join(req.Args, " ") == "issue view 42 --repo owner/repo --json number,title,body,labels,url":
-			_, _ = io.WriteString(req.Stdout, `{"number":42,"title":"Implement queue","body":"<!-- runoq:meta\nestimated_complexity: low\ntype: task\n-->\n","labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/42"}`)
-			return nil
-		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "list owner/repo runoq:ready":
-			_, _ = io.WriteString(req.Stdout, `[{"number":42,"title":"Implement queue","body":"body","url":"https://example.test/issues/42","estimated_complexity":"low","type":"task"}]`)
-			return nil
-		case strings.HasSuffix(req.Name, "/dispatch-safety.sh") && strings.Join(req.Args, " ") == "eligibility owner/repo 42":
-			_, _ = io.WriteString(req.Stdout, `{"allowed":true,"issue":42,"branch":"runoq/42-implement-queue","reasons":[]}`)
+		case strings.HasSuffix(req.Name, "/dispatch-safety.sh"):
 			return nil
 		default:
-			t.Fatalf("unexpected command: %s", commandLine(req))
 			return nil
 		}
 	})
 
 	code := app.Run(ctx)
-	if code != 0 {
-		t.Fatalf("expected exit code 0, got %d", code)
+	if code != 1 {
+		t.Fatalf("expected exit code 1 without --issue, got %d", code)
 	}
-	if strings.TrimSpace(stdout.String()) != `{"branch":"runoq/42-implement-queue","dry_run":true,"issue":42,"phase":"INIT"}` {
-		t.Fatalf("unexpected stdout: %q", stdout.String())
-	}
-	if !strings.Contains(stderr.String(), "Queue result: 1 actionable issue found, 1 skipped") {
-		t.Fatalf("expected queue summary, got %q", stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "Skipped details: #41 — epic issues are not directly dispatchable") {
-		t.Fatalf("expected skipped details, got %q", stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "Processing issue #42: Implement queue") {
-		t.Fatalf("expected processing log, got %q", stderr.String())
-	}
-	if !containsCall(calls, "gh-issue-queue.sh next owner/repo runoq:ready") {
-		t.Fatalf("expected queue selection call, got %v", calls)
-	}
-	if !containsCall(calls, "dispatch-safety.sh eligibility owner/repo 42") {
-		t.Fatalf("expected init dry-run eligibility call, got %v", calls)
+	if !strings.Contains(stderr.String(), "--issue is required") {
+		t.Fatalf("expected --issue required error, got %q", stderr.String())
 	}
 }
 
@@ -884,81 +850,6 @@ func TestPhaseIntegrateFailureMarksNeedsReviewAndFailed(t *testing.T) {
 	}
 	if !containsAny(savedStates, `"integrate_failures":"criteria drift, tests failed"`) {
 		t.Fatalf("expected integrate failures in saved state, got %v", savedStates)
-	}
-}
-
-func TestRunQueueInvokesEpicSweepIntegrateForEligibleEpic(t *testing.T) {
-	ctx := t.Context()
-	root := t.TempDir()
-	writeRuntimeConfig(t, root)
-
-	var stderr bytes.Buffer
-	var savedStates []string
-	var calls []string
-	epicStatusCalls := 0
-
-	app := New([]string{"run", "owner/repo"}, []string{
-		"RUNOQ_ROOT=" + root,
-		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
-		"TARGET_ROOT=" + root,
-	}, root, io.Discard, &stderr)
-	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
-		calls = append(calls, commandLine(req))
-		switch {
-		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
-			_, _ = io.WriteString(req.Stdout, "fail\n")
-			return nil
-		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "configure_git_bot_identity"):
-			return nil
-		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "configure_git_bot_remote"):
-			return nil
-		case strings.HasSuffix(req.Name, "/dispatch-safety.sh") && strings.Join(req.Args, " ") == "reconcile owner/repo":
-			return nil
-		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "next owner/repo runoq:ready":
-			_, _ = io.WriteString(req.Stdout, `{"issue":null,"skipped":[{"number":41,"title":"Coordinate migration","blocked_reasons":["epic issues are not directly dispatchable"]}]}`)
-			return nil
-		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "list owner/repo runoq:ready":
-			_, _ = io.WriteString(req.Stdout, `[{"number":41,"title":"Coordinate migration","type":"epic"}]`)
-			return nil
-		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "epic-status owner/repo 41":
-			epicStatusCalls++
-			_, _ = io.WriteString(req.Stdout, `{"all_done":true,"children":[42],"pending":[]}`)
-			return nil
-		case req.Name == "gh" && strings.Join(req.Args, " ") == "issue view 41 --repo owner/repo --json title":
-			_, _ = io.WriteString(req.Stdout, `{"title":"Coordinate migration"}`)
-			return nil
-		case strings.HasSuffix(req.Name, "/state.sh") && strings.Join(req.Args, " ") == "load 41":
-			return fakeExitError{code: 1}
-		case strings.HasSuffix(req.Name, "/worktree.sh") && strings.Join(req.Args, " ") == "create 41 Coordinate migration-integrate":
-			_, _ = io.WriteString(req.Stdout, `{"branch":"runoq/41-coordinate-migration-integrate","worktree":"/tmp/runoq-wt-41-integrate"}`)
-			return nil
-		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "set-status owner/repo 41 done":
-			return nil
-		case strings.HasSuffix(req.Name, "/state.sh") && strings.Join(req.Args, " ") == "save 41":
-			payload, _ := io.ReadAll(req.Stdin)
-			savedStates = append(savedStates, string(payload))
-			return nil
-		default:
-			t.Fatalf("unexpected command: %s", commandLine(req))
-			return nil
-		}
-	})
-
-	code := app.Run(ctx)
-	if code != 0 {
-		t.Fatalf("expected exit code 0, got %d", code)
-	}
-	if epicStatusCalls != 2 {
-		t.Fatalf("expected two epic-status calls (sweep + integrate), got %d", epicStatusCalls)
-	}
-	if !containsCall(calls, "gh-issue-queue.sh set-status owner/repo 41 done") {
-		t.Fatalf("expected done status update for epic, got %v", calls)
-	}
-	if !containsAny(savedStates, `"phase":"INTEGRATE"`) || !containsAny(savedStates, `"phase":"DONE"`) {
-		t.Fatalf("expected INTEGRATE and DONE states for epic sweep, got %v", savedStates)
-	}
-	if !strings.Contains(stderr.String(), "Epic sweep: found 1 epic(s) to evaluate") {
-		t.Fatalf("expected epic sweep log, got %q", stderr.String())
 	}
 }
 
@@ -1160,59 +1051,6 @@ func TestRunIssueExportedMethodSkipsQueueSelection(t *testing.T) {
 	}
 	if !strings.Contains(stateJSON, `"issue":42`) || !strings.Contains(stateJSON, `"dry_run":true`) {
 		t.Fatalf("unexpected state: %s", stateJSON)
-	}
-}
-
-func TestRunQueueExportedMethodSkipsArgParsingAndReconcile(t *testing.T) {
-	ctx := t.Context()
-	root := t.TempDir()
-	writeRuntimeConfig(t, root)
-
-	var stderr bytes.Buffer
-	var calls []string
-
-	app := New(nil, []string{
-		"RUNOQ_ROOT=" + root,
-		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
-		"TARGET_ROOT=" + root,
-	}, root, io.Discard, &stderr)
-	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
-		calls = append(calls, commandLine(req))
-		switch {
-		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
-			_, _ = io.WriteString(req.Stdout, "fail\n")
-			return nil
-		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "configure_git_bot_identity"):
-			return nil
-		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "configure_git_bot_remote"):
-			return nil
-		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "next owner/repo runoq:ready":
-			_, _ = io.WriteString(req.Stdout, `{"issue":null,"skipped":[]}`)
-			return nil
-		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "list owner/repo runoq:ready":
-			_, _ = io.WriteString(req.Stdout, `[]`)
-			return nil
-		default:
-			t.Fatalf("unexpected command: %s", commandLine(req))
-			return nil
-		}
-	})
-
-	code := app.RunQueue(ctx, "owner/repo")
-	if code != 0 {
-		t.Fatalf("RunQueue returned %d, stderr=%q", code, stderr.String())
-	}
-
-	// Should NOT have called dispatch-safety reconcile
-	for _, call := range calls {
-		if strings.Contains(call, "dispatch-safety") {
-			t.Fatalf("RunQueue should not run dispatch-safety reconcile, but called: %s", call)
-		}
-	}
-
-	// Should have called the queue
-	if !containsCall(calls, "gh-issue-queue.sh next owner/repo runoq:ready") {
-		t.Fatalf("expected queue next call, got: %v", calls)
 	}
 }
 

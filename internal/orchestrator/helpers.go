@@ -38,25 +38,6 @@ func metadataFromIssueView(issue issueView) IssueMetadata {
 	}
 }
 
-func formatSkippedSummary(skipped []queueSelectionIssue) string {
-	if len(skipped) == 0 {
-		return ""
-	}
-
-	parts := make([]string, 0, len(skipped))
-	for _, issue := range skipped {
-		number := "?"
-		if issue.Number > 0 {
-			number = strconv.Itoa(issue.Number)
-		}
-		reasons := issue.BlockedReasons
-		if len(reasons) == 0 {
-			reasons = []string{"unknown"}
-		}
-		parts = append(parts, "#"+number+" — "+strings.Join(reasons, ", "))
-	}
-	return strings.Join(parts, "; ")
-}
 
 func IssueMetadataFromQueue(raw string, issueNumber int) (IssueMetadata, bool) {
 	var queueEntries []struct {

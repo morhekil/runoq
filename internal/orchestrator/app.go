@@ -9,7 +9,7 @@ import (
 )
 
 const usageText = `Usage:
-  orchestrator.sh run <repo> [--issue N] [--dry-run]
+  orchestrator.sh run <repo> --issue N [--dry-run]
   orchestrator.sh mention-triage <repo> <pr-number>
 `
 
