@@ -289,9 +289,6 @@ func (a *App) runFromDevelop(ctx context.Context, root string, env []string, rep
 			if err != nil {
 				return "", err
 			}
-			if err := a.saveState(ctx, root, env, issueNumber, stateJSON); err != nil {
-				return "", err
-			}
 			continue
 		}
 
@@ -376,9 +373,6 @@ func (a *App) getIssueMetadata(ctx context.Context, root string, env []string, r
 	return metadataFromIssueView(issue), nil
 }
 
-func (a *App) saveState(ctx context.Context, root string, env []string, issueNumber int, stateJSON string) error {
-	return a.runScript(ctx, root, env, "state.sh", []string{"save", strconv.Itoa(issueNumber)}, strings.NewReader(stateJSON), io.Discard, io.Discard)
-}
 
 func (a *App) issueTitle(ctx context.Context, env []string, repo string, issueNumber int) (string, error) {
 	out, err := a.ghOutput(ctx, env, "issue", "view", strconv.Itoa(issueNumber), "--repo", repo, "--json", "title")

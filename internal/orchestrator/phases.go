@@ -37,9 +37,6 @@ func (a *App) phaseIntegrate(ctx context.Context, root string, env []string, rep
 		if err != nil {
 			return "", err
 		}
-		if err := a.saveState(ctx, root, env, issueNumber, nextState); err != nil {
-			return "", err
-		}
 		return nextState, nil
 	}
 
@@ -87,16 +84,10 @@ func (a *App) phaseIntegrate(ctx context.Context, root string, env []string, rep
 			if err != nil {
 				return "", err
 			}
-			if err := a.saveState(ctx, root, env, issueNumber, integrateState); err != nil {
-				return "", err
-			}
 			doneState, err := updateStateJSON(integrateState, func(state map[string]any) {
 				state["phase"] = "DONE"
 			})
 			if err != nil {
-				return "", err
-			}
-			if err := a.saveState(ctx, root, env, issueNumber, doneState); err != nil {
 				return "", err
 			}
 			return doneState, nil
@@ -112,16 +103,10 @@ func (a *App) phaseIntegrate(ctx context.Context, root string, env []string, rep
 		if err != nil {
 			return "", err
 		}
-		if err := a.saveState(ctx, root, env, issueNumber, integrateState); err != nil {
-			return "", err
-		}
 		failedState, err := updateStateJSON(integrateState, func(state map[string]any) {
 			state["phase"] = "FAILED"
 		})
 		if err != nil {
-			return "", err
-		}
-		if err := a.saveState(ctx, root, env, issueNumber, failedState); err != nil {
 			return "", err
 		}
 		return failedState, nil
@@ -134,16 +119,10 @@ func (a *App) phaseIntegrate(ctx context.Context, root string, env []string, rep
 	if err != nil {
 		return "", err
 	}
-	if err := a.saveState(ctx, root, env, issueNumber, integrateState); err != nil {
-		return "", err
-	}
 	doneState, err := updateStateJSON(integrateState, func(state map[string]any) {
 		state["phase"] = "DONE"
 	})
 	if err != nil {
-		return "", err
-	}
-	if err := a.saveState(ctx, root, env, issueNumber, doneState); err != nil {
 		return "", err
 	}
 	return doneState, nil
@@ -237,9 +216,6 @@ func (a *App) phaseInit(ctx context.Context, root string, env []string, repo str
 		return "", err
 	}
 
-	if err := a.saveState(ctx, root, env, issueNumber, stateJSON); err != nil {
-		return "", a.handleInitFailure(ctx, root, env, repo, issueNumber, "failed to persist INIT state", branch, worktree, &prNumber)
-	}
 
 	_ = a.postAuditCommentWithState(ctx, root, env, repo, prNumber, "init", stateJSON, fmt.Sprintf("Orchestrator initialized. Branch: `%s`", branch))
 	return stateJSON, nil
@@ -257,9 +233,6 @@ func (a *App) phaseCriteria(ctx context.Context, root string, env []string, repo
 		state["issue_type"] = defaultString(metadata.Type, "task")
 	})
 	if err != nil {
-		return "", err
-	}
-	if err := a.saveState(ctx, root, env, issueNumber, nextState); err != nil {
 		return "", err
 	}
 	return nextState, nil
@@ -292,9 +265,6 @@ func (a *App) phaseCriteriaNeedsReviewHandoff(ctx context.Context, root string, 
 	if err != nil {
 		return "", err
 	}
-	if err := a.saveState(ctx, root, env, issueNumber, reviewState); err != nil {
-		return "", err
-	}
 
 	decideState, err := updateStateJSON(reviewState, func(state map[string]any) {
 		state["phase"] = "DECIDE"
@@ -302,9 +272,6 @@ func (a *App) phaseCriteriaNeedsReviewHandoff(ctx context.Context, root string, 
 		state["next_phase"] = "FINALIZE"
 	})
 	if err != nil {
-		return "", err
-	}
-	if err := a.saveState(ctx, root, env, issueNumber, decideState); err != nil {
 		return "", err
 	}
 
@@ -331,17 +298,11 @@ func (a *App) phaseCriteriaNeedsReviewHandoff(ctx context.Context, root string, 
 	if err != nil {
 		return "", err
 	}
-	if err := a.saveState(ctx, root, env, issueNumber, finalizeState); err != nil {
-		return "", err
-	}
 
 	doneState, err := updateStateJSON(finalizeState, func(state map[string]any) {
 		state["phase"] = "DONE"
 	})
 	if err != nil {
-		return "", err
-	}
-	if err := a.saveState(ctx, root, env, issueNumber, doneState); err != nil {
 		return "", err
 	}
 	return doneState, nil
@@ -479,9 +440,6 @@ func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo 
 		state["summary"] = result.Summary
 	})
 	if err != nil {
-		return "", issueRunnerResult{}, err
-	}
-	if err := a.saveState(ctx, root, env, issueNumber, nextState); err != nil {
 		return "", issueRunnerResult{}, err
 	}
 
@@ -639,9 +597,6 @@ func (a *App) phaseReview(ctx context.Context, root string, env []string, repo s
 
 	_ = a.postAuditCommentWithState(ctx, root, env, repo, state.PRNumber, "review", reviewState, reviewBody)
 
-	if err := a.saveState(ctx, root, env, issueNumber, reviewState); err != nil {
-		return "", err
-	}
 
 	return reviewState, nil
 }
@@ -682,9 +637,6 @@ func (a *App) phaseDecide(ctx context.Context, root string, env []string, issueN
 		state["next_phase"] = nextPhase
 	})
 	if err != nil {
-		return "", err
-	}
-	if err := a.saveState(ctx, root, env, issueNumber, decideState); err != nil {
 		return "", err
 	}
 	return decideState, nil
@@ -794,17 +746,11 @@ func (a *App) phaseFinalize(ctx context.Context, root string, env []string, repo
 		a.logInfo("FINALIZE: PR body update failed: %v", err)
 	}
 
-	if err := a.saveState(ctx, root, env, issueNumber, finalizeState); err != nil {
-		return "", err
-	}
 
 	doneState, err := updateStateJSON(finalizeState, func(state map[string]any) {
 		state["phase"] = "DONE"
 	})
 	if err != nil {
-		return "", err
-	}
-	if err := a.saveState(ctx, root, env, issueNumber, doneState); err != nil {
 		return "", err
 	}
 	return doneState, nil
@@ -830,9 +776,6 @@ func (a *App) phaseDevelopNeedsReview(ctx context.Context, root string, env []st
 	if err != nil {
 		return "", err
 	}
-	if err := a.saveState(ctx, root, env, issueNumber, reviewState); err != nil {
-		return "", err
-	}
 
 	decideState, err := updateStateJSON(reviewState, func(state map[string]any) {
 		state["phase"] = "DECIDE"
@@ -840,9 +783,6 @@ func (a *App) phaseDevelopNeedsReview(ctx context.Context, root string, env []st
 		state["next_phase"] = "FINALIZE"
 	})
 	if err != nil {
-		return "", err
-	}
-	if err := a.saveState(ctx, root, env, issueNumber, decideState); err != nil {
 		return "", err
 	}
 
@@ -869,9 +809,6 @@ func (a *App) phaseDevelopNeedsReview(ctx context.Context, root string, env []st
 	if err != nil {
 		return "", err
 	}
-	if err := a.saveState(ctx, root, env, issueNumber, finalizeState); err != nil {
-		return "", err
-	}
 
 	doneState, err := updateStateJSON(finalizeState, func(state map[string]any) {
 		state["phase"] = "DONE"
@@ -879,19 +816,11 @@ func (a *App) phaseDevelopNeedsReview(ctx context.Context, root string, env []st
 	if err != nil {
 		return "", err
 	}
-	if err := a.saveState(ctx, root, env, issueNumber, doneState); err != nil {
-		return "", err
-	}
 	return doneState, nil
 }
 
 func (a *App) handleInitFailure(ctx context.Context, root string, env []string, repo string, issueNumber int, reason string, branch string, worktree string, prNumber *int) error {
 	a.logError("INIT: %s", reason)
-
-	failureState, err := marshalJSON(initFailureState(reason, branch, worktree, prNumber))
-	if err == nil {
-		_ = a.saveState(ctx, root, env, issueNumber, failureState)
-	}
 
 	if prNumber == nil {
 		_ = a.runScript(ctx, root, env, "gh-issue-queue.sh", []string{"set-status", repo, strconv.Itoa(issueNumber), "ready"}, nil, io.Discard, io.Discard)
