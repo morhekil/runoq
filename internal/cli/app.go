@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/saruman/runoq/internal/common"
 	"github.com/saruman/runoq/internal/report"
@@ -185,7 +188,7 @@ func (a *App) Run(ctx context.Context) int {
 		if code != 0 {
 			return code
 		}
-		return a.runScript(ctx, targetEnv, runoqRoot, "loop.sh", args)
+		return a.runLoop(ctx, targetEnv, runoqRoot, args)
 	case "run":
 		targetEnv, code := a.prepareTargetContext(ctx, runoqRoot, env)
 		if code != 0 {
@@ -437,6 +440,47 @@ func (a *App) runMaintenance(ctx context.Context, env []string, runoqRoot string
 		return common.ExitCodeFromError(err)
 	}
 	return 0
+}
+
+func (a *App) runLoop(ctx context.Context, env []string, runoqRoot string, args []string) int {
+	backoff := 30
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--backoff" && i+1 < len(args) {
+			v, err := strconv.Atoi(args[i+1])
+			if err != nil || v < 1 {
+				return common.Failf(a.stderr, "Invalid --backoff value: %s", args[i+1])
+			}
+			backoff = v
+			i++
+		}
+	}
+
+	loopCtx, cancel := signal.NotifyContext(ctx, os.Interrupt)
+	defer cancel()
+
+	for {
+		code := a.runScript(loopCtx, env, runoqRoot, "tick.sh", nil)
+
+		select {
+		case <-loopCtx.Done():
+			return 0
+		default:
+		}
+
+		switch code {
+		case 0:
+			// Work done, loop immediately
+		case 2:
+			fmt.Fprintf(a.stderr, "waiting %ds before next tick\n", backoff)
+			select {
+			case <-time.After(time.Duration(backoff) * time.Second):
+			case <-loopCtx.Done():
+				return 0
+			}
+		default:
+			return common.Failf(a.stderr, "tick exited with status %d", code)
+		}
+	}
 }
 
 func (a *App) printUsage(w io.Writer) {
