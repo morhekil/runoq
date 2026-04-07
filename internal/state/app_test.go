@@ -59,6 +59,21 @@ func TestSaveRejectsTerminalTransition(t *testing.T) {
 	}
 }
 
+func TestSaveAllowsFailedToInitRetry(t *testing.T) {
+	t.Parallel()
+
+	stateDir := filepath.Join(t.TempDir(), "state")
+	env := []string{"RUNOQ_STATE_DIR=" + stateDir}
+
+	_, _, _ = runApp(t, []string{"save", "42"}, env, ".", `{"phase":"INIT","round":0}`, nil)
+	_, _, _ = runApp(t, []string{"save", "42"}, env, ".", `{"phase":"FAILED","round":0}`, nil)
+
+	code, _, stderr := runApp(t, []string{"save", "42"}, env, ".", `{"phase":"INIT","round":0}`, nil)
+	if code != 0 {
+		t.Fatalf("expected FAILED→INIT to succeed, got code=%d stderr=%q", code, stderr)
+	}
+}
+
 func TestSaveAllowsCriteriaToReviewTransition(t *testing.T) {
 	t.Parallel()
 

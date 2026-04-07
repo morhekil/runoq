@@ -705,6 +705,7 @@ func validatePhaseTransition(from string, to string) error {
 		"FINALIZE:FAILED":  {},
 		"INTEGRATE:DONE":   {},
 		"INTEGRATE:FAILED": {},
+		"FAILED:INIT":      {}, // retry from scratch
 	}
 	key := from + ":" + to
 	if _, ok := allowed[key]; ok {
