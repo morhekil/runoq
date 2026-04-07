@@ -722,6 +722,98 @@ func TestWithoutEnvKeysEdgeCases(t *testing.T) {
 	})
 }
 
+func TestCreateExportedMethodSkipsArgParsing(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t, nil)
+	var bodyText string
+	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
+		command := req.Name + " " + strings.Join(req.Args, " ")
+		switch {
+		case strings.Contains(command, "issue create"):
+			for i := range len(req.Args) {
+				if req.Args[i] == "--body-file" {
+					data, _ := os.ReadFile(req.Args[i+1])
+					bodyText = string(data)
+					break
+				}
+			}
+			_, _ = req.Stdout.Write([]byte("https://github.com/owner/repo/issues/99"))
+			return nil
+		case strings.Contains(command, "api") && strings.Contains(command, "jq .id"):
+			_, _ = req.Stdout.Write([]byte("12345"))
+			return nil
+		case strings.Contains(command, "sub_issues"):
+			return nil
+		default:
+			return nil
+		}
+	})
+
+	code := app.Create(t.Context(), "owner/repo", "Test issue", "## AC\n\n- [ ] Works.",
+		[]string{"--type", "task", "--priority", "1", "--parent-epic", "5"})
+	if code != 0 {
+		t.Fatalf("Create returned %d, stderr=%q", code, app.stderr.(*bytes.Buffer).String())
+	}
+	stdout := app.stdout.(*bytes.Buffer).String()
+	if !strings.Contains(stdout, "github.com/owner/repo/issues/99") {
+		t.Fatalf("expected issue URL in stdout, got %q", stdout)
+	}
+	if !strings.Contains(bodyText, "type: task") || !strings.Contains(bodyText, "priority: 1") {
+		t.Fatalf("unexpected body:\n%s", bodyText)
+	}
+}
+
+func TestSetStatusExportedMethodSkipsArgParsing(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t, nil)
+	var commands []string
+	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
+		cmd := req.Name + " " + strings.Join(req.Args, " ")
+		commands = append(commands, cmd)
+		if strings.Contains(cmd, "issue view") {
+			_, _ = req.Stdout.Write([]byte(`{"labels":[{"name":"runoq:ready"}]}`))
+		}
+		return nil
+	})
+
+	code := app.SetStatus(t.Context(), "owner/repo", "42", "done")
+	if code != 0 {
+		t.Fatalf("SetStatus returned %d", code)
+	}
+	if len(commands) == 0 {
+		t.Fatal("no commands executed")
+	}
+	found := false
+	for _, cmd := range commands {
+		if strings.Contains(cmd, "issue edit 42") && strings.Contains(cmd, "runoq:done") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected issue edit with done label, got: %v", commands)
+	}
+}
+
+func TestAssignExportedMethodSkipsArgParsing(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t, nil)
+	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
+		command := req.Name + " " + strings.Join(req.Args, " ")
+		if strings.Contains(command, "api user") {
+			_, _ = req.Stdout.Write([]byte(`{"login":"bot-user"}`))
+		}
+		return nil
+	})
+
+	code := app.Assign(t.Context(), "owner/repo", "42")
+	if code != 0 {
+		t.Fatalf("Assign returned %d, stderr=%q", code, app.stderr.(*bytes.Buffer).String())
+	}
+}
+
 func newTestApp(t *testing.T, args []string) *App {
 	t.Helper()
 

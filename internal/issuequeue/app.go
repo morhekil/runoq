@@ -200,19 +200,19 @@ func (a *App) Run(ctx context.Context) int {
 			a.printUsage(a.stderr)
 			return 1
 		}
-		return a.runSetStatus(ctx, a.args[1], a.args[2], a.args[3])
+		return a.SetStatus(ctx, a.args[1], a.args[2], a.args[3])
 	case "create":
 		if len(a.args) < 4 {
 			a.printUsage(a.stderr)
 			return 1
 		}
-		return a.runCreate(ctx, a.args[1], a.args[2], a.args[3], a.args[4:])
+		return a.Create(ctx, a.args[1], a.args[2], a.args[3], a.args[4:])
 	case "assign":
 		if len(a.args) != 3 {
 			a.printUsage(a.stderr)
 			return 1
 		}
-		return a.runAssign(ctx, a.args[1], a.args[2])
+		return a.Assign(ctx, a.args[1], a.args[2])
 	case "epic-status":
 		if len(a.args) != 3 {
 			a.printUsage(a.stderr)
@@ -284,7 +284,8 @@ func (a *App) runNext(ctx context.Context, repo string, readyLabel string) int {
 	return a.writeJSON(result)
 }
 
-func (a *App) runSetStatus(ctx context.Context, repo string, issueNumber string, status string) int {
+// SetStatus updates the status labels on an issue.
+func (a *App) SetStatus(ctx context.Context, repo string, issueNumber string, status string) int {
 	cfg, err := a.loadConfig()
 	if err != nil {
 		return shell.Failf(a.stderr, "Failed to read config: %v", err)
@@ -362,7 +363,8 @@ func (a *App) runGHMutationWithRetry(ctx context.Context, args []string) error {
 	return err
 }
 
-func (a *App) runCreate(ctx context.Context, repo string, title string, body string, args []string) int {
+// Create creates a new issue with metadata and optional parent-epic linking.
+func (a *App) Create(ctx context.Context, repo string, title string, body string, args []string) int {
 	opts, err := parseCreateOptions(args)
 	if err != nil {
 		a.printUsage(a.stderr)
@@ -408,7 +410,8 @@ func (a *App) runCreate(ctx context.Context, repo string, title string, body str
 	return a.writeJSON(createResult{Title: title, URL: url})
 }
 
-func (a *App) runAssign(ctx context.Context, repo string, issueNumber string) int {
+// Assign assigns the issue to the configured operator.
+func (a *App) Assign(ctx context.Context, repo string, issueNumber string) int {
 	operator, err := a.operatorLogin(ctx)
 	if err != nil {
 		return shell.Failf(a.stderr, "Failed to resolve operator login: %v", err)

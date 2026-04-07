@@ -669,33 +669,34 @@ func (a *tickGHAdapter) AddReaction(_ context.Context, commentID string, content
 
 // --- Issue queue helpers (direct Go calls) ---
 
-func (t *tickRunner) issueQueueRun(ctx context.Context, args ...string) (string, error) {
+func (t *tickRunner) newIssueQueueApp() (*issuequeue.App, *bytes.Buffer) {
 	var stdout bytes.Buffer
-	app := issuequeue.New(args, t.cfg.Env, "", &stdout, t.cfg.Stderr)
+	app := issuequeue.New(nil, t.cfg.Env, "", &stdout, t.cfg.Stderr)
 	app.SetCommandExecutor(t.cfg.ExecCommand)
-	code := app.Run(ctx)
-	if code != 0 {
-		return stdout.String(), fmt.Errorf("issue-queue %s exited %d", args[0], code)
-	}
-	return stdout.String(), nil
+	return app, &stdout
 }
 
 func (t *tickRunner) issueCreate(ctx context.Context, repo, title, body string, opts ...string) (string, error) {
-	args := append([]string{"create", repo, title, body}, opts...)
-	output, err := t.issueQueueRun(ctx, args...)
-	if err != nil {
-		return "", err
+	app, stdout := t.newIssueQueueApp()
+	code := app.Create(ctx, repo, title, body, opts)
+	if code != 0 {
+		return "", fmt.Errorf("issue-queue create exited %d", code)
 	}
-	return extractIssueNumber(output), nil
+	return extractIssueNumber(stdout.String()), nil
 }
 
 func (t *tickRunner) issueSetStatus(ctx context.Context, repo, issueNumber, status string) error {
-	_, err := t.issueQueueRun(ctx, "set-status", repo, issueNumber, status)
-	return err
+	app, _ := t.newIssueQueueApp()
+	code := app.SetStatus(ctx, repo, issueNumber, status)
+	if code != 0 {
+		return fmt.Errorf("issue-queue set-status exited %d", code)
+	}
+	return nil
 }
 
 func (t *tickRunner) issueAssign(ctx context.Context, repo, issueNumber string) {
-	t.issueQueueRun(ctx, "assign", repo, issueNumber)
+	app, _ := t.newIssueQueueApp()
+	app.Assign(ctx, repo, issueNumber)
 }
 
 // --- GH helpers ---
