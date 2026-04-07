@@ -1,5 +1,6 @@
-// Package common provides shared types and helpers used across runoq runtime packages.
-package common
+// Package shell provides subprocess execution, environment helpers, and
+// shared output utilities used across runoq runtime packages.
+package shell
 
 import (
 	"bytes"

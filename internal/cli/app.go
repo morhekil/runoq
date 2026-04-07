@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/saruman/runoq/internal/common"
+	"github.com/saruman/runoq/internal/shell"
 	"github.com/saruman/runoq/internal/report"
 )
 
@@ -110,7 +110,7 @@ type App struct {
 	stdout         io.Writer
 	stderr         io.Writer
 	executablePath string
-	execCommand    common.CommandExecutor
+	execCommand    shell.CommandExecutor
 }
 
 func New(args []string, env []string, cwd string, stdout io.Writer, stderr io.Writer, executablePath string) *App {
@@ -121,13 +121,13 @@ func New(args []string, env []string, cwd string, stdout io.Writer, stderr io.Wr
 		stdout:         stdout,
 		stderr:         stderr,
 		executablePath: executablePath,
-		execCommand:    common.RunCommand,
+		execCommand:    shell.RunCommand,
 	}
 }
 
-func (a *App) SetCommandExecutor(execFn common.CommandExecutor) {
+func (a *App) SetCommandExecutor(execFn shell.CommandExecutor) {
 	if execFn == nil {
-		a.execCommand = common.RunCommand
+		a.execCommand = shell.RunCommand
 		return
 	}
 	a.execCommand = execFn
@@ -136,7 +136,7 @@ func (a *App) SetCommandExecutor(execFn common.CommandExecutor) {
 func (a *App) Run(ctx context.Context) int {
 	runoqRoot, env, ok := a.resolveRuntimeEnv()
 	if !ok {
-		return common.Fail(a.stderr, "Unable to resolve RUNOQ_ROOT for runtime mode.")
+		return shell.Fail(a.stderr, "Unable to resolve RUNOQ_ROOT for runtime mode.")
 	}
 
 	subcommand := ""
@@ -169,11 +169,11 @@ func (a *App) Run(ctx context.Context) int {
 			return code
 		}
 		fmt.Fprintln(a.stderr, "runoq plan is deprecated; prefer `runoq tick` for the iterative planning workflow.")
-		repo, _ := common.EnvLookup(targetEnv, "REPO")
-		targetRoot, _ := common.EnvLookup(targetEnv, "TARGET_ROOT")
+		repo, _ := shell.EnvLookup(targetEnv, "REPO")
+		targetRoot, _ := shell.EnvLookup(targetEnv, "TARGET_ROOT")
 		planArgs, err := a.resolvePlanArgs(targetRoot, args)
 		if err != nil {
-			return common.Fail(a.stderr, err.Error())
+			return shell.Fail(a.stderr, err.Error())
 		}
 		planArgs = append([]string{repo}, planArgs...)
 		return a.runScript(ctx, targetEnv, runoqRoot, "plan.sh", planArgs)
@@ -227,7 +227,7 @@ func (a *App) Run(ctx context.Context) int {
 
 func (a *App) resolveRuntimeEnv() (string, []string, bool) {
 	env := append([]string(nil), a.env...)
-	runoqRoot, ok := common.EnvLookup(env, "RUNOQ_ROOT")
+	runoqRoot, ok := shell.EnvLookup(env, "RUNOQ_ROOT")
 	if !ok || strings.TrimSpace(runoqRoot) == "" {
 		runoqRoot = a.fallbackRoot()
 	}
@@ -235,16 +235,16 @@ func (a *App) resolveRuntimeEnv() (string, []string, bool) {
 		return "", nil, false
 	}
 
-	env = common.EnvSet(env, "RUNOQ_ROOT", runoqRoot)
-	configValue, hasConfig := common.EnvLookup(env, "RUNOQ_CONFIG")
+	env = shell.EnvSet(env, "RUNOQ_ROOT", runoqRoot)
+	configValue, hasConfig := shell.EnvLookup(env, "RUNOQ_CONFIG")
 	if !hasConfig || configValue == "" {
-		env = common.EnvSet(env, "RUNOQ_CONFIG", filepath.Join(runoqRoot, "config", "runoq.json"))
+		env = shell.EnvSet(env, "RUNOQ_CONFIG", filepath.Join(runoqRoot, "config", "runoq.json"))
 	}
 	return runoqRoot, env, true
 }
 
 func (a *App) fallbackRoot() string {
-	if a.cwd != "" && common.FileExists(filepath.Join(a.cwd, "scripts", "lib", "common.sh")) {
+	if a.cwd != "" && shell.FileExists(filepath.Join(a.cwd, "scripts", "lib", "common.sh")) {
 		return a.cwd
 	}
 	if a.executablePath == "" {
@@ -252,41 +252,41 @@ func (a *App) fallbackRoot() string {
 	}
 	base := filepath.Dir(a.executablePath)
 	candidate := filepath.Clean(filepath.Join(base, ".."))
-	if common.FileExists(filepath.Join(candidate, "scripts", "lib", "common.sh")) {
+	if shell.FileExists(filepath.Join(candidate, "scripts", "lib", "common.sh")) {
 		return candidate
 	}
 	return ""
 }
 
 func (a *App) prepareTargetContext(ctx context.Context, runoqRoot string, env []string) ([]string, int) {
-	targetRoot, ok := common.EnvLookup(env, "TARGET_ROOT")
+	targetRoot, ok := shell.EnvLookup(env, "TARGET_ROOT")
 	if !ok || strings.TrimSpace(targetRoot) == "" {
 		var err error
-		targetRoot, err = common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
+		targetRoot, err = shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
 			Name: "git",
 			Args: []string{"rev-parse", "--show-toplevel"},
 			Dir:  a.cwd,
 			Env:  env,
 		})
 		if err != nil {
-			return nil, common.Fail(a.stderr, "Run runoq from inside a git repository.")
+			return nil, shell.Fail(a.stderr, "Run runoq from inside a git repository.")
 		}
 	}
 
 	repo, err := a.resolveRepo(ctx, env, targetRoot)
 	if err != nil {
-		return nil, common.Fail(a.stderr, err.Error())
+		return nil, shell.Fail(a.stderr, err.Error())
 	}
 
 	nextEnv := append([]string(nil), env...)
-	nextEnv = common.EnvSet(nextEnv, "TARGET_ROOT", targetRoot)
-	nextEnv = common.EnvSet(nextEnv, "REPO", repo)
+	nextEnv = shell.EnvSet(nextEnv, "TARGET_ROOT", targetRoot)
+	nextEnv = shell.EnvSet(nextEnv, "REPO", repo)
 	nextEnv = prependPath(nextEnv, filepath.Join(runoqRoot, "scripts"))
 	return nextEnv, 0
 }
 
 func (a *App) prepareAuth(ctx context.Context, env []string, runoqRoot string) ([]string, int) {
-	token, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
+	token, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
 		Name: "bash",
 		Args: []string{
 			"-lc",
@@ -298,23 +298,23 @@ func (a *App) prepareAuth(ctx context.Context, env []string, runoqRoot string) (
 		Env: env,
 	})
 	if err != nil {
-		return nil, common.ExitCodeFromError(err)
+		return nil, shell.ExitCodeFromError(err)
 	}
 	if token == "" {
-		return nil, common.Fail(a.stderr, "Failed to export GH_TOKEN.")
+		return nil, shell.Fail(a.stderr, "Failed to export GH_TOKEN.")
 	}
 
 	nextEnv := append([]string(nil), env...)
-	nextEnv = common.EnvSet(nextEnv, "GH_TOKEN", token)
+	nextEnv = shell.EnvSet(nextEnv, "GH_TOKEN", token)
 	return nextEnv, 0
 }
 
 func (a *App) resolveRepo(ctx context.Context, env []string, targetRoot string) (string, error) {
-	if value, ok := common.EnvLookup(env, "RUNOQ_REPO"); ok && strings.TrimSpace(value) != "" {
+	if value, ok := shell.EnvLookup(env, "RUNOQ_REPO"); ok && strings.TrimSpace(value) != "" {
 		return value, nil
 	}
 
-	originURL, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
+	originURL, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
 		Name: "git",
 		Args: []string{"-C", targetRoot, "remote", "get-url", "origin"},
 		Dir:  a.cwd,
@@ -408,7 +408,7 @@ func readProjectPlanFile(targetRoot string) (string, error) {
 }
 
 func (a *App) runScript(ctx context.Context, env []string, runoqRoot string, script string, args []string) int {
-	req := common.CommandRequest{
+	req := shell.CommandRequest{
 		Name:   filepath.Join(runoqRoot, "scripts", script),
 		Args:   append([]string(nil), args...),
 		Dir:    a.cwd,
@@ -417,13 +417,13 @@ func (a *App) runScript(ctx context.Context, env []string, runoqRoot string, scr
 		Stderr: a.stderr,
 	}
 	if err := a.execCommand(ctx, req); err != nil {
-		return common.ExitCodeFromError(err)
+		return shell.ExitCodeFromError(err)
 	}
 	return 0
 }
 
 func (a *App) runMaintenance(ctx context.Context, env []string, runoqRoot string) int {
-	req := common.CommandRequest{
+	req := shell.CommandRequest{
 		Name: "bash",
 		Args: []string{
 			"-lc",
@@ -437,7 +437,7 @@ func (a *App) runMaintenance(ctx context.Context, env []string, runoqRoot string
 		Stderr: a.stderr,
 	}
 	if err := a.execCommand(ctx, req); err != nil {
-		return common.ExitCodeFromError(err)
+		return shell.ExitCodeFromError(err)
 	}
 	return 0
 }
@@ -448,7 +448,7 @@ func (a *App) runLoop(ctx context.Context, env []string, runoqRoot string, args 
 		if args[i] == "--backoff" && i+1 < len(args) {
 			v, err := strconv.Atoi(args[i+1])
 			if err != nil || v < 1 {
-				return common.Failf(a.stderr, "Invalid --backoff value: %s", args[i+1])
+				return shell.Failf(a.stderr, "Invalid --backoff value: %s", args[i+1])
 			}
 			backoff = v
 			i++
@@ -478,7 +478,7 @@ func (a *App) runLoop(ctx context.Context, env []string, runoqRoot string, args 
 				return 0
 			}
 		default:
-			return common.Failf(a.stderr, "tick exited with status %d", code)
+			return shell.Failf(a.stderr, "tick exited with status %d", code)
 		}
 	}
 }
@@ -497,9 +497,9 @@ func hasHelpFlag(args []string) bool {
 }
 
 func prependPath(env []string, head string) []string {
-	current, _ := common.EnvLookup(env, "PATH")
+	current, _ := shell.EnvLookup(env, "PATH")
 	if current == "" {
-		return common.EnvSet(env, "PATH", head)
+		return shell.EnvSet(env, "PATH", head)
 	}
-	return common.EnvSet(env, "PATH", head+string(os.PathListSeparator)+current)
+	return shell.EnvSet(env, "PATH", head+string(os.PathListSeparator)+current)
 }

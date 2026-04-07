@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/saruman/runoq/internal/common"
+	"github.com/saruman/runoq/internal/shell"
 )
 
 func (a *App) mentionTriageEntry(ctx context.Context, root string, env []string, args []string) int {
@@ -23,7 +23,7 @@ func (a *App) mentionTriageEntry(ctx context.Context, root string, env []string,
 	repo := args[0]
 	cfg, err := a.loadConfig(root, env)
 	if err != nil {
-		return common.Fail(a.stderr, err.Error())
+		return shell.Fail(a.stderr, err.Error())
 	}
 
 	var stdout bytes.Buffer
@@ -33,13 +33,13 @@ func (a *App) mentionTriageEntry(ctx context.Context, root string, env []string,
 
 	var mentions []json.RawMessage
 	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &mentions); err != nil {
-		return common.Failf(a.stderr, "poll-mentions returned invalid JSON: %v", err)
+		return shell.Failf(a.stderr, "poll-mentions returned invalid JSON: %v", err)
 	}
 	if len(mentions) == 0 {
 		return 0
 	}
 
-	return common.Fail(a.stderr, "mention-triage with mentions not implemented")
+	return shell.Fail(a.stderr, "mention-triage with mentions not implemented")
 }
 
 func (a *App) runCommandEntry(ctx context.Context, root string, env []string, args []string) int {
@@ -57,7 +57,7 @@ func (a *App) runCommandEntry(ctx context.Context, root string, env []string, ar
 		switch rest[i] {
 		case "--issue":
 			if i+1 >= len(rest) {
-				return common.Fail(a.stderr, "--issue requires a value")
+				return shell.Fail(a.stderr, "--issue requires a value")
 			}
 			issueNumber = rest[i+1]
 			i++
@@ -71,13 +71,13 @@ func (a *App) runCommandEntry(ctx context.Context, root string, env []string, ar
 
 	if issueNumber != "" {
 		if _, err := strconv.Atoi(issueNumber); err != nil {
-			return common.Fail(a.stderr, "--issue requires a numeric value")
+			return shell.Fail(a.stderr, "--issue requires a numeric value")
 		}
 	}
 
 	targetRoot, err := a.targetRoot(ctx, env)
 	if err != nil {
-		return common.Fail(a.stderr, err.Error())
+		return shell.Fail(a.stderr, err.Error())
 	}
 
 	a.logInfo("Configuring bot identity for target root: %s", targetRoot)
@@ -95,7 +95,7 @@ func (a *App) runCommandEntry(ctx context.Context, root string, env []string, ar
 
 	a.logInfo("Running reconciliation")
 	reconcileEnv := append([]string(nil), env...)
-	reconcileEnv = common.EnvSet(reconcileEnv, "RUNOQ_NO_AUTO_TOKEN", "1")
+	reconcileEnv = shell.EnvSet(reconcileEnv, "RUNOQ_NO_AUTO_TOKEN", "1")
 	_ = a.runScript(ctx, root, reconcileEnv, "dispatch-safety.sh", []string{"reconcile", repo}, nil, io.Discard, io.Discard)
 
 	if issueNumber == "" {
@@ -108,7 +108,7 @@ func (a *App) runCommandEntry(ctx context.Context, root string, env []string, ar
 	issue, _ := strconv.Atoi(issueNumber)
 	title, err := a.issueTitle(ctx, env, repo, issue)
 	if err != nil {
-		return common.Failf(a.stderr, "failed to load issue title: %v", err)
+		return shell.Failf(a.stderr, "failed to load issue title: %v", err)
 	}
 
 	stateJSON, err := a.runSingleIssue(ctx, root, env, repo, issue, dryRun, title)
@@ -129,12 +129,12 @@ func (a *App) runCommandEntry(ctx context.Context, root string, env []string, ar
 func (a *App) runQueue(ctx context.Context, root string, env []string, repo string) int {
 	cfg, err := a.loadConfig(root, env)
 	if err != nil {
-		return common.Fail(a.stderr, err.Error())
+		return shell.Fail(a.stderr, err.Error())
 	}
 
 	queueEnv := append([]string(nil), env...)
-	queueEnv = common.EnvSet(queueEnv, "RUNOQ_LOG", "1")
-	queueEnv = common.EnvSet(queueEnv, "RUNOQ_NO_AUTO_TOKEN", "1")
+	queueEnv = shell.EnvSet(queueEnv, "RUNOQ_LOG", "1")
+	queueEnv = shell.EnvSet(queueEnv, "RUNOQ_NO_AUTO_TOKEN", "1")
 
 	for {
 		queueOut, queueStderr, err := a.scriptOutputWithStderr(ctx, root, queueEnv, "gh-issue-queue.sh", []string{"next", repo, cfg.Labels.Ready}, nil)
@@ -147,7 +147,7 @@ func (a *App) runQueue(ctx context.Context, root string, env []string, repo stri
 
 		var selection queueSelectionResult
 		if err := json.Unmarshal([]byte(queueOut), &selection); err != nil {
-			return common.Failf(a.stderr, "gh-issue-queue.sh next returned invalid JSON: %v", err)
+			return shell.Failf(a.stderr, "gh-issue-queue.sh next returned invalid JSON: %v", err)
 		}
 
 		totalSkipped := len(selection.Skipped)
@@ -188,7 +188,7 @@ func (a *App) runQueue(ctx context.Context, root string, env []string, repo stri
 	}
 
 	if err := a.runEpicSweep(ctx, root, queueEnv, repo, cfg.Labels.Ready); err != nil {
-		return common.Fail(a.stderr, err.Error())
+		return shell.Fail(a.stderr, err.Error())
 	}
 	return 0
 }
@@ -196,12 +196,12 @@ func (a *App) runQueue(ctx context.Context, root string, env []string, repo stri
 func (a *App) runQueueDryRun(ctx context.Context, root string, env []string, repo string) int {
 	cfg, err := a.loadConfig(root, env)
 	if err != nil {
-		return common.Fail(a.stderr, err.Error())
+		return shell.Fail(a.stderr, err.Error())
 	}
 
 	queueEnv := append([]string(nil), env...)
-	queueEnv = common.EnvSet(queueEnv, "RUNOQ_LOG", "1")
-	queueEnv = common.EnvSet(queueEnv, "RUNOQ_NO_AUTO_TOKEN", "1")
+	queueEnv = shell.EnvSet(queueEnv, "RUNOQ_LOG", "1")
+	queueEnv = shell.EnvSet(queueEnv, "RUNOQ_NO_AUTO_TOKEN", "1")
 	queueOut, queueStderr, err := a.scriptOutputWithStderr(ctx, root, queueEnv, "gh-issue-queue.sh", []string{"next", repo, cfg.Labels.Ready}, nil)
 	if strings.TrimSpace(queueStderr) != "" {
 		_, _ = fmt.Fprintln(a.stderr, queueStderr)
@@ -212,7 +212,7 @@ func (a *App) runQueueDryRun(ctx context.Context, root string, env []string, rep
 
 	var selection queueSelectionResult
 	if err := json.Unmarshal([]byte(queueOut), &selection); err != nil {
-		return common.Failf(a.stderr, "gh-issue-queue.sh next returned invalid JSON: %v", err)
+		return shell.Failf(a.stderr, "gh-issue-queue.sh next returned invalid JSON: %v", err)
 	}
 
 	totalSkipped := len(selection.Skipped)
@@ -451,7 +451,7 @@ func (a *App) issueTitle(ctx context.Context, env []string, repo string, issueNu
 }
 
 func (a *App) loadConfig(root string, env []string) (queueConfig, error) {
-	configPath, ok := common.EnvLookup(env, "RUNOQ_CONFIG")
+	configPath, ok := shell.EnvLookup(env, "RUNOQ_CONFIG")
 	if !ok || strings.TrimSpace(configPath) == "" {
 		configPath = filepath.Join(root, "config", "runoq.json")
 	}

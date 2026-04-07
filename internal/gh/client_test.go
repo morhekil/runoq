@@ -15,12 +15,12 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/saruman/runoq/internal/common"
+	"github.com/saruman/runoq/internal/shell"
 	"github.com/saruman/runoq/internal/gh"
 )
 
 func TestNewClient(t *testing.T) {
-	exec := common.RunCommand
+	exec := shell.RunCommand
 	httpClient := http.DefaultClient
 	env := []string{"PATH=/usr/bin"}
 	cwd := "/tmp"
@@ -36,7 +36,7 @@ func TestNewClient(t *testing.T) {
 
 func TestEnsureToken_AlreadySet(t *testing.T) {
 	var calls int
-	exec := func(_ context.Context, req common.CommandRequest) error {
+	exec := func(_ context.Context, req shell.CommandRequest) error {
 		calls++
 		return nil
 	}
@@ -53,7 +53,7 @@ func TestEnsureToken_AlreadySet(t *testing.T) {
 
 func TestEnsureToken_NoAutoToken(t *testing.T) {
 	var calls int
-	exec := func(_ context.Context, req common.CommandRequest) error {
+	exec := func(_ context.Context, req shell.CommandRequest) error {
 		calls++
 		return nil
 	}
@@ -101,7 +101,7 @@ func TestEnsureToken_OnlyOnce(t *testing.T) {
 
 	// Track how many times git rev-parse is called (proxy for mint attempts).
 	var gitCalls atomic.Int32
-	exec := func(_ context.Context, req common.CommandRequest) error {
+	exec := func(_ context.Context, req shell.CommandRequest) error {
 		if req.Name == "git" {
 			gitCalls.Add(1)
 			fmt.Fprint(req.Stdout, tmpDir)
@@ -149,7 +149,7 @@ func TestEnsureToken_OnlyOnce(t *testing.T) {
 
 func TestOutput_EnsuresToken(t *testing.T) {
 	var ensureCalled bool
-	exec := func(_ context.Context, req common.CommandRequest) error {
+	exec := func(_ context.Context, req shell.CommandRequest) error {
 		if req.Name == "git" {
 			ensureCalled = true
 			// Simulate git rev-parse failing so EnsureToken returns early after setting tokenInit.
@@ -174,7 +174,7 @@ func TestOutput_EnsuresToken(t *testing.T) {
 }
 
 func TestClientOutput_UsesGHBin(t *testing.T) {
-	exec := func(_ context.Context, req common.CommandRequest) error {
+	exec := func(_ context.Context, req shell.CommandRequest) error {
 		if req.Name == "git" {
 			return fmt.Errorf("not a repo")
 		}
@@ -193,7 +193,7 @@ func TestClientOutput_UsesGHBin(t *testing.T) {
 }
 
 func TestRun_PassesIO(t *testing.T) {
-	exec := func(_ context.Context, req common.CommandRequest) error {
+	exec := func(_ context.Context, req shell.CommandRequest) error {
 		if req.Name == "git" {
 			return fmt.Errorf("not a repo")
 		}

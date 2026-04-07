@@ -12,7 +12,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/saruman/runoq/internal/common"
+	"github.com/saruman/runoq/internal/shell"
 )
 
 const usageText = `Usage:
@@ -26,7 +26,7 @@ type App struct {
 	cwd         string
 	stdout      io.Writer
 	stderr      io.Writer
-	execCommand common.CommandExecutor
+	execCommand shell.CommandExecutor
 }
 
 type groundTruth struct {
@@ -55,13 +55,13 @@ func New(args []string, env []string, cwd string, stdout io.Writer, stderr io.Wr
 		cwd:         cwd,
 		stdout:      stdout,
 		stderr:      stderr,
-		execCommand: common.RunCommand,
+		execCommand: shell.RunCommand,
 	}
 }
 
-func (a *App) SetCommandExecutor(execFn common.CommandExecutor) {
+func (a *App) SetCommandExecutor(execFn shell.CommandExecutor) {
 	if execFn == nil {
-		a.execCommand = common.RunCommand
+		a.execCommand = shell.RunCommand
 		return
 	}
 	a.execCommand = execFn
@@ -95,12 +95,12 @@ func (a *App) Run(ctx context.Context) int {
 func (a *App) runRound(ctx context.Context, worktree string, branch string, baseSHA string, payloadFile string) int {
 	truth, err := a.groundTruth(ctx, worktree, baseSHA)
 	if err != nil {
-		return common.Failf(a.stderr, "Failed to compute ground truth: %v", err)
+		return shell.Failf(a.stderr, "Failed to compute ground truth: %v", err)
 	}
 
 	payload, err := a.readPayload(payloadFile)
 	if err != nil {
-		return common.Failf(a.stderr, "%v", err)
+		return shell.Failf(a.stderr, "%v", err)
 	}
 
 	failures := make([]string, 0, 8)
@@ -121,17 +121,17 @@ func (a *App) runRound(ctx context.Context, worktree string, branch string, base
 		failures = append(failures, "file lists do not match ground truth")
 	}
 
-	localSHA, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
+	localSHA, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
 		Name: "git",
 		Args: []string{"-C", worktree, "rev-parse", "HEAD"},
 		Dir:  a.cwd,
 		Env:  a.env,
 	})
 	if err != nil {
-		return common.Failf(a.stderr, "Failed to resolve local HEAD: %v", err)
+		return shell.Failf(a.stderr, "Failed to resolve local HEAD: %v", err)
 	}
 
-	remoteSHA, _ := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
+	remoteSHA, _ := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
 		Name: "git",
 		Args: []string{"-C", worktree, "ls-remote", "origin", branch},
 		Dir:  a.cwd,
@@ -144,7 +144,7 @@ func (a *App) runRound(ctx context.Context, worktree string, branch string, base
 
 	testCommand, buildCommand, err := a.verificationCommands()
 	if err != nil {
-		return common.Fail(a.stderr, err.Error())
+		return shell.Fail(a.stderr, err.Error())
 	}
 
 	if output, err := a.runCheckCommand(ctx, worktree, testCommand); err != nil {
@@ -184,7 +184,7 @@ func (a *App) runRound(ctx context.Context, worktree string, branch string, base
 		Failures:      failures,
 		Actual:        truth,
 	}
-	return common.WriteJSON(a.stdout, a.stderr, res)
+	return shell.WriteJSON(a.stdout, a.stderr, res)
 }
 
 func (a *App) runIntegrate(ctx context.Context, worktree string, criteriaCommit string) int {
@@ -209,13 +209,13 @@ func (a *App) runIntegrate(ctx context.Context, worktree string, criteriaCommit 
 
 	testCommand, _, err := a.verificationCommands()
 	if err != nil {
-		return common.Fail(a.stderr, err.Error())
+		return shell.Fail(a.stderr, err.Error())
 	}
 	if _, err := a.runCheckCommand(ctx, worktree, testCommand); err != nil {
 		failures = append(failures, "test command failed")
 	}
 
-	return common.WriteJSON(a.stdout, a.stderr, integrateResult{
+	return shell.WriteJSON(a.stdout, a.stderr, integrateResult{
 		OK:       len(failures) == 0,
 		Failures: failures,
 	})
@@ -234,7 +234,7 @@ func (a *App) readPayload(payloadFile string) (map[string]any, error) {
 }
 
 func (a *App) groundTruth(ctx context.Context, worktree string, baseSHA string) (groundTruth, error) {
-	commitsOut, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
+	commitsOut, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
 		Name: "git",
 		Args: []string{"-C", worktree, "rev-list", "--reverse", baseSHA + "..HEAD"},
 		Dir:  a.cwd,
@@ -243,7 +243,7 @@ func (a *App) groundTruth(ctx context.Context, worktree string, baseSHA string) 
 	if err != nil {
 		return groundTruth{}, err
 	}
-	diffOut, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
+	diffOut, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
 		Name: "git",
 		Args: []string{"-C", worktree, "diff", "--name-status", baseSHA + "..HEAD"},
 		Dir:  a.cwd,
@@ -282,9 +282,9 @@ func (a *App) groundTruth(ctx context.Context, worktree string, baseSHA string) 
 
 func (a *App) verificationCommands() (string, string, error) {
 	configPath := ""
-	if value, ok := common.EnvLookup(a.env, "RUNOQ_CONFIG"); ok && strings.TrimSpace(value) != "" {
+	if value, ok := shell.EnvLookup(a.env, "RUNOQ_CONFIG"); ok && strings.TrimSpace(value) != "" {
 		configPath = value
-	} else if root, ok := common.EnvLookup(a.env, "RUNOQ_ROOT"); ok && strings.TrimSpace(root) != "" {
+	} else if root, ok := shell.EnvLookup(a.env, "RUNOQ_ROOT"); ok && strings.TrimSpace(root) != "" {
 		configPath = filepath.Join(root, "config", "runoq.json")
 	} else if strings.TrimSpace(a.cwd) != "" {
 		configPath = filepath.Join(a.cwd, "config", "runoq.json")
@@ -319,7 +319,7 @@ func (a *App) verificationCommands() (string, string, error) {
 func (a *App) runCheckCommand(ctx context.Context, worktree string, command string) (string, error) {
 	script := fmt.Sprintf("cd %s && %s", shellQuote(worktree), command)
 	var output bytes.Buffer
-	err := a.execCommand(ctx, common.CommandRequest{
+	err := a.execCommand(ctx, shell.CommandRequest{
 		Name:   "bash",
 		Args:   []string{"-lc", script},
 		Dir:    a.cwd,
@@ -331,7 +331,7 @@ func (a *App) runCheckCommand(ctx context.Context, worktree string, command stri
 }
 
 func (a *App) commitExists(ctx context.Context, worktree string, sha string) bool {
-	err := a.execCommand(ctx, common.CommandRequest{
+	err := a.execCommand(ctx, shell.CommandRequest{
 		Name:   "git",
 		Args:   []string{"-C", worktree, "rev-parse", "--verify", sha + "^{commit}"},
 		Dir:    a.cwd,
@@ -343,7 +343,7 @@ func (a *App) commitExists(ctx context.Context, worktree string, sha string) boo
 }
 
 func (a *App) criteriaFiles(ctx context.Context, worktree string, criteriaCommit string) []string {
-	out, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
+	out, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
 		Name: "git",
 		Args: []string{"-C", worktree, "diff-tree", "--no-commit-id", "--name-only", "-r", criteriaCommit},
 		Dir:  a.cwd,
@@ -356,7 +356,7 @@ func (a *App) criteriaFiles(ctx context.Context, worktree string, criteriaCommit
 }
 
 func (a *App) isCriteriaTampered(ctx context.Context, worktree string, criteriaCommit string, cfile string) bool {
-	err := a.execCommand(ctx, common.CommandRequest{
+	err := a.execCommand(ctx, shell.CommandRequest{
 		Name:   "git",
 		Args:   []string{"-C", worktree, "diff", "--quiet", criteriaCommit, "HEAD", "--", cfile},
 		Dir:    a.cwd,

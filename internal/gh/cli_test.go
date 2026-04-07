@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/saruman/runoq/internal/common"
+	"github.com/saruman/runoq/internal/shell"
 	"github.com/saruman/runoq/internal/gh"
 )
 
 func TestOutput(t *testing.T) {
-	fake := func(_ context.Context, req common.CommandRequest) error {
+	fake := func(_ context.Context, req shell.CommandRequest) error {
 		fmt.Fprint(req.Stdout, "hello\n")
 		return nil
 	}
@@ -25,7 +25,7 @@ func TestOutput(t *testing.T) {
 }
 
 func TestOutput_UsesGHBin(t *testing.T) {
-	fake := func(_ context.Context, req common.CommandRequest) error {
+	fake := func(_ context.Context, req shell.CommandRequest) error {
 		if req.Name != "mycustomgh" {
 			t.Errorf("expected binary mycustomgh, got %s", req.Name)
 		}

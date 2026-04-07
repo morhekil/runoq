@@ -10,14 +10,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/saruman/runoq/internal/common"
+	"github.com/saruman/runoq/internal/shell"
 )
 
 func TestListParsesMetadataVariants(t *testing.T) {
 	t.Parallel()
 
 	app := newTestApp(t, []string{"list", "owner/repo", "runoq:ready"})
-	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
 		t.Helper()
 		if req.Name != "gh" {
 			t.Fatalf("unexpected command: %s %v", req.Name, req.Args)
@@ -75,7 +75,7 @@ func TestListParsesPlanningAndAdjustmentTypes(t *testing.T) {
 	t.Parallel()
 
 	app := newTestApp(t, []string{"list", "owner/repo", "runoq:ready"})
-	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
 		t.Helper()
 		if req.Name != "gh" {
 			t.Fatalf("unexpected command: %s %v", req.Name, req.Args)
@@ -120,7 +120,7 @@ func TestNextSkipsBlockedDependencies(t *testing.T) {
 	t.Parallel()
 
 	app := newTestApp(t, []string{"next", "owner/repo", "runoq:ready"})
-	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
 		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
 		switch {
@@ -161,7 +161,7 @@ func TestSetStatusRemovesExistingRunoqLabels(t *testing.T) {
 
 	app := newTestApp(t, []string{"set-status", "owner/repo", "42", "in-progress"})
 	var commands []string
-	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
 		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
 		commands = append(commands, command)
@@ -194,7 +194,7 @@ func TestSetStatusPreservesNonStateLabels(t *testing.T) {
 
 	app := newTestApp(t, []string{"set-status", "owner/repo", "42", "done"})
 	var editCommand string
-	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
 		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
 		switch {
@@ -232,7 +232,7 @@ func TestSetStatusDoneClosesIssue(t *testing.T) {
 
 	app := newTestApp(t, []string{"set-status", "owner/repo", "42", "done"})
 	var commands []string
-	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
 		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
 		commands = append(commands, command)
@@ -271,7 +271,7 @@ func TestSetStatusDoneRetriesCloseOnce(t *testing.T) {
 	app := newTestApp(t, []string{"set-status", "owner/repo", "42", "done"})
 	var commands []string
 	closeAttempts := 0
-	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
 		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
 		commands = append(commands, command)
@@ -316,7 +316,7 @@ func TestCreateWritesMetadataAndLinksParentEpic(t *testing.T) {
 	})
 	var bodyText string
 	var commands []string
-	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
 		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
 		commands = append(commands, command)
@@ -367,7 +367,7 @@ func TestCreatePlanningWritesPlanningType(t *testing.T) {
 		"--estimated-complexity", "low",
 	})
 	var bodyText string
-	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
 		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
 		if strings.Contains(command, "issue create --repo owner/repo --title Plan milestone 1 --body-file ") {
@@ -410,7 +410,7 @@ func TestCreateAdjustmentWritesAdjustmentType(t *testing.T) {
 		"--estimated-complexity", "low",
 	})
 	var bodyText string
-	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
 		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
 		if strings.Contains(command, "issue create --repo owner/repo --title Adjust milestones --body-file ") {
@@ -449,7 +449,7 @@ func TestAssignUsesOperatorLoginOverride(t *testing.T) {
 	app := newTestApp(t, []string{"assign", "owner/repo", "99"})
 	app.env = append(app.env, "RUNOQ_OPERATOR_LOGIN=override-user")
 	var sawEdit bool
-	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
 		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
 		switch {
@@ -478,7 +478,7 @@ func TestEpicStatusTracksPendingChildren(t *testing.T) {
 	t.Parallel()
 
 	app := newTestApp(t, []string{"epic-status", "owner/repo", "77"})
-	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
 		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
 		if !strings.Contains(command, "api repos/owner/repo/issues/77/sub_issues --paginate") {
@@ -511,7 +511,7 @@ func TestAssignFallsBackToGHWhenEnvEmpty(t *testing.T) {
 	app := newTestApp(t, []string{"assign", "owner/repo", "99"})
 	app.env = append(app.env, "RUNOQ_OPERATOR_LOGIN=")
 	var sawAPICall, sawEdit bool
-	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
 		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
 		switch {
@@ -544,7 +544,7 @@ func TestAssignFailsWhenGHReturnsEmpty(t *testing.T) {
 	t.Parallel()
 
 	app := newTestApp(t, []string{"assign", "owner/repo", "42"})
-	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
 		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
 		switch {
@@ -576,7 +576,7 @@ func TestCreateBodyInterpretsEscapedNewlines(t *testing.T) {
 		"--estimated-complexity", "low",
 	})
 	var bodyText string
-	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
 		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
 		if strings.Contains(command, "issue create") {
@@ -618,7 +618,7 @@ func TestCreatePlanningDoesNotAssign(t *testing.T) {
 		"--priority", "1",
 		"--estimated-complexity", "low",
 	})
-	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
 		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
 		if strings.Contains(command, "issue create") {
@@ -644,7 +644,7 @@ func TestAssignSetsOperatorOnIssue(t *testing.T) {
 	app := newTestApp(t, []string{"assign", "owner/repo", "42"})
 	app.env = append(app.env, "RUNOQ_OPERATOR_LOGIN=the-human")
 	var sawEdit bool
-	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
 		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
 		if strings.Contains(command, "issue edit 42 --repo owner/repo --add-assignee the-human") {
@@ -669,7 +669,7 @@ func TestRunGHMutationWithRetryExhaustion(t *testing.T) {
 
 	app := newTestApp(t, []string{"set-status", "owner/repo", "42", "done"})
 	editAttempts := 0
-	app.SetCommandExecutor(func(ctx context.Context, req common.CommandRequest) error {
+	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
 		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
 		switch {

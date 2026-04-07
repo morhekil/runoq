@@ -15,7 +15,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/saruman/runoq/internal/common"
+	"github.com/saruman/runoq/internal/shell"
 )
 
 const usageText = `Usage:
@@ -31,7 +31,7 @@ type App struct {
 	cwd         string
 	stdout      io.Writer
 	stderr      io.Writer
-	execCommand common.CommandExecutor
+	execCommand shell.CommandExecutor
 }
 
 type contractError struct {
@@ -75,13 +75,13 @@ func New(args []string, env []string, cwd string, stdout io.Writer, stderr io.Wr
 		cwd:         cwd,
 		stdout:      stdout,
 		stderr:      stderr,
-		execCommand: common.RunCommand,
+		execCommand: shell.RunCommand,
 	}
 }
 
-func (a *App) SetCommandExecutor(execFn common.CommandExecutor) {
+func (a *App) SetCommandExecutor(execFn shell.CommandExecutor) {
 	if execFn == nil {
-		a.execCommand = common.RunCommand
+		a.execCommand = shell.RunCommand
 		return
 	}
 	a.execCommand = execFn
@@ -115,12 +115,12 @@ func (a *App) Run(ctx context.Context) int {
 func (a *App) runReconcile(ctx context.Context, repo string) int {
 	activeIssues, err := a.activeStateIssues()
 	if err != nil {
-		return common.Failf(a.stderr, "%v", err)
+		return shell.Failf(a.stderr, "%v", err)
 	}
 
 	files, err := a.stateJSONFiles()
 	if err != nil {
-		return common.Failf(a.stderr, "%v", err)
+		return shell.Failf(a.stderr, "%v", err)
 	}
 
 	actions := make([]reconcileAction, 0, len(files))
@@ -135,7 +135,7 @@ func (a *App) runReconcile(ctx context.Context, repo string) int {
 			if isExitError(commandErr) {
 				return 1
 			}
-			return common.Failf(a.stderr, "%v", commandErr)
+			return shell.Failf(a.stderr, "%v", commandErr)
 		}
 		if ok {
 			actions = append(actions, action)
@@ -147,11 +147,11 @@ func (a *App) runReconcile(ctx context.Context, repo string) int {
 		if isExitError(err) {
 			return 1
 		}
-		return common.Failf(a.stderr, "%v", err)
+		return shell.Failf(a.stderr, "%v", err)
 	}
 	actions = append(actions, staleActions...)
 
-	return common.WriteJSON(a.stdout, a.stderr, actions)
+	return shell.WriteJSON(a.stdout, a.stderr, actions)
 }
 
 func (a *App) runEligibility(ctx context.Context, repo string, issueArg string) int {
@@ -160,7 +160,7 @@ func (a *App) runEligibility(ctx context.Context, repo string, issueArg string) 
 		if isExitError(err) {
 			return 1
 		}
-		return common.Failf(a.stderr, "%v", err)
+		return shell.Failf(a.stderr, "%v", err)
 	}
 
 	var issue struct {
@@ -169,12 +169,12 @@ func (a *App) runEligibility(ctx context.Context, repo string, issueArg string) 
 		Body   string `json:"body"`
 	}
 	if err := json.Unmarshal([]byte(issueOutput), &issue); err != nil {
-		return common.Failf(a.stderr, "failed to parse issue metadata: %v", err)
+		return shell.Failf(a.stderr, "failed to parse issue metadata: %v", err)
 	}
 
 	cfg, err := a.loadConfig()
 	if err != nil {
-		return common.Failf(a.stderr, "%v", err)
+		return shell.Failf(a.stderr, "%v", err)
 	}
 
 	metadata := parseIssueMetadata(issue.Body)
@@ -194,7 +194,7 @@ func (a *App) runEligibility(ctx context.Context, repo string, issueArg string) 
 			if isExitError(err) {
 				return 1
 			}
-			return common.Failf(a.stderr, "%v", err)
+			return shell.Failf(a.stderr, "%v", err)
 		}
 		if blocked {
 			reasons = append(reasons, reason)
@@ -207,7 +207,7 @@ func (a *App) runEligibility(ctx context.Context, repo string, issueArg string) 
 			if isExitError(err) {
 				return 1
 			}
-			return common.Failf(a.stderr, "%v", err)
+			return shell.Failf(a.stderr, "%v", err)
 		}
 		if openPRReason != "" {
 			reasons = append(reasons, openPRReason)
@@ -218,7 +218,7 @@ func (a *App) runEligibility(ctx context.Context, repo string, issueArg string) 
 			if isExitError(err) {
 				return 1
 			}
-			return common.Failf(a.stderr, "%v", err)
+			return shell.Failf(a.stderr, "%v", err)
 		}
 		if hasConflicts {
 			reasons = append(reasons, "branch "+branch+" has unresolved conflicts with origin/main")
@@ -233,7 +233,7 @@ func (a *App) runEligibility(ctx context.Context, repo string, issueArg string) 
 	}
 
 	if len(reasons) == 0 {
-		return common.WriteJSON(a.stdout, a.stderr, result)
+		return shell.WriteJSON(a.stdout, a.stderr, result)
 	}
 
 	message := "Skipped: " + strings.Join(reasons, "; ") + "."
@@ -241,9 +241,9 @@ func (a *App) runEligibility(ctx context.Context, repo string, issueArg string) 
 		if isExitError(err) {
 			return 1
 		}
-		return common.Failf(a.stderr, "%v", err)
+		return shell.Failf(a.stderr, "%v", err)
 	}
-	if code := common.WriteJSON(a.stdout, a.stderr, result); code != 0 {
+	if code := shell.WriteJSON(a.stdout, a.stderr, result); code != 0 {
 		return code
 	}
 	return 1
@@ -508,7 +508,7 @@ func (a *App) branchHasConflicts(ctx context.Context, branch string) (bool, erro
 		return false, nil
 	}
 
-	remoteOut, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
+	remoteOut, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
 		Name: "git",
 		Args: []string{"-C", targetRoot, "ls-remote", "--heads", "origin", branch},
 		Dir:  a.cwd,
@@ -522,7 +522,7 @@ func (a *App) branchHasConflicts(ctx context.Context, branch string) (bool, erro
 		return false, nil
 	}
 
-	_ = a.execCommand(ctx, common.CommandRequest{
+	_ = a.execCommand(ctx, shell.CommandRequest{
 		Name:   "git",
 		Args:   []string{"-C", targetRoot, "fetch", "origin", "main", branch},
 		Dir:    a.cwd,
@@ -531,7 +531,7 @@ func (a *App) branchHasConflicts(ctx context.Context, branch string) (bool, erro
 		Stderr: io.Discard,
 	})
 
-	mergeBase, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
+	mergeBase, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
 		Name: "git",
 		Args: []string{"-C", targetRoot, "merge-base", "origin/main", remoteSHA},
 		Dir:  a.cwd,
@@ -541,7 +541,7 @@ func (a *App) branchHasConflicts(ctx context.Context, branch string) (bool, erro
 		return false, nil
 	}
 
-	mergeTree, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
+	mergeTree, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
 		Name: "git",
 		Args: []string{"-C", targetRoot, "merge-tree", strings.TrimSpace(mergeBase), "origin/main", remoteSHA},
 		Dir:  a.cwd,
@@ -569,7 +569,7 @@ func (a *App) branchIsPushed(ctx context.Context, branch string) (bool, error) {
 		return false, nil
 	}
 
-	output, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
+	output, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
 		Name: "git",
 		Args: []string{"-C", targetRoot, "ls-remote", "--heads", "origin", branch},
 		Dir:  a.cwd,
@@ -595,7 +595,7 @@ func (a *App) setIssueStatus(ctx context.Context, repo string, issueNumber int, 
 		return err
 	}
 
-	return a.execCommand(ctx, common.CommandRequest{
+	return a.execCommand(ctx, shell.CommandRequest{
 		Name:   filepath.Join(root, "scripts", "gh-issue-queue.sh"),
 		Args:   []string{"set-status", repo, strconv.Itoa(issueNumber), status},
 		Dir:    a.cwd,
@@ -617,7 +617,7 @@ func (a *App) runGhWithStderr(ctx context.Context, stdout io.Writer, stderr io.W
 
 	script := `source "$1/scripts/lib/common.sh"; shift; runoq::gh "$@"`
 	commandArgs := append([]string{"-lc", script, "bash", root}, args...)
-	return a.execCommand(ctx, common.CommandRequest{
+	return a.execCommand(ctx, shell.CommandRequest{
 		Name:   "bash",
 		Args:   commandArgs,
 		Dir:    a.cwd,
@@ -662,7 +662,7 @@ func (a *App) loadConfig() (config, error) {
 }
 
 func (a *App) configPath() (string, error) {
-	if value, ok := common.EnvLookup(a.env, "RUNOQ_CONFIG"); ok && strings.TrimSpace(value) != "" {
+	if value, ok := shell.EnvLookup(a.env, "RUNOQ_CONFIG"); ok && strings.TrimSpace(value) != "" {
 		return value, nil
 	}
 	root, err := a.runoqRoot()
@@ -676,7 +676,7 @@ func (a *App) configPath() (string, error) {
 }
 
 func (a *App) runoqRoot() (string, error) {
-	if value, ok := common.EnvLookup(a.env, "RUNOQ_ROOT"); ok && strings.TrimSpace(value) != "" {
+	if value, ok := shell.EnvLookup(a.env, "RUNOQ_ROOT"); ok && strings.TrimSpace(value) != "" {
 		return value, nil
 	}
 	if strings.TrimSpace(a.cwd) != "" {
@@ -689,11 +689,11 @@ func (a *App) runoqRoot() (string, error) {
 }
 
 func (a *App) targetRoot(ctx context.Context) (string, error) {
-	if value, ok := common.EnvLookup(a.env, "TARGET_ROOT"); ok && strings.TrimSpace(value) != "" {
+	if value, ok := shell.EnvLookup(a.env, "TARGET_ROOT"); ok && strings.TrimSpace(value) != "" {
 		return value, nil
 	}
 
-	output, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
+	output, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
 		Name:   "git",
 		Args:   []string{"rev-parse", "--show-toplevel"},
 		Dir:    a.cwd,
@@ -707,7 +707,7 @@ func (a *App) targetRoot(ctx context.Context) (string, error) {
 }
 
 func (a *App) stateDir(ctx context.Context) (string, error) {
-	if value, ok := common.EnvLookup(a.env, "RUNOQ_STATE_DIR"); ok && strings.TrimSpace(value) != "" {
+	if value, ok := shell.EnvLookup(a.env, "RUNOQ_STATE_DIR"); ok && strings.TrimSpace(value) != "" {
 		return value, nil
 	}
 	targetRoot, err := a.targetRoot(ctx)

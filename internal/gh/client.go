@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/saruman/runoq/internal/common"
+	"github.com/saruman/runoq/internal/shell"
 )
 
 // identityFile represents the .runoq/identity.json configuration.
@@ -21,7 +21,7 @@ type identityFile struct {
 
 // Client wraps gh CLI execution with automatic token lifecycle management.
 type Client struct {
-	exec       common.CommandExecutor
+	exec       shell.CommandExecutor
 	httpClient *http.Client
 	env        []string
 	cwd        string
@@ -29,7 +29,7 @@ type Client struct {
 }
 
 // NewClient creates a Client with the given executor, HTTP client, environment, and working directory.
-func NewClient(exec common.CommandExecutor, httpClient *http.Client, env []string, cwd string) *Client {
+func NewClient(exec shell.CommandExecutor, httpClient *http.Client, env []string, cwd string) *Client {
 	return &Client{
 		exec:       exec,
 		httpClient: httpClient,
@@ -41,10 +41,10 @@ func NewClient(exec common.CommandExecutor, httpClient *http.Client, env []strin
 // EnsureToken checks for GH_TOKEN, reads identity.json, and mints a token if needed.
 // Modifies c.env on success. Returns nil on success or silent failure if no identity is found.
 func (c *Client) EnsureToken(ctx context.Context) error {
-	if _, ok := common.EnvLookup(c.env, "GH_TOKEN"); ok {
+	if _, ok := shell.EnvLookup(c.env, "GH_TOKEN"); ok {
 		return nil
 	}
-	if _, ok := common.EnvLookup(c.env, "RUNOQ_NO_AUTO_TOKEN"); ok {
+	if _, ok := shell.EnvLookup(c.env, "RUNOQ_NO_AUTO_TOKEN"); ok {
 		return nil
 	}
 	if c.tokenInit {
@@ -52,7 +52,7 @@ func (c *Client) EnsureToken(ctx context.Context) error {
 	}
 	c.tokenInit = true
 
-	targetRoot, err := common.CommandOutput(ctx, c.exec, common.CommandRequest{
+	targetRoot, err := shell.CommandOutput(ctx, c.exec, shell.CommandRequest{
 		Name:   "git",
 		Args:   []string{"rev-parse", "--show-toplevel"},
 		Dir:    c.cwd,
@@ -88,7 +88,7 @@ func (c *Client) EnsureToken(ctx context.Context) error {
 		return nil
 	}
 
-	c.env = common.EnvSet(c.env, "GH_TOKEN", token)
+	c.env = shell.EnvSet(c.env, "GH_TOKEN", token)
 	return nil
 }
 
@@ -104,10 +104,10 @@ func (c *Client) Output(ctx context.Context, args ...string) (string, error) {
 		return "", err
 	}
 	bin := "gh"
-	if v, ok := common.EnvLookup(c.env, "GH_BIN"); ok && v != "" {
+	if v, ok := shell.EnvLookup(c.env, "GH_BIN"); ok && v != "" {
 		bin = v
 	}
-	return common.CommandOutput(ctx, c.exec, common.CommandRequest{
+	return shell.CommandOutput(ctx, c.exec, shell.CommandRequest{
 		Name: bin,
 		Args: args,
 		Dir:  c.cwd,
@@ -122,10 +122,10 @@ func (c *Client) Run(ctx context.Context, args []string, stdout io.Writer, stder
 		return err
 	}
 	bin := "gh"
-	if v, ok := common.EnvLookup(c.env, "GH_BIN"); ok && v != "" {
+	if v, ok := shell.EnvLookup(c.env, "GH_BIN"); ok && v != "" {
 		bin = v
 	}
-	return c.exec(ctx, common.CommandRequest{
+	return c.exec(ctx, shell.CommandRequest{
 		Name:   bin,
 		Args:   args,
 		Dir:    c.cwd,

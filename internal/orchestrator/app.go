@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/saruman/runoq/internal/common"
+	"github.com/saruman/runoq/internal/shell"
 )
 
 const usageText = `Usage:
@@ -19,7 +19,7 @@ type App struct {
 	cwd         string
 	stdout      io.Writer
 	stderr      io.Writer
-	execCommand common.CommandExecutor
+	execCommand shell.CommandExecutor
 }
 
 func New(args []string, env []string, cwd string, stdout io.Writer, stderr io.Writer) *App {
@@ -29,13 +29,13 @@ func New(args []string, env []string, cwd string, stdout io.Writer, stderr io.Wr
 		cwd:         cwd,
 		stdout:      stdout,
 		stderr:      stderr,
-		execCommand: common.RunCommand,
+		execCommand: shell.RunCommand,
 	}
 }
 
-func (a *App) SetCommandExecutor(execFn common.CommandExecutor) {
+func (a *App) SetCommandExecutor(execFn shell.CommandExecutor) {
 	if execFn == nil {
-		a.execCommand = common.RunCommand
+		a.execCommand = shell.RunCommand
 		return
 	}
 	a.execCommand = execFn
@@ -49,7 +49,7 @@ func (a *App) Run(ctx context.Context) int {
 
 	root := a.runoqRoot()
 	if root == "" {
-		return common.Fail(a.stderr, "Unable to resolve RUNOQ_ROOT for runtime orchestrator.")
+		return shell.Fail(a.stderr, "Unable to resolve RUNOQ_ROOT for runtime orchestrator.")
 	}
 
 	env := append([]string(nil), a.env...)

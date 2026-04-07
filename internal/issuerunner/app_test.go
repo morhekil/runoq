@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/saruman/runoq/internal/common"
+	"github.com/saruman/runoq/internal/shell"
 )
 
 func newTestApp(t *testing.T, args []string) *App {
@@ -99,7 +99,7 @@ func TestRunValidPayload(t *testing.T) {
 	app := New([]string{"run", payloadFile}, nil, dir, &stdout, &stderr)
 
 	fakeHash := "abc123def456"
-	app.SetCommandExecutor(func(_ context.Context, req common.CommandRequest) error {
+	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
 		if req.Name == "git" {
 			_, _ = req.Stdout.Write([]byte(fakeHash + "\n"))
 		}
@@ -160,7 +160,7 @@ func TestPayloadDefaults(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	app := New([]string{"run", payloadFile}, nil, dir, &stdout, &stderr)
-	app.SetCommandExecutor(func(_ context.Context, req common.CommandRequest) error {
+	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
 		if req.Name == "git" {
 			_, _ = req.Stdout.Write([]byte("deadbeef\n"))
 		}
@@ -189,10 +189,10 @@ func TestPayloadDefaults(t *testing.T) {
 // fakeExecutor routes command calls to handler functions.
 type fakeExecutor struct {
 	t        *testing.T
-	handlers map[string]func(common.CommandRequest) error
+	handlers map[string]func(shell.CommandRequest) error
 }
 
-func (fe *fakeExecutor) exec(_ context.Context, req common.CommandRequest) error {
+func (fe *fakeExecutor) exec(_ context.Context, req shell.CommandRequest) error {
 	// Try exact name match first, then base name.
 	if h, ok := fe.handlers[req.Name]; ok {
 		return h(req)
@@ -233,14 +233,14 @@ func TestDevelopmentLoop_SingleRoundSuccess(t *testing.T) {
 	specFile := filepath.Join(dir, "spec.md")
 	os.WriteFile(specFile, []byte("implement X"), 0o644)
 
-	fe := &fakeExecutor{t: t, handlers: map[string]func(common.CommandRequest) error{
-		"git": func(req common.CommandRequest) error {
+	fe := &fakeExecutor{t: t, handlers: map[string]func(shell.CommandRequest) error{
+		"git": func(req shell.CommandRequest) error {
 			if req.Stdout != nil {
 				req.Stdout.Write([]byte("abc123\n"))
 			}
 			return nil
 		},
-		"codex": func(req common.CommandRequest) error {
+		"codex": func(req shell.CommandRequest) error {
 			// Write a fake events JSONL with thread_id.
 			if req.Stdout != nil {
 				req.Stdout.Write([]byte(`{"type":"thread.started","thread_id":"thread-42"}` + "\n"))
@@ -255,14 +255,14 @@ func TestDevelopmentLoop_SingleRoundSuccess(t *testing.T) {
 			}
 			return nil
 		},
-		"state.sh": func(req common.CommandRequest) error {
+		"state.sh": func(req shell.CommandRequest) error {
 			// validate-payload: return valid schema.
 			if req.Stdout != nil {
 				req.Stdout.Write([]byte(`{"payload_schema_valid":true}`))
 			}
 			return nil
 		},
-		"verify.sh": func(req common.CommandRequest) error {
+		"verify.sh": func(req shell.CommandRequest) error {
 			if req.Stdout != nil {
 				req.Stdout.Write([]byte(`{"review_allowed":true,"failures":[],"actual":{"files_changed":["main.go"],"files_added":[],"files_deleted":[]}}`))
 			}
@@ -332,7 +332,7 @@ func TestDevelopmentLoop_BudgetExhausted(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	app := New([]string{"run", payloadFile}, nil, dir, &stdout, &stderr)
-	app.SetCommandExecutor(func(_ context.Context, req common.CommandRequest) error {
+	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
 		if req.Name == "git" && req.Stdout != nil {
 			req.Stdout.Write([]byte("deadbeef\n"))
 		}
@@ -370,14 +370,14 @@ func TestDevelopmentLoop_MaxRoundsExhausted(t *testing.T) {
 	os.WriteFile(specFile, []byte("spec"), 0o644)
 
 	roundCount := 0
-	fe := &fakeExecutor{t: t, handlers: map[string]func(common.CommandRequest) error{
-		"git": func(req common.CommandRequest) error {
+	fe := &fakeExecutor{t: t, handlers: map[string]func(shell.CommandRequest) error{
+		"git": func(req shell.CommandRequest) error {
 			if req.Stdout != nil {
 				req.Stdout.Write([]byte("deadbeef\n"))
 			}
 			return nil
 		},
-		"codex": func(req common.CommandRequest) error {
+		"codex": func(req shell.CommandRequest) error {
 			if req.Stdout != nil {
 				req.Stdout.Write([]byte(`{"type":"thread.started","thread_id":"t1"}` + "\n"))
 			}
@@ -389,20 +389,20 @@ func TestDevelopmentLoop_MaxRoundsExhausted(t *testing.T) {
 			}
 			return nil
 		},
-		"state.sh": func(req common.CommandRequest) error {
+		"state.sh": func(req shell.CommandRequest) error {
 			if req.Stdout != nil {
 				req.Stdout.Write([]byte(`{"payload_schema_valid":true}`))
 			}
 			return nil
 		},
-		"verify.sh": func(req common.CommandRequest) error {
+		"verify.sh": func(req shell.CommandRequest) error {
 			roundCount++
 			if req.Stdout != nil {
 				req.Stdout.Write([]byte(`{"review_allowed":false,"failures":["test failed"],"actual":{"files_changed":[],"files_added":[],"files_deleted":[]}}`))
 			}
 			return nil
 		},
-		"gh-pr-lifecycle.sh": func(req common.CommandRequest) error {
+		"gh-pr-lifecycle.sh": func(req shell.CommandRequest) error {
 			return nil
 		},
 	}}

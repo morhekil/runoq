@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/saruman/runoq/internal/common"
+	"github.com/saruman/runoq/internal/shell"
 )
 
 func metadataFromIssueView(issue issueView) issueMetadata {
@@ -218,9 +218,9 @@ func parseReviewVerdict(path string) (reviewVerdictResult, error) {
 }
 
 func (a *App) prepareAuth(ctx context.Context, root string, env []string) []string {
-	authEnv := common.EnvSet(env, "RUNOQ_FORCE_REFRESH_TOKEN", "1")
+	authEnv := shell.EnvSet(env, "RUNOQ_FORCE_REFRESH_TOKEN", "1")
 	var stdout bytes.Buffer
-	err := a.execCommand(ctx, common.CommandRequest{
+	err := a.execCommand(ctx, shell.CommandRequest{
 		Name: "bash",
 		Args: []string{
 			"-lc",
@@ -246,16 +246,16 @@ func (a *App) prepareAuth(ctx context.Context, root string, env []string) []stri
 		a.logInfo("Token mint failed or skipped (will use ambient credentials)")
 	}
 	if strings.TrimSpace(token) != "" {
-		authEnv = common.EnvSet(authEnv, "GH_TOKEN", strings.TrimSpace(token))
+		authEnv = shell.EnvSet(authEnv, "GH_TOKEN", strings.TrimSpace(token))
 	}
 	return authEnv
 }
 
 func (a *App) targetRoot(ctx context.Context, env []string) (string, error) {
-	if value, ok := common.EnvLookup(env, "TARGET_ROOT"); ok && strings.TrimSpace(value) != "" {
+	if value, ok := shell.EnvLookup(env, "TARGET_ROOT"); ok && strings.TrimSpace(value) != "" {
 		return value, nil
 	}
-	out, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
+	out, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
 		Name: "git",
 		Args: []string{"rev-parse", "--show-toplevel"},
 		Dir:  a.cwd,
@@ -309,7 +309,7 @@ func (a *App) postAuditComment(ctx context.Context, root string, env []string, r
 }
 
 func (a *App) ghOutput(ctx context.Context, env []string, args ...string) (string, error) {
-	return common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
+	return shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
 		Name: envOrDefault(env, "GH_BIN", "gh"),
 		Args: args,
 		Dir:  a.cwd,
@@ -335,7 +335,7 @@ func (a *App) runScript(ctx context.Context, root string, env []string, script s
 }
 
 func (a *App) runProgram(ctx context.Context, env []string, name string, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
-	return a.execCommand(ctx, common.CommandRequest{
+	return a.execCommand(ctx, shell.CommandRequest{
 		Name:   name,
 		Args:   append([]string(nil), args...),
 		Dir:    a.cwd,
@@ -347,10 +347,10 @@ func (a *App) runProgram(ctx context.Context, env []string, name string, args []
 }
 
 func (a *App) runoqRoot() string {
-	if root, ok := common.EnvLookup(a.env, "RUNOQ_ROOT"); ok && strings.TrimSpace(root) != "" {
+	if root, ok := shell.EnvLookup(a.env, "RUNOQ_ROOT"); ok && strings.TrimSpace(root) != "" {
 		return root
 	}
-	if a.cwd != "" && common.FileExists(filepath.Join(a.cwd, "scripts", "lib", "common.sh")) {
+	if a.cwd != "" && shell.FileExists(filepath.Join(a.cwd, "scripts", "lib", "common.sh")) {
 		return a.cwd
 	}
 	return ""
@@ -492,7 +492,7 @@ func updateStateJSON(stateJSON string, update func(map[string]any)) (string, err
 }
 
 func envOrDefault(env []string, key string, fallback string) string {
-	if value, ok := common.EnvLookup(env, key); ok && value != "" {
+	if value, ok := shell.EnvLookup(env, key); ok && value != "" {
 		return value
 	}
 	return fallback

@@ -15,7 +15,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/saruman/runoq/internal/common"
+	"github.com/saruman/runoq/internal/shell"
 	"github.com/saruman/runoq/internal/gh"
 )
 
@@ -34,7 +34,7 @@ type App struct {
 	cwd         string
 	stdout      io.Writer
 	stderr      io.Writer
-	execCommand common.CommandExecutor
+	execCommand shell.CommandExecutor
 	ghClient    *gh.Client
 }
 
@@ -161,15 +161,15 @@ func New(args []string, env []string, cwd string, stdout io.Writer, stderr io.Wr
 		cwd:         cwd,
 		stdout:      stdout,
 		stderr:      stderr,
-		execCommand: common.RunCommand,
-		ghClient:    gh.NewClient(common.RunCommand, http.DefaultClient, clonedEnv, cwd),
+		execCommand: shell.RunCommand,
+		ghClient:    gh.NewClient(shell.RunCommand, http.DefaultClient, clonedEnv, cwd),
 	}
 }
 
-func (a *App) SetCommandExecutor(execFn common.CommandExecutor) {
+func (a *App) SetCommandExecutor(execFn shell.CommandExecutor) {
 	if execFn == nil {
-		a.execCommand = common.RunCommand
-		a.ghClient = gh.NewClient(common.RunCommand, http.DefaultClient, a.env, a.cwd)
+		a.execCommand = shell.RunCommand
+		a.ghClient = gh.NewClient(shell.RunCommand, http.DefaultClient, a.env, a.cwd)
 		return
 	}
 	a.execCommand = execFn
@@ -231,7 +231,7 @@ func (a *App) Run(ctx context.Context) int {
 func (a *App) runList(ctx context.Context, repo string, readyLabel string) int {
 	issues, err := a.listIssues(ctx, repo, readyLabel)
 	if err != nil {
-		return common.Failf(a.stderr, "%v", err)
+		return shell.Failf(a.stderr, "%v", err)
 	}
 	return a.writeJSON(issues)
 }
@@ -239,7 +239,7 @@ func (a *App) runList(ctx context.Context, repo string, readyLabel string) int {
 func (a *App) runNext(ctx context.Context, repo string, readyLabel string) int {
 	issues, err := a.listIssues(ctx, repo, readyLabel)
 	if err != nil {
-		return common.Failf(a.stderr, "%v", err)
+		return shell.Failf(a.stderr, "%v", err)
 	}
 
 	a.log("issue-queue", fmt.Sprintf("next_issue: found %d issues with label=%s", len(issues), readyLabel))
@@ -261,7 +261,7 @@ func (a *App) runNext(ctx context.Context, repo string, readyLabel string) int {
 		for _, dep := range issue.DependsOn {
 			status, err := a.dependencyStatus(ctx, repo, dep)
 			if err != nil {
-				return common.Failf(a.stderr, "%v", err)
+				return shell.Failf(a.stderr, "%v", err)
 			}
 			if !status.Done && status.Reason != nil {
 				blocked = append(blocked, *status.Reason)
@@ -287,17 +287,17 @@ func (a *App) runNext(ctx context.Context, repo string, readyLabel string) int {
 func (a *App) runSetStatus(ctx context.Context, repo string, issueNumber string, status string) int {
 	cfg, err := a.loadConfig()
 	if err != nil {
-		return common.Failf(a.stderr, "Failed to read config: %v", err)
+		return shell.Failf(a.stderr, "Failed to read config: %v", err)
 	}
 
 	newLabel, ok := labelForStatus(cfg, status)
 	if !ok {
-		return common.Failf(a.stderr, "Unknown status: %s", status)
+		return shell.Failf(a.stderr, "Unknown status: %s", status)
 	}
 
 	raw, err := a.ghClient.Output(ctx, "issue", "view", issueNumber, "--repo", repo, "--json", "labels")
 	if err != nil {
-		return common.Failf(a.stderr, "%v", err)
+		return shell.Failf(a.stderr, "%v", err)
 	}
 
 	var response struct {
@@ -306,7 +306,7 @@ func (a *App) runSetStatus(ctx context.Context, repo string, issueNumber string,
 		} `json:"labels"`
 	}
 	if err := json.Unmarshal([]byte(raw), &response); err != nil {
-		return common.Failf(a.stderr, "issue view returned invalid JSON: %v", err)
+		return shell.Failf(a.stderr, "issue view returned invalid JSON: %v", err)
 	}
 
 	stateLabels := map[string]bool{
@@ -328,18 +328,18 @@ func (a *App) runSetStatus(ctx context.Context, repo string, issueNumber string,
 	a.log("issue-queue", fmt.Sprintf("set-status issue=#%s: removing=[%s] adding=[%s]", issueNumber, strings.Join(removing, ", "), newLabel))
 
 	if err := a.runGHMutationWithRetry(ctx, editArgs); err != nil {
-		return common.Failf(a.stderr, "%v", err)
+		return shell.Failf(a.stderr, "%v", err)
 	}
 
 	if status == "done" {
 		if err := a.runGHMutationWithRetry(ctx, []string{"issue", "close", issueNumber, "--repo", repo}); err != nil {
-			return common.Failf(a.stderr, "%v", err)
+			return shell.Failf(a.stderr, "%v", err)
 		}
 	}
 
 	issueID, err := strconv.Atoi(issueNumber)
 	if err != nil {
-		return common.Failf(a.stderr, "invalid issue number: %s", issueNumber)
+		return shell.Failf(a.stderr, "invalid issue number: %s", issueNumber)
 	}
 	return a.writeJSON(setStatusResult{
 		Issue:  issueID,
@@ -371,12 +371,12 @@ func (a *App) runCreate(ctx context.Context, repo string, title string, body str
 
 	cfg, err := a.loadConfig()
 	if err != nil {
-		return common.Failf(a.stderr, "Failed to read config: %v", err)
+		return shell.Failf(a.stderr, "Failed to read config: %v", err)
 	}
 
 	bodyFile, err := a.writeCreateBody(body, opts)
 	if err != nil {
-		return common.Failf(a.stderr, "Failed to write issue body: %v", err)
+		return shell.Failf(a.stderr, "Failed to write issue body: %v", err)
 	}
 	defer func() {
 		_ = os.Remove(bodyFile)
@@ -386,21 +386,21 @@ func (a *App) runCreate(ctx context.Context, repo string, title string, body str
 
 	url, err := a.ghClient.Output(ctx, createArgs...)
 	if err != nil {
-		return common.Failf(a.stderr, "%v", err)
+		return shell.Failf(a.stderr, "%v", err)
 	}
 	a.log("issue-queue", fmt.Sprintf("create: title=%q result_url=%s", title, url))
 
 	if opts.ParentEpic != "" {
 		newIssueNumber := issueURLPattern.FindString(url)
 		if newIssueNumber == "" {
-			return common.Failf(a.stderr, "failed to parse created issue number from %q", url)
+			return shell.Failf(a.stderr, "failed to parse created issue number from %q", url)
 		}
 		childID, err := a.ghClient.Output(ctx, "api", fmt.Sprintf("repos/%s/issues/%s", repo, newIssueNumber), "--jq", ".id")
 		if err != nil {
-			return common.Failf(a.stderr, "%v", err)
+			return shell.Failf(a.stderr, "%v", err)
 		}
 		if err := a.ghClient.Run(ctx, []string{"api", fmt.Sprintf("repos/%s/issues/%s/sub_issues", repo, opts.ParentEpic), "--method", "POST", "-F", "sub_issue_id=" + childID}, io.Discard, io.Discard); err != nil {
-			return common.Failf(a.stderr, "%v", err)
+			return shell.Failf(a.stderr, "%v", err)
 		}
 		a.log("issue-queue", fmt.Sprintf("create: linked issue #%s as sub-issue of epic #%s", newIssueNumber, opts.ParentEpic))
 	}
@@ -411,17 +411,17 @@ func (a *App) runCreate(ctx context.Context, repo string, title string, body str
 func (a *App) runAssign(ctx context.Context, repo string, issueNumber string) int {
 	operator, err := a.operatorLogin(ctx)
 	if err != nil {
-		return common.Failf(a.stderr, "Failed to resolve operator login: %v", err)
+		return shell.Failf(a.stderr, "Failed to resolve operator login: %v", err)
 	}
 	if err := a.ghClient.Run(ctx, []string{"issue", "edit", issueNumber, "--repo", repo, "--add-assignee", operator}, io.Discard, a.stderr); err != nil {
-		return common.Failf(a.stderr, "%v", err)
+		return shell.Failf(a.stderr, "%v", err)
 	}
 	a.log("issue-queue", fmt.Sprintf("assign: issue=#%s assignee=%s", issueNumber, operator))
 	return 0
 }
 
 func (a *App) operatorLogin(ctx context.Context) (string, error) {
-	if login, ok := common.EnvLookup(a.env, "RUNOQ_OPERATOR_LOGIN"); ok {
+	if login, ok := shell.EnvLookup(a.env, "RUNOQ_OPERATOR_LOGIN"); ok {
 		login = strings.TrimSpace(login)
 		if login != "" {
 			return login, nil
@@ -429,10 +429,10 @@ func (a *App) operatorLogin(ctx context.Context) (string, error) {
 	}
 	env := withoutEnvKeys(a.ghClient.Env(), "GH_TOKEN", "GITHUB_TOKEN")
 	bin := "gh"
-	if v, ok := common.EnvLookup(env, "GH_BIN"); ok && v != "" {
+	if v, ok := shell.EnvLookup(env, "GH_BIN"); ok && v != "" {
 		bin = v
 	}
-	login, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
+	login, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
 		Name: bin,
 		Args: []string{"api", "user", "--jq", ".login"},
 		Dir:  a.cwd,
@@ -472,19 +472,19 @@ func withoutEnvKeys(env []string, keys ...string) []string {
 func (a *App) runEpicStatus(ctx context.Context, repo string, issueNumber string) int {
 	cfg, err := a.loadConfig()
 	if err != nil {
-		return common.Failf(a.stderr, "Failed to read config: %v", err)
+		return shell.Failf(a.stderr, "Failed to read config: %v", err)
 	}
 
 	raw, err := a.ghClient.Output(ctx, "api", fmt.Sprintf("repos/%s/issues/%s/sub_issues", repo, issueNumber), "--paginate")
 	if err != nil {
-		return common.Failf(a.stderr, "%v", err)
+		return shell.Failf(a.stderr, "%v", err)
 	}
 
 	var children []epicChild
 	if strings.TrimSpace(raw) == "" {
 		children = []epicChild{}
 	} else if err := json.Unmarshal([]byte(raw), &children); err != nil {
-		return common.Failf(a.stderr, "sub_issues returned invalid JSON: %v", err)
+		return shell.Failf(a.stderr, "sub_issues returned invalid JSON: %v", err)
 	}
 
 	result := epicStatusResult{
@@ -842,10 +842,10 @@ func (a *App) loadConfig() (config, error) {
 }
 
 func (a *App) configPath() (string, error) {
-	if value, ok := common.EnvLookup(a.env, "RUNOQ_CONFIG"); ok && strings.TrimSpace(value) != "" {
+	if value, ok := shell.EnvLookup(a.env, "RUNOQ_CONFIG"); ok && strings.TrimSpace(value) != "" {
 		return value, nil
 	}
-	if value, ok := common.EnvLookup(a.env, "RUNOQ_ROOT"); ok && strings.TrimSpace(value) != "" {
+	if value, ok := shell.EnvLookup(a.env, "RUNOQ_ROOT"); ok && strings.TrimSpace(value) != "" {
 		return filepath.Join(value, "config", "runoq.json"), nil
 	}
 	return "", errors.New("RUNOQ_CONFIG is not set")
@@ -889,10 +889,10 @@ func (a *App) writeJSON(value any) int {
 	encoder.SetEscapeHTML(false)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(value); err != nil {
-		return common.Failf(a.stderr, "Failed to encode JSON: %v", err)
+		return shell.Failf(a.stderr, "Failed to encode JSON: %v", err)
 	}
 	if _, err := a.stdout.Write(buffer.Bytes()); err != nil {
-		return common.Failf(a.stderr, "Failed to write output: %v", err)
+		return shell.Failf(a.stderr, "Failed to write output: %v", err)
 	}
 	return 0
 }
@@ -922,7 +922,7 @@ func (a *App) printUsage(w io.Writer) {
 }
 
 func (a *App) log(prefix string, message string) {
-	if value, ok := common.EnvLookup(a.env, "RUNOQ_LOG"); ok && value != "" {
+	if value, ok := shell.EnvLookup(a.env, "RUNOQ_LOG"); ok && value != "" {
 		_, _ = fmt.Fprintf(a.stderr, "[%s] %s\n", prefix, message)
 	}
 }

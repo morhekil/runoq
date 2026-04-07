@@ -12,7 +12,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/saruman/runoq/internal/common"
+	"github.com/saruman/runoq/internal/shell"
 )
 
 const usageText = `Usage:
@@ -28,7 +28,7 @@ type App struct {
 	cwd         string
 	stdout      io.Writer
 	stderr      io.Writer
-	execCommand common.CommandExecutor
+	execCommand shell.CommandExecutor
 }
 
 type config struct {
@@ -51,13 +51,13 @@ func New(args []string, env []string, cwd string, stdout io.Writer, stderr io.Wr
 		cwd:         cwd,
 		stdout:      stdout,
 		stderr:      stderr,
-		execCommand: common.RunCommand,
+		execCommand: shell.RunCommand,
 	}
 }
 
-func (a *App) SetCommandExecutor(execFn common.CommandExecutor) {
+func (a *App) SetCommandExecutor(execFn shell.CommandExecutor) {
 	if execFn == nil {
-		a.execCommand = common.RunCommand
+		a.execCommand = shell.RunCommand
 		return
 	}
 	a.execCommand = execFn
@@ -103,7 +103,7 @@ func (a *App) Run(ctx context.Context) int {
 func (a *App) runCreate(ctx context.Context, issue string, title string) int {
 	cfg, err := a.loadConfig()
 	if err != nil {
-		return common.Failf(a.stderr, "Failed to read config: %v", err)
+		return shell.Failf(a.stderr, "Failed to read config: %v", err)
 	}
 
 	targetRoot, code := a.targetRoot(ctx)
@@ -114,13 +114,13 @@ func (a *App) runCreate(ctx context.Context, issue string, title string) int {
 	branch := branchName(cfg.BranchPrefix, issue, title)
 	path, err := worktreePath(cfg.WorktreePrefix, targetRoot, issue)
 	if err != nil {
-		return common.Failf(a.stderr, "Failed to resolve worktree path: %v", err)
+		return shell.Failf(a.stderr, "Failed to resolve worktree path: %v", err)
 	}
 	baseRef := defaultBaseRef(a.env)
 
 	a.log("worktree", fmt.Sprintf("create: source_ref=%s target_path=%s branch=%s", baseRef, path, branch))
 
-	if err := a.execCommand(ctx, common.CommandRequest{
+	if err := a.execCommand(ctx, shell.CommandRequest{
 		Name:   "git",
 		Args:   []string{"-C", targetRoot, "fetch", "origin", "main"},
 		Dir:    a.cwd,
@@ -128,16 +128,16 @@ func (a *App) runCreate(ctx context.Context, issue string, title string) int {
 		Stdout: io.Discard,
 		Stderr: io.Discard,
 	}); err != nil {
-		return common.Failf(a.stderr, "Failed to fetch origin main: %v", err)
+		return shell.Failf(a.stderr, "Failed to fetch origin main: %v", err)
 	}
 
 	if _, err := os.Lstat(path); err == nil {
-		return common.Failf(a.stderr, "Worktree already exists: %s", path)
+		return shell.Failf(a.stderr, "Worktree already exists: %s", path)
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return common.Failf(a.stderr, "Failed to inspect worktree path %s: %v", path, err)
+		return shell.Failf(a.stderr, "Failed to inspect worktree path %s: %v", path, err)
 	}
 
-	if err := a.execCommand(ctx, common.CommandRequest{
+	if err := a.execCommand(ctx, shell.CommandRequest{
 		Name:   "git",
 		Args:   []string{"-C", targetRoot, "worktree", "add", path, "-b", branch, baseRef},
 		Dir:    a.cwd,
@@ -145,12 +145,12 @@ func (a *App) runCreate(ctx context.Context, issue string, title string) int {
 		Stdout: io.Discard,
 		Stderr: io.Discard,
 	}); err != nil {
-		return common.Failf(a.stderr, "Failed to create worktree: %v", err)
+		return shell.Failf(a.stderr, "Failed to create worktree: %v", err)
 	}
 
 	_ = a.configureGitBotIdentity(ctx, path, cfg.Identity.AppSlug, targetRoot)
 
-	return common.WriteJSON(a.stdout, a.stderr, struct {
+	return shell.WriteJSON(a.stdout, a.stderr, struct {
 		Branch   string `json:"branch"`
 		Worktree string `json:"worktree"`
 		BaseRef  string `json:"base_ref"`
@@ -164,7 +164,7 @@ func (a *App) runCreate(ctx context.Context, issue string, title string) int {
 func (a *App) runRemove(ctx context.Context, issue string) int {
 	cfg, err := a.loadConfig()
 	if err != nil {
-		return common.Failf(a.stderr, "Failed to read config: %v", err)
+		return shell.Failf(a.stderr, "Failed to read config: %v", err)
 	}
 
 	targetRoot, code := a.targetRoot(ctx)
@@ -174,12 +174,12 @@ func (a *App) runRemove(ctx context.Context, issue string) int {
 
 	path, err := worktreePath(cfg.WorktreePrefix, targetRoot, issue)
 	if err != nil {
-		return common.Failf(a.stderr, "Failed to resolve worktree path: %v", err)
+		return shell.Failf(a.stderr, "Failed to resolve worktree path: %v", err)
 	}
 	a.log("worktree", fmt.Sprintf("remove: path=%s", path))
 
 	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
-		return common.WriteJSON(a.stdout, a.stderr, struct {
+		return shell.WriteJSON(a.stdout, a.stderr, struct {
 			Removed  bool   `json:"removed"`
 			Worktree string `json:"worktree"`
 		}{
@@ -187,10 +187,10 @@ func (a *App) runRemove(ctx context.Context, issue string) int {
 			Worktree: path,
 		})
 	} else if err != nil {
-		return common.Failf(a.stderr, "Failed to inspect worktree path %s: %v", path, err)
+		return shell.Failf(a.stderr, "Failed to inspect worktree path %s: %v", path, err)
 	}
 
-	if err := a.execCommand(ctx, common.CommandRequest{
+	if err := a.execCommand(ctx, shell.CommandRequest{
 		Name:   "git",
 		Args:   []string{"-C", targetRoot, "worktree", "remove", path, "--force"},
 		Dir:    a.cwd,
@@ -198,10 +198,10 @@ func (a *App) runRemove(ctx context.Context, issue string) int {
 		Stdout: io.Discard,
 		Stderr: io.Discard,
 	}); err != nil {
-		return common.Failf(a.stderr, "Failed to remove worktree: %v", err)
+		return shell.Failf(a.stderr, "Failed to remove worktree: %v", err)
 	}
 
-	return common.WriteJSON(a.stdout, a.stderr, struct {
+	return shell.WriteJSON(a.stdout, a.stderr, struct {
 		Removed  bool   `json:"removed"`
 		Worktree string `json:"worktree"`
 	}{
@@ -213,7 +213,7 @@ func (a *App) runRemove(ctx context.Context, issue string) int {
 func (a *App) runInspect(ctx context.Context, issue string) int {
 	cfg, err := a.loadConfig()
 	if err != nil {
-		return common.Failf(a.stderr, "Failed to read config: %v", err)
+		return shell.Failf(a.stderr, "Failed to read config: %v", err)
 	}
 
 	targetRoot, code := a.targetRoot(ctx)
@@ -223,16 +223,16 @@ func (a *App) runInspect(ctx context.Context, issue string) int {
 
 	path, err := worktreePath(cfg.WorktreePrefix, targetRoot, issue)
 	if err != nil {
-		return common.Failf(a.stderr, "Failed to resolve worktree path: %v", err)
+		return shell.Failf(a.stderr, "Failed to resolve worktree path: %v", err)
 	}
 
 	_, statErr := os.Lstat(path)
 	exists := statErr == nil
 	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-		return common.Failf(a.stderr, "Failed to inspect worktree path %s: %v", path, statErr)
+		return shell.Failf(a.stderr, "Failed to inspect worktree path %s: %v", path, statErr)
 	}
 
-	return common.WriteJSON(a.stdout, a.stderr, struct {
+	return shell.WriteJSON(a.stdout, a.stderr, struct {
 		Worktree string `json:"worktree"`
 		Exists   bool   `json:"exists"`
 	}{
@@ -244,22 +244,22 @@ func (a *App) runInspect(ctx context.Context, issue string) int {
 func (a *App) runBranchName(issue string, title string) int {
 	cfg, err := a.loadConfig()
 	if err != nil {
-		return common.Failf(a.stderr, "Failed to read config: %v", err)
+		return shell.Failf(a.stderr, "Failed to read config: %v", err)
 	}
 
 	_, err = fmt.Fprintf(a.stdout, "%s\n", branchName(cfg.BranchPrefix, issue, title))
 	if err != nil {
-		return common.Failf(a.stderr, "Failed to write branch name: %v", err)
+		return shell.Failf(a.stderr, "Failed to write branch name: %v", err)
 	}
 	return 0
 }
 
 func (a *App) targetRoot(ctx context.Context) (string, int) {
-	if targetRoot, ok := common.EnvLookup(a.env, "TARGET_ROOT"); ok && targetRoot != "" {
+	if targetRoot, ok := shell.EnvLookup(a.env, "TARGET_ROOT"); ok && targetRoot != "" {
 		return targetRoot, 0
 	}
 
-	root, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
+	root, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
 		Name:   "git",
 		Args:   []string{"rev-parse", "--show-toplevel"},
 		Dir:    a.cwd,
@@ -268,7 +268,7 @@ func (a *App) targetRoot(ctx context.Context) (string, int) {
 		Stderr: nil,
 	})
 	if err != nil {
-		return "", common.Fail(a.stderr, "Run runoq from inside a git repository.")
+		return "", shell.Fail(a.stderr, "Run runoq from inside a git repository.")
 	}
 	return root, 0
 }
@@ -292,7 +292,7 @@ func (a *App) configureGitBotIdentity(ctx context.Context, dir string, slug stri
 		return nil
 	}
 
-	if err := a.execCommand(ctx, common.CommandRequest{
+	if err := a.execCommand(ctx, shell.CommandRequest{
 		Name:   "git",
 		Args:   []string{"-C", dir, "config", "user.name", slug + "[bot]"},
 		Dir:    a.cwd,
@@ -308,7 +308,7 @@ func (a *App) configureGitBotIdentity(ctx context.Context, dir string, slug stri
 		return nil
 	}
 
-	return a.execCommand(ctx, common.CommandRequest{
+	return a.execCommand(ctx, shell.CommandRequest{
 		Name:   "git",
 		Args:   []string{"-C", dir, "config", "user.email", fmt.Sprintf("%s+%s[bot]@users.noreply.github.com", appID, slug)},
 		Dir:    a.cwd,
@@ -319,7 +319,7 @@ func (a *App) configureGitBotIdentity(ctx context.Context, dir string, slug stri
 }
 
 func (a *App) appID(targetRoot string) string {
-	if appID, ok := common.EnvLookup(a.env, "RUNOQ_APP_ID"); ok && appID != "" {
+	if appID, ok := shell.EnvLookup(a.env, "RUNOQ_APP_ID"); ok && appID != "" {
 		return appID
 	}
 
@@ -352,7 +352,7 @@ func (a *App) appID(targetRoot string) string {
 }
 
 func (a *App) log(prefix string, message string) {
-	if value, ok := common.EnvLookup(a.env, "RUNOQ_LOG"); !ok || value == "" {
+	if value, ok := shell.EnvLookup(a.env, "RUNOQ_LOG"); !ok || value == "" {
 		return
 	}
 	_, _ = fmt.Fprintf(a.stderr, "[%s] %s\n", prefix, message)
@@ -386,17 +386,17 @@ func worktreePath(prefix string, targetRoot string, issue string) (string, error
 }
 
 func defaultBaseRef(env []string) string {
-	if baseRef, ok := common.EnvLookup(env, "RUNOQ_BASE_REF"); ok && baseRef != "" {
+	if baseRef, ok := shell.EnvLookup(env, "RUNOQ_BASE_REF"); ok && baseRef != "" {
 		return baseRef
 	}
 	return "origin/main"
 }
 
 func configPath(env []string, cwd string) string {
-	if path, ok := common.EnvLookup(env, "RUNOQ_CONFIG"); ok && path != "" {
+	if path, ok := shell.EnvLookup(env, "RUNOQ_CONFIG"); ok && path != "" {
 		return path
 	}
-	if root, ok := common.EnvLookup(env, "RUNOQ_ROOT"); ok && root != "" {
+	if root, ok := shell.EnvLookup(env, "RUNOQ_ROOT"); ok && root != "" {
 		return filepath.Join(root, "config", "runoq.json")
 	}
 	return filepath.Join(cwd, "config", "runoq.json")

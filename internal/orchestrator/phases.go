@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/saruman/runoq/internal/common"
+	"github.com/saruman/runoq/internal/shell"
 )
 
 func (a *App) phaseIntegrate(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, title string) (string, error) {
@@ -153,7 +153,7 @@ func (a *App) phaseInit(ctx context.Context, root string, env []string, repo str
 	a.logInfo("INIT: issue #%d", issueNumber)
 
 	dispatchEnv := append([]string(nil), env...)
-	dispatchEnv = common.EnvSet(dispatchEnv, "RUNOQ_NO_AUTO_TOKEN", "1")
+	dispatchEnv = shell.EnvSet(dispatchEnv, "RUNOQ_NO_AUTO_TOKEN", "1")
 	eligibilityOut, eligibilityErr := a.scriptOutput(ctx, root, dispatchEnv, "dispatch-safety.sh", []string{"eligibility", repo, strconv.Itoa(issueNumber)}, nil)
 	if eligibilityErr != nil {
 		return "", eligibilityErr
@@ -572,7 +572,7 @@ func (a *App) phaseReview(ctx context.Context, root string, env []string, repo s
 	if reviewLogAbs != "" && !filepath.IsAbs(reviewLogAbs) {
 		reviewLogAbs = filepath.Join(state.Worktree, reviewLogAbs)
 	}
-	reviewLogExists := common.FileExists(reviewLogAbs)
+	reviewLogExists := shell.FileExists(reviewLogAbs)
 	a.logInfo("REVIEW: review_log_path=%s review_log_abs=%s exists=%s", state.ReviewLogPath, reviewLogAbs, yesNo(reviewLogExists))
 
 	verdictResult := reviewVerdictResult{}

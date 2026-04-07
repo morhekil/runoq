@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/saruman/runoq/internal/common"
+	"github.com/saruman/runoq/internal/shell"
 )
 
 type App struct {
@@ -21,7 +21,7 @@ type App struct {
 	cwd         string
 	stdout      io.Writer
 	stderr      io.Writer
-	execCommand common.CommandExecutor
+	execCommand shell.CommandExecutor
 }
 
 const usageText = `Usage:
@@ -35,13 +35,13 @@ func New(args []string, env []string, cwd string, stdout io.Writer, stderr io.Wr
 		cwd:         cwd,
 		stdout:      stdout,
 		stderr:      stderr,
-		execCommand: common.RunCommand,
+		execCommand: shell.RunCommand,
 	}
 }
 
-func (a *App) SetCommandExecutor(execFn common.CommandExecutor) {
+func (a *App) SetCommandExecutor(execFn shell.CommandExecutor) {
 	if execFn == nil {
-		a.execCommand = common.RunCommand
+		a.execCommand = shell.RunCommand
 		return
 	}
 	a.execCommand = execFn
@@ -55,23 +55,23 @@ func (a *App) Run(ctx context.Context) int {
 	switch a.args[0] {
 	case "run":
 		if len(a.args) < 2 {
-			return common.Fail(a.stderr, "usage: issue-runner run <payload-json-file>")
+			return shell.Fail(a.stderr, "usage: issue-runner run <payload-json-file>")
 		}
 		return a.runIssue(ctx, a.args[1])
 	default:
-		return common.Failf(a.stderr, "unknown command: %s", a.args[0])
+		return shell.Failf(a.stderr, "unknown command: %s", a.args[0])
 	}
 }
 
 func (a *App) runIssue(ctx context.Context, payloadPath string) int {
 	data, err := os.ReadFile(payloadPath)
 	if err != nil {
-		return common.Failf(a.stderr, "failed to read payload: %v", err)
+		return shell.Failf(a.stderr, "failed to read payload: %v", err)
 	}
 
 	var input inputPayload
 	if err := json.Unmarshal(data, &input); err != nil {
-		return common.Failf(a.stderr, "failed to parse payload: %v", err)
+		return shell.Failf(a.stderr, "failed to parse payload: %v", err)
 	}
 
 	if input.MaxRounds <= 0 {
@@ -97,19 +97,19 @@ func (a *App) runIssue(ctx context.Context, payloadPath string) int {
 	if logDir == "" {
 		logDir = filepath.Join(a.cwd, "log", fmt.Sprintf("issue-%d-%d", input.IssueNumber, os.Getpid()))
 		if err := os.MkdirAll(logDir, 0o755); err != nil {
-			return common.Failf(a.stderr, "failed to create log dir: %v", err)
+			return shell.Failf(a.stderr, "failed to create log dir: %v", err)
 		}
 	}
 
 	// Get baseline hash
-	baseline, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
+	baseline, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
 		Name: "git",
 		Args: []string{"-C", input.Worktree, "log", "-1", "--format=%H"},
 		Dir:  a.cwd,
 		Env:  a.env,
 	})
 	if err != nil {
-		return common.Failf(a.stderr, "failed to get baseline: %v", err)
+		return shell.Failf(a.stderr, "failed to get baseline: %v", err)
 	}
 
 	state := &roundState{
@@ -125,7 +125,7 @@ func (a *App) runIssue(ctx context.Context, payloadPath string) int {
 	result := a.developmentLoop(ctx, &input, state, specRequirements)
 
 	// Emit output
-	return common.WriteJSON(a.stdout, a.stderr, result)
+	return shell.WriteJSON(a.stdout, a.stderr, result)
 }
 
 func (a *App) developmentLoop(ctx context.Context, input *inputPayload, state *roundState, specRequirements string) *outputPayload {
@@ -143,7 +143,7 @@ func (a *App) developmentLoop(ctx context.Context, input *inputPayload, state *r
 		}
 
 		// Record per-round baseline for commit tracking.
-		roundBaseline, _ := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
+		roundBaseline, _ := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
 			Name: "git", Args: []string{"-C", input.Worktree, "log", "-1", "--format=%H"},
 			Dir: a.cwd, Env: a.env,
 		})
@@ -251,7 +251,7 @@ func (a *App) developmentLoop(ctx context.Context, input *inputPayload, state *r
 
 // runoqRoot returns the RUNOQ_ROOT path from the environment.
 func (a *App) runoqRoot() string {
-	root, _ := common.EnvLookup(a.env, "RUNOQ_ROOT")
+	root, _ := shell.EnvLookup(a.env, "RUNOQ_ROOT")
 	return root
 }
 
@@ -334,7 +334,7 @@ Do not run additional commands. Re-emit only the corrected final payload block w
 // invokeCodex runs the codex binary with the given prompt.
 func (a *App) invokeCodex(ctx context.Context, input *inputPayload, state *roundState, prompt, eventLogPath, lastMsgPath string) {
 	codexBin := "codex"
-	if bin, ok := common.EnvLookup(a.env, "RUNOQ_CODEX_BIN"); ok && bin != "" {
+	if bin, ok := shell.EnvLookup(a.env, "RUNOQ_CODEX_BIN"); ok && bin != "" {
 		codexBin = bin
 	}
 
@@ -348,9 +348,9 @@ func (a *App) invokeCodex(ctx context.Context, input *inputPayload, state *round
 	defer eventFile.Close()
 
 	captureDir := filepath.Join(state.logDir, fmt.Sprintf("codex-round-%d", state.round))
-	env := common.EnvSet(a.env, "RUNOQ_CODEX_CAPTURE_DIR", captureDir)
+	env := shell.EnvSet(a.env, "RUNOQ_CODEX_CAPTURE_DIR", captureDir)
 
-	_ = a.execCommand(ctx, common.CommandRequest{
+	_ = a.execCommand(ctx, shell.CommandRequest{
 		Name:   codexBin,
 		Args:   []string{"exec", "--dangerously-bypass-approvals-and-sandbox", "--json", "-o", absLastMsg, prompt},
 		Dir:    input.Worktree,
@@ -363,7 +363,7 @@ func (a *App) invokeCodex(ctx context.Context, input *inputPayload, state *round
 // resumeCodex resumes a codex thread with a retry prompt.
 func (a *App) resumeCodex(ctx context.Context, input *inputPayload, state *roundState, threadID, prompt, eventLogPath, lastMsgPath string) {
 	codexBin := "codex"
-	if bin, ok := common.EnvLookup(a.env, "RUNOQ_CODEX_BIN"); ok && bin != "" {
+	if bin, ok := shell.EnvLookup(a.env, "RUNOQ_CODEX_BIN"); ok && bin != "" {
 		codexBin = bin
 	}
 
@@ -375,7 +375,7 @@ func (a *App) resumeCodex(ctx context.Context, input *inputPayload, state *round
 	eventFile, _ := os.Create(eventLogPath)
 	defer eventFile.Close()
 
-	_ = a.execCommand(ctx, common.CommandRequest{
+	_ = a.execCommand(ctx, shell.CommandRequest{
 		Name:   codexBin,
 		Args:   []string{"exec", "resume", threadID, "--json", "-o", absLastMsg, prompt},
 		Dir:    input.Worktree,
@@ -449,7 +449,7 @@ func (a *App) validatePayload(ctx context.Context, worktree, baseline, lastMsgFi
 	}
 	stateScript := filepath.Join(root, "scripts", "state.sh")
 
-	out, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
+	out, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
 		Name: stateScript,
 		Args: []string{"validate-payload", worktree, baseline, lastMsgFile},
 		Dir:  a.cwd,
@@ -475,7 +475,7 @@ func (a *App) validatePayload(ctx context.Context, worktree, baseline, lastMsgFi
 
 // extractCommits updates state with commit info from baseline..HEAD.
 func (a *App) extractCommits(ctx context.Context, input *inputPayload, state *roundState) {
-	out, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
+	out, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
 		Name: "git",
 		Args: []string{"-C", input.Worktree, "log", "--reverse", "--format=%H %s", state.baseline + "..HEAD"},
 		Dir:  a.cwd,
@@ -495,7 +495,7 @@ func (a *App) extractCommits(ctx context.Context, input *inputPayload, state *ro
 	state.commitSubjects = subjects
 
 	// Update head hash.
-	if head, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
+	if head, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
 		Name: "git", Args: []string{"-C", input.Worktree, "log", "-1", "--format=%H"},
 		Dir: a.cwd, Env: a.env,
 	}); err == nil {
@@ -513,7 +513,7 @@ func (a *App) runVerification(ctx context.Context, worktree, branch, baseline, p
 	}
 	verifyScript := filepath.Join(root, "scripts", "verify.sh")
 
-	out, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
+	out, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
 		Name: verifyScript,
 		Args: []string{"round", worktree, branch, baseline, payloadFile},
 		Dir:  a.cwd,
@@ -555,7 +555,7 @@ func (a *App) postVerificationComment(ctx context.Context, input *inputPayload, 
 	tmpFile := filepath.Join(state.logDir, fmt.Sprintf("round-%d-verify-comment.md", round))
 	os.WriteFile(tmpFile, []byte(b.String()), 0o644)
 
-	_ = a.execCommand(ctx, common.CommandRequest{
+	_ = a.execCommand(ctx, shell.CommandRequest{
 		Name: lifecycleScript,
 		Args: []string{"comment", input.Repo, fmt.Sprintf("%d", input.PRNumber), tmpFile},
 		Dir:  a.cwd,
@@ -606,7 +606,7 @@ func (a *App) expandReviewScope(ctx context.Context, worktree string, changedFil
 			continue
 		}
 
-		out, err := common.CommandOutput(ctx, a.execCommand, common.CommandRequest{
+		out, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
 			Name: "grep",
 			Args: []string{"-rl", "--include=*.ts", "--include=*.js", "--include=*.py", "--include=*.go", nameNoExt, worktree + "/"},
 			Dir:  a.cwd,
