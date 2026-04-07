@@ -104,7 +104,7 @@ func TestRunTickAllClosedReturnsWaiting(t *testing.T) {
 	}
 }
 
-func TestHandleImplementationPassesRepoToOrchestrator(t *testing.T) {
+func TestHandleImplementationCallsRunQueueWithRepo(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
@@ -121,11 +121,8 @@ func TestHandleImplementationPassesRepoToOrchestrator(t *testing.T) {
 	stub := &ghStub{
 		rules: []ghStubRule{
 			{contains: "issue list", stdout: issueList},
-			// The queue "next" call from the orchestrator's runCommandEntry
 			{contains: "gh-issue-queue.sh next", stdout: `{"issue":null,"skipped":[]}`},
-			// list for sweep
 			{contains: "gh-issue-queue.sh list", stdout: issueList},
-			// epic-status for sweep
 			{contains: "epic-status", stdout: `{"all_done":false,"pending":[10]}`},
 		},
 	}
@@ -149,10 +146,10 @@ func TestHandleImplementationPassesRepoToOrchestrator(t *testing.T) {
 	_ = result
 
 	if len(queueNextArgs) == 0 {
-		t.Fatalf("orchestrator run was never invoked (gh-issue-queue.sh next not called); stderr:\n%s", stderr.String())
+		t.Fatalf("RunQueue was never invoked (gh-issue-queue.sh next not called); stderr:\n%s", stderr.String())
 	}
 
 	if !slices.Contains(queueNextArgs, "owner/repo") {
-		t.Errorf("orchestrator did not receive repo; queue next args = %v", queueNextArgs)
+		t.Errorf("RunQueue did not receive repo; queue next args = %v", queueNextArgs)
 	}
 }
