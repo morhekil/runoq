@@ -117,19 +117,28 @@ func (a *App) runCreate(ctx context.Context, issue string, title string) int {
 		return shell.Failf(a.stderr, "Failed to resolve worktree path: %v", err)
 	}
 	baseRef := defaultBaseRef(a.env)
+	if baseRef == "" {
+		// Detect remote default branch
+		remoteBranch, err := a.detectDefaultBranch(ctx, targetRoot)
+		if err != nil {
+			return shell.Failf(a.stderr, "Failed to detect default branch: %v", err)
+		}
+		baseRef = "origin/" + remoteBranch
+
+		// Fetch the detected branch
+		if err := a.execCommand(ctx, shell.CommandRequest{
+			Name:   "git",
+			Args:   []string{"-C", targetRoot, "fetch", "origin", remoteBranch},
+			Dir:    a.cwd,
+			Env:    a.env,
+			Stdout: io.Discard,
+			Stderr: io.Discard,
+		}); err != nil {
+			return shell.Failf(a.stderr, "Failed to fetch origin %s: %v", remoteBranch, err)
+		}
+	}
 
 	a.log("worktree", fmt.Sprintf("create: source_ref=%s target_path=%s branch=%s", baseRef, path, branch))
-
-	if err := a.execCommand(ctx, shell.CommandRequest{
-		Name:   "git",
-		Args:   []string{"-C", targetRoot, "fetch", "origin", "main"},
-		Dir:    a.cwd,
-		Env:    a.env,
-		Stdout: io.Discard,
-		Stderr: io.Discard,
-	}); err != nil {
-		return shell.Failf(a.stderr, "Failed to fetch origin main: %v", err)
-	}
 
 	if _, err := os.Lstat(path); err == nil {
 		return shell.Failf(a.stderr, "Worktree already exists: %s", path)
@@ -389,7 +398,31 @@ func defaultBaseRef(env []string) string {
 	if baseRef, ok := shell.EnvLookup(env, "RUNOQ_BASE_REF"); ok && baseRef != "" {
 		return baseRef
 	}
-	return "origin/main"
+	return "" // auto-detect from remote
+}
+
+// detectDefaultBranch uses git ls-remote to find the remote's default branch.
+func (a *App) detectDefaultBranch(ctx context.Context, targetRoot string) (string, error) {
+	out, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
+		Name:   "git",
+		Args:   []string{"-C", targetRoot, "ls-remote", "--symref", "origin", "HEAD"},
+		Dir:    a.cwd,
+		Env:    a.env,
+		Stdout: nil,
+	})
+	if err != nil {
+		return "", fmt.Errorf("ls-remote failed: %v", err)
+	}
+	// Parse "ref: refs/heads/<branch>\tHEAD" from the first line
+	for line := range strings.SplitSeq(out, "\n") {
+		if rest, ok := strings.CutPrefix(line, "ref: refs/heads/"); ok {
+			branch, _, _ := strings.Cut(rest, "\t")
+			if branch != "" {
+				return branch, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("could not parse default branch from ls-remote output")
 }
 
 func configPath(env []string, cwd string) string {
