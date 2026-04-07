@@ -165,7 +165,7 @@ finalize_pr() {
         runoq::log "pr-lifecycle" "finalize_pr: auto-merge enabled successfully for PR #${pr_number}"
       elif [[ "$merge_output" == *"Protected branch rules not configured for this branch"* ]] || [[ "$merge_output" == *"enablePullRequestAutoMerge"* ]]; then
         runoq::log "pr-lifecycle" "finalize_pr: auto-merge not available (${merge_output}), falling back to direct squash merge for PR #${pr_number}"
-        runoq::gh pr merge "$pr_number" --repo "$repo" --squash --delete-branch >/dev/null
+        runoq::gh pr merge "$pr_number" --repo "$repo" --squash --delete-branch --body "" >/dev/null
         runoq::log "pr-lifecycle" "finalize_pr: direct squash merge completed for PR #${pr_number}"
       else
         runoq::log "pr-lifecycle" "finalize_pr: merge failed — $merge_output"
