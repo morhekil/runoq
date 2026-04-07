@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -52,6 +53,45 @@ func TestParseStateFromCommentsNoStateBlock(t *testing.T) {
 	}
 	if stateJSON != "" {
 		t.Fatalf("expected empty state for old-format comments, got %q", stateJSON)
+	}
+}
+
+func TestAuditCommentFormatsStateBlock(t *testing.T) {
+	// formatAuditComment should embed state JSON when provided
+	body := formatAuditComment("develop", `{"phase":"DEVELOP","round":1}`, "## Develop\n| Field | Value |")
+	if !strings.Contains(body, `<!-- runoq:event:develop -->`) {
+		t.Fatalf("expected event marker, got %q", body)
+	}
+	if !strings.Contains(body, `<!-- runoq:state:{"phase":"DEVELOP","round":1} -->`) {
+		t.Fatalf("expected state block, got %q", body)
+	}
+	if !strings.Contains(body, "## Develop") {
+		t.Fatalf("expected body content, got %q", body)
+	}
+}
+
+func TestAuditCommentOmitsStateBlockWhenEmpty(t *testing.T) {
+	body := formatAuditComment("init", "", "Orchestrator initialized.")
+	if strings.Contains(body, "runoq:state") {
+		t.Fatalf("expected no state block for empty state, got %q", body)
+	}
+	if !strings.Contains(body, `<!-- runoq:event:init -->`) {
+		t.Fatalf("expected event marker, got %q", body)
+	}
+}
+
+func TestAuditCommentRoundTrip(t *testing.T) {
+	stateJSON := `{"phase":"REVIEW","round":2,"pr_number":87,"verdict":"PASS"}`
+	body := formatAuditComment("review", stateJSON, "Review verdict table")
+
+	// Wrap in comments array and parse back
+	commentsJSON := `[{"body":` + strconv.Quote(body) + `}]`
+	parsed, err := parseStateFromComments(commentsJSON)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if parsed != stateJSON {
+		t.Fatalf("round-trip failed: got %q, want %q", parsed, stateJSON)
 	}
 }
 

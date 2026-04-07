@@ -269,7 +269,22 @@ func (a *App) configureGitBotRemote(ctx context.Context, root string, env []stri
 	}, nil, io.Discard, io.Discard)
 }
 
+// formatAuditComment builds the comment body with event marker, optional state block, and human-readable content.
+func formatAuditComment(event string, stateJSON string, body string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "<!-- runoq:event:%s -->\n", event)
+	if stateJSON != "" {
+		fmt.Fprintf(&b, "%s%s%s\n", markerStatePrefix, stateJSON, markerStateSuffix)
+	}
+	fmt.Fprintf(&b, "> Posted by `orchestrator` — %s phase\n\n%s\n", event, body)
+	return b.String()
+}
+
 func (a *App) postAuditComment(ctx context.Context, root string, env []string, repo string, prNumber int, event string, body string) error {
+	return a.postAuditCommentWithState(ctx, root, env, repo, prNumber, event, "", body)
+}
+
+func (a *App) postAuditCommentWithState(ctx context.Context, root string, env []string, repo string, prNumber int, event string, stateJSON string, body string) error {
 	commentFile, err := os.CreateTemp("", "runoq-audit.*")
 	if err != nil {
 		return err
@@ -278,7 +293,8 @@ func (a *App) postAuditComment(ctx context.Context, root string, env []string, r
 		_ = os.Remove(commentFile.Name())
 	}()
 
-	if _, err := fmt.Fprintf(commentFile, "<!-- runoq:event:%s -->\n> Posted by `orchestrator` — %s phase\n\n%s\n", event, event, body); err != nil {
+	content := formatAuditComment(event, stateJSON, body)
+	if _, err := io.WriteString(commentFile, content); err != nil {
 		_ = commentFile.Close()
 		return err
 	}
