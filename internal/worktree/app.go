@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/saruman/runoq/internal/gitops"
 	"github.com/saruman/runoq/internal/shell"
 )
 
@@ -29,6 +30,7 @@ type App struct {
 	stdout      io.Writer
 	stderr      io.Writer
 	execCommand shell.CommandExecutor
+	repo        gitops.Repo
 }
 
 type config struct {
@@ -110,6 +112,7 @@ func (a *App) runCreate(ctx context.Context, issue string, title string) int {
 	if code != 0 {
 		return code
 	}
+	a.repo = gitops.OpenCLI(ctx, targetRoot, a.execCommand)
 
 	branch := branchName(cfg.BranchPrefix, issue, title)
 	path, err := worktreePath(cfg.WorktreePrefix, targetRoot, issue)
@@ -119,21 +122,14 @@ func (a *App) runCreate(ctx context.Context, issue string, title string) int {
 	baseRef := defaultBaseRef(a.env)
 	if baseRef == "" {
 		// Detect remote default branch
-		remoteBranch, err := a.detectDefaultBranch(ctx, targetRoot)
+		remoteBranch, err := a.repo.DefaultBranch("origin")
 		if err != nil {
 			return shell.Failf(a.stderr, "Failed to detect default branch: %v", err)
 		}
 		baseRef = "origin/" + remoteBranch
 
 		// Fetch the detected branch
-		if err := a.execCommand(ctx, shell.CommandRequest{
-			Name:   "git",
-			Args:   []string{"-C", targetRoot, "fetch", "origin", remoteBranch},
-			Dir:    a.cwd,
-			Env:    a.env,
-			Stdout: io.Discard,
-			Stderr: io.Discard,
-		}); err != nil {
+		if err := a.repo.Fetch("origin", remoteBranch); err != nil {
 			return shell.Failf(a.stderr, "Failed to fetch origin %s: %v", remoteBranch, err)
 		}
 	}
@@ -147,33 +143,12 @@ func (a *App) runCreate(ctx context.Context, issue string, title string) int {
 	}
 
 	// Prune stale worktree metadata (directory removed but git still tracks it)
-	_ = a.execCommand(ctx, shell.CommandRequest{
-		Name:   "git",
-		Args:   []string{"-C", targetRoot, "worktree", "prune"},
-		Dir:    a.cwd,
-		Env:    a.env,
-		Stdout: io.Discard,
-		Stderr: io.Discard,
-	})
+	_ = a.repo.WorktreePrune()
 
 	// Delete stale local branch from a previous killed run
-	_ = a.execCommand(ctx, shell.CommandRequest{
-		Name:   "git",
-		Args:   []string{"-C", targetRoot, "branch", "-D", branch},
-		Dir:    a.cwd,
-		Env:    a.env,
-		Stdout: io.Discard,
-		Stderr: io.Discard,
-	})
+	_ = a.repo.DeleteBranch(branch)
 
-	if err := a.execCommand(ctx, shell.CommandRequest{
-		Name:   "git",
-		Args:   []string{"-C", targetRoot, "worktree", "add", path, "-b", branch, baseRef},
-		Dir:    a.cwd,
-		Env:    a.env,
-		Stdout: io.Discard,
-		Stderr: io.Discard,
-	}); err != nil {
+	if err := a.repo.WorktreeAdd(path, branch, baseRef); err != nil {
 		return shell.Failf(a.stderr, "Failed to create worktree: %v", err)
 	}
 
@@ -200,6 +175,7 @@ func (a *App) runRemove(ctx context.Context, issue string) int {
 	if code != 0 {
 		return code
 	}
+	a.repo = gitops.OpenCLI(ctx, targetRoot, a.execCommand)
 
 	path, err := worktreePath(cfg.WorktreePrefix, targetRoot, issue)
 	if err != nil {
@@ -219,14 +195,7 @@ func (a *App) runRemove(ctx context.Context, issue string) int {
 		return shell.Failf(a.stderr, "Failed to inspect worktree path %s: %v", path, err)
 	}
 
-	if err := a.execCommand(ctx, shell.CommandRequest{
-		Name:   "git",
-		Args:   []string{"-C", targetRoot, "worktree", "remove", path, "--force"},
-		Dir:    a.cwd,
-		Env:    a.env,
-		Stdout: io.Discard,
-		Stderr: io.Discard,
-	}); err != nil {
+	if err := a.repo.WorktreeRemove(path); err != nil {
 		return shell.Failf(a.stderr, "Failed to remove worktree: %v", err)
 	}
 
@@ -283,19 +252,12 @@ func (a *App) runBranchName(issue string, title string) int {
 	return 0
 }
 
-func (a *App) targetRoot(ctx context.Context) (string, int) {
+func (a *App) targetRoot(_ context.Context) (string, int) {
 	if targetRoot, ok := shell.EnvLookup(a.env, "TARGET_ROOT"); ok && targetRoot != "" {
 		return targetRoot, 0
 	}
 
-	root, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
-		Name:   "git",
-		Args:   []string{"rev-parse", "--show-toplevel"},
-		Dir:    a.cwd,
-		Env:    a.env,
-		Stdout: nil,
-		Stderr: nil,
-	})
+	root, err := gitops.FindRoot(a.cwd)
 	if err != nil {
 		return "", shell.Fail(a.stderr, "Run runoq from inside a git repository.")
 	}
@@ -321,14 +283,9 @@ func (a *App) configureGitBotIdentity(ctx context.Context, dir string, slug stri
 		return nil
 	}
 
-	if err := a.execCommand(ctx, shell.CommandRequest{
-		Name:   "git",
-		Args:   []string{"-C", dir, "config", "user.name", slug + "[bot]"},
-		Dir:    a.cwd,
-		Env:    a.env,
-		Stdout: io.Discard,
-		Stderr: io.Discard,
-	}); err != nil {
+	wtRepo := gitops.OpenCLI(ctx, dir, a.execCommand)
+
+	if err := wtRepo.SetConfig("user.name", slug+"[bot]"); err != nil {
 		return err
 	}
 
@@ -337,14 +294,7 @@ func (a *App) configureGitBotIdentity(ctx context.Context, dir string, slug stri
 		return nil
 	}
 
-	return a.execCommand(ctx, shell.CommandRequest{
-		Name:   "git",
-		Args:   []string{"-C", dir, "config", "user.email", fmt.Sprintf("%s+%s[bot]@users.noreply.github.com", appID, slug)},
-		Dir:    a.cwd,
-		Env:    a.env,
-		Stdout: io.Discard,
-		Stderr: io.Discard,
-	})
+	return wtRepo.SetConfig("user.email", fmt.Sprintf("%s+%s[bot]@users.noreply.github.com", appID, slug))
 }
 
 func (a *App) appID(targetRoot string) string {
@@ -421,29 +371,6 @@ func defaultBaseRef(env []string) string {
 	return "" // auto-detect from remote
 }
 
-// detectDefaultBranch uses git ls-remote to find the remote's default branch.
-func (a *App) detectDefaultBranch(ctx context.Context, targetRoot string) (string, error) {
-	out, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
-		Name:   "git",
-		Args:   []string{"-C", targetRoot, "ls-remote", "--symref", "origin", "HEAD"},
-		Dir:    a.cwd,
-		Env:    a.env,
-		Stdout: nil,
-	})
-	if err != nil {
-		return "", fmt.Errorf("ls-remote failed: %v", err)
-	}
-	// Parse "ref: refs/heads/<branch>\tHEAD" from the first line
-	for line := range strings.SplitSeq(out, "\n") {
-		if rest, ok := strings.CutPrefix(line, "ref: refs/heads/"); ok {
-			branch, _, _ := strings.Cut(rest, "\t")
-			if branch != "" {
-				return branch, nil
-			}
-		}
-	}
-	return "", fmt.Errorf("could not parse default branch from ls-remote output")
-}
 
 func configPath(env []string, cwd string) string {
 	if path, ok := shell.EnvLookup(env, "RUNOQ_CONFIG"); ok && path != "" {
