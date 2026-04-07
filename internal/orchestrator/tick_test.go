@@ -76,7 +76,7 @@ func TestRunTickNoEpicsBootstraps(t *testing.T) {
 	}
 }
 
-func TestRunTickAllClosedReturnsWaiting(t *testing.T) {
+func TestRunTickAllClosedReturnsComplete(t *testing.T) {
 	t.Parallel()
 
 	stub := &ghStub{
@@ -95,8 +95,8 @@ func TestRunTickAllClosedReturnsWaiting(t *testing.T) {
 		Stderr:      &stderr,
 	})
 
-	if result != 2 {
-		t.Errorf("RunTick = %d, want 2 (waiting); stderr = %s", result, stderr.String())
+	if result != 3 {
+		t.Errorf("RunTick = %d, want 3 (complete); stderr = %s", result, stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "All milestones complete") {
 		t.Errorf("stdout = %q", stdout.String())

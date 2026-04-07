@@ -327,8 +327,8 @@ func TestTickSubcommandCallsRunTick(t *testing.T) {
 	if !ghCalled {
 		t.Fatal("expected gh to be called by RunTick, not tick.sh")
 	}
-	if code != 2 {
-		t.Fatalf("expected exit 2 (all milestones complete), got %d; stderr=%q", code, stderr.String())
+	if code != 3 {
+		t.Fatalf("expected exit 3 (all milestones complete), got %d; stderr=%q", code, stderr.String())
 	}
 }
 

@@ -47,7 +47,7 @@ type label struct {
 }
 
 // RunTick executes one step of the planning lifecycle.
-// Returns 0 (work done), 2 (waiting), or 1 (error).
+// Returns 0 (work done), 1 (error), 2 (waiting), or 3 (complete).
 func RunTick(ctx context.Context, cfg TickConfig) int {
 	t := &tickRunner{cfg: cfg}
 	return t.run(ctx)
@@ -92,7 +92,7 @@ func (t *tickRunner) run(ctx context.Context) int {
 		}
 		t.success("All milestones complete")
 		fmt.Fprintln(t.cfg.Stdout, "All milestones complete")
-		return 2
+		return 3
 	}
 	t.detail("epic", fmt.Sprintf("#%d %s", epic.Number, epic.Title))
 

@@ -518,6 +518,9 @@ func (a *App) runLoop(ctx context.Context, env []string, runoqRoot string, args 
 			case <-loopCtx.Done():
 				return 0
 			}
+		case 3:
+			// All milestones complete
+			return 0
 		default:
 			return shell.Failf(a.stderr, "tick exited with status %d", code)
 		}
