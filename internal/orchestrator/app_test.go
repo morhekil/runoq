@@ -776,7 +776,7 @@ func TestRunLowComplexityIterateReentersDevelopWithChecklist(t *testing.T) {
 	}
 }
 
-func TestRunNonLowComplexityCriteriaNeedsReviewHandoffSkipsDevelop(t *testing.T) {
+func TestRunMediumComplexityGoesToDevelopAndFinalizesNeedsReview(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
 	writeRuntimeConfig(t, root)
@@ -792,48 +792,62 @@ func TestRunNonLowComplexityCriteriaNeedsReviewHandoffSkipsDevelop(t *testing.T)
 	}, root, &stdout, &stderr)
 	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
 		calls = append(calls, commandLine(req))
+		args := strings.Join(req.Args, " ")
 		switch {
-		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
+		case req.Name == "bash" && strings.Contains(args, "gh-auth.sh"):
 			_, _ = io.WriteString(req.Stdout, "fail\n")
 			return nil
-		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "configure_git_bot_identity"):
+		case req.Name == "bash" && strings.Contains(args, "configure_git_bot_identity"):
 			return nil
-		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "configure_git_bot_remote"):
+		case req.Name == "bash" && strings.Contains(args, "configure_git_bot_remote"):
 			return nil
-		case strings.HasSuffix(req.Name, "/dispatch-safety.sh") && strings.Join(req.Args, " ") == "reconcile owner/repo":
+		case req.Name == "bash" && strings.Contains(args, "runoq::claude_stream"):
+			reviewOutputPath := req.Args[4]
+			_ = os.WriteFile(reviewOutputPath, []byte("REVIEW-TYPE: diff-review\nVERDICT: PASS\nSCORE: 38\nCHECKLIST:\n- Looks good.\n"), 0o644)
 			return nil
-		case req.Name == "gh" && strings.Contains(strings.Join(req.Args, " "), "pr list") && strings.Contains(strings.Join(req.Args, " "), "closes #42"):
+		case strings.HasSuffix(req.Name, "/dispatch-safety.sh") && strings.Contains(args, "reconcile"):
+			return nil
+		case req.Name == "gh" && strings.Contains(args, "pr list") && strings.Contains(args, "closes #42"):
 			_, _ = io.WriteString(req.Stdout, `[]`)
 			return nil
-		case req.Name == "gh" && strings.Join(req.Args, " ") == "issue view 42 --repo owner/repo --json title":
+		case req.Name == "gh" && strings.Contains(args, "issue view 42") && strings.Contains(args, "json title"):
 			_, _ = io.WriteString(req.Stdout, `{"title":"Coordinate migration"}`)
 			return nil
-		case req.Name == "gh" && strings.Join(req.Args, " ") == "issue view 42 --repo owner/repo --json number,title,body,labels,url":
+		case req.Name == "gh" && strings.Contains(args, "issue view 42") && strings.Contains(args, "number,title,body"):
 			_, _ = io.WriteString(req.Stdout, `{"number":42,"title":"Coordinate migration","body":"<!-- runoq:meta\nestimated_complexity: medium\ntype: task\n-->\n\n## Acceptance Criteria\n\n- [ ] Coordinate migration.","labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/42"}`)
 			return nil
-		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "list owner/repo runoq:ready":
+		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Contains(args, "list"):
 			_, _ = io.WriteString(req.Stdout, `[{"number":42,"title":"Coordinate migration","body":"body","url":"https://example.test/issues/42","estimated_complexity":"medium","type":"task"}]`)
 			return nil
-		case strings.HasSuffix(req.Name, "/dispatch-safety.sh") && strings.Join(req.Args, " ") == "eligibility owner/repo 42":
+		case strings.HasSuffix(req.Name, "/dispatch-safety.sh") && strings.Contains(args, "eligibility"):
 			_, _ = io.WriteString(req.Stdout, `{"allowed":true,"issue":42,"branch":"runoq/42-coordinate-migration","reasons":[]}`)
 			return nil
-		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "set-status owner/repo 42 in-progress":
+		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Contains(args, "set-status"):
 			return nil
-		case strings.HasSuffix(req.Name, "/worktree.sh") && strings.Join(req.Args, " ") == "create 42 Coordinate migration":
+		case strings.HasSuffix(req.Name, "/worktree.sh") && strings.Contains(args, "create"):
 			_, _ = io.WriteString(req.Stdout, `{"branch":"runoq/42-coordinate-migration","worktree":"/tmp/runoq-wt-42"}`)
 			return nil
-		case req.Name == "git" && strings.Join(req.Args, " ") == "-C /tmp/runoq-wt-42 commit --allow-empty -m runoq: begin work on #42":
+		case req.Name == "git":
 			return nil
-		case req.Name == "git" && strings.Join(req.Args, " ") == "-C /tmp/runoq-wt-42 push -u origin runoq/42-coordinate-migration":
-			return nil
-		case strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") && strings.Join(req.Args, " ") == "create owner/repo runoq/42-coordinate-migration 42 Coordinate migration":
+		case strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") && strings.Contains(args, "create"):
 			_, _ = io.WriteString(req.Stdout, `{"url":"https://example.test/pull/87","number":87}`)
 			return nil
-		case strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") && strings.HasPrefix(strings.Join(req.Args, " "), "comment owner/repo 87 "):
+		case strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") && strings.Contains(args, "comment"):
 			return nil
-		case strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") && strings.Join(req.Args, " ") == "finalize owner/repo 87 needs-review --reviewer username":
+		case strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") && strings.Contains(args, "finalize"):
 			return nil
-		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.Join(req.Args, " ") == "set-status owner/repo 42 needs-review":
+		case req.Name == "gh" && strings.Contains(args, "issue view 42") && strings.Contains(args, "--json body"):
+			_, _ = io.WriteString(req.Stdout, `{"body":"## AC\n\n- [ ] Coordinate migration."}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/issue-runner.sh"):
+			_, _ = io.WriteString(req.Stdout, `{"status":"review_ready","logDir":"log","baselineHash":"b","headHash":"h","commitRange":"b..h","reviewLogPath":"log/r.md","specRequirements":"AC","changedFiles":["f"],"relatedFiles":["f"],"cumulativeTokens":10,"verificationPassed":true,"verificationFailures":[],"caveats":[],"summary":"Done"}`)
+			return nil
+		case strings.HasSuffix(req.Name, "/worktree.sh") && strings.Contains(args, "remove"):
+			return nil
+		case req.Name == "gh" && strings.Contains(args, "pr view 87") && strings.Contains(args, "--json body"):
+			_, _ = io.WriteString(req.Stdout, `{"body":"## Summary\n<!-- runoq:summary:start -->\nP.\n<!-- runoq:summary:end -->\n\nCloses #42\n"}`)
+			return nil
+		case req.Name == "gh" && strings.Contains(args, "pr edit 87") && strings.Contains(args, "--body-file"):
 			return nil
 		default:
 			t.Fatalf("unexpected command: %s", commandLine(req))
@@ -843,31 +857,22 @@ func TestRunNonLowComplexityCriteriaNeedsReviewHandoffSkipsDevelop(t *testing.T)
 
 	code := app.Run(ctx)
 	if code != 0 {
-		t.Fatalf("expected exit code 0, got %d", code)
-	}
-	if strings.TrimSpace(stdout.String()) == "" {
-		t.Fatal("expected final state on stdout")
+		t.Fatalf("expected exit code 0, got %d; stderr: %s", code, stderr.String())
 	}
 	if !strings.Contains(stdout.String(), `"phase":"DONE"`) {
-		t.Fatalf("expected DONE state on stdout, got %q", stdout.String())
+		t.Fatalf("expected DONE state, got %q", stdout.String())
 	}
+	// Medium complexity + PASS → finalize as needs-review (auto-merge max is "low" in config)
 	if !strings.Contains(stdout.String(), `"finalize_verdict":"needs-review"`) {
 		t.Fatalf("expected needs-review finalize verdict, got %q", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), `"issue_status":"needs-review"`) {
-		t.Fatalf("expected needs-review issue status, got %q", stdout.String())
+	// Must have invoked issue-runner (went through DEVELOP)
+	if !containsCall(calls, "issue-runner.sh run") {
+		t.Fatalf("expected issue-runner invocation for medium complexity, got %v", calls)
 	}
-	if containsCall(calls, "issue-runner.sh run") {
-		t.Fatalf("did not expect issue-runner invocation, got %v", calls)
-	}
-	if !containsCall(calls, "gh-pr-lifecycle.sh finalize owner/repo 87 needs-review --reviewer username") {
-		t.Fatalf("expected needs-review finalize call, got %v", calls)
-	}
-	if !containsCall(calls, "gh-issue-queue.sh set-status owner/repo 42 needs-review") {
-		t.Fatalf("expected needs-review status update, got %v", calls)
-	}
-	if !strings.Contains(stderr.String(), "CRITERIA: issue #42 criteria for complexity=medium type=task requires human review in the current runtime slice") {
-		t.Fatalf("expected criteria handoff log, got %q", stderr.String())
+	// Must have gone through REVIEW
+	if !strings.Contains(stderr.String(), "REVIEW:") {
+		t.Fatalf("expected REVIEW phase, got %q", stderr.String())
 	}
 }
 

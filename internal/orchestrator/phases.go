@@ -238,76 +238,6 @@ func (a *App) phaseCriteria(ctx context.Context, root string, env []string, repo
 	return nextState, nil
 }
 
-func (a *App) phaseCriteriaNeedsReviewHandoff(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
-	complexity := strings.TrimSpace(metadata.EstimatedComplexity)
-	if complexity == "" {
-		complexity = "medium"
-	}
-	issueType := defaultString(metadata.Type, "task")
-	reason := fmt.Sprintf("criteria for complexity=%s type=%s requires human review in the current runtime slice", complexity, issueType)
-	a.logInfo("CRITERIA: issue #%d %s", issueNumber, reason)
-
-	var state struct {
-		PRNumber int `json:"pr_number"`
-	}
-	if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
-		return "", fmt.Errorf("failed to parse state for criteria handoff: %v", err)
-	}
-	if state.PRNumber == 0 {
-		return "", errors.New("CRITERIA state is missing pr_number")
-	}
-
-	reviewState, err := updateStateJSON(stateJSON, func(state map[string]any) {
-		state["phase"] = "REVIEW"
-		state["verdict"] = "FAIL"
-		state["criteria_handoff"] = reason
-	})
-	if err != nil {
-		return "", err
-	}
-
-	decideState, err := updateStateJSON(reviewState, func(state map[string]any) {
-		state["phase"] = "DECIDE"
-		state["decision"] = "finalize-needs-review"
-		state["next_phase"] = "FINALIZE"
-	})
-	if err != nil {
-		return "", err
-	}
-
-	cfg, err := a.loadConfig(root, env)
-	if err != nil {
-		return "", err
-	}
-	finalizeArgs := []string{"finalize", repo, strconv.Itoa(state.PRNumber), "needs-review"}
-	if reviewer := firstReviewer(cfg.Reviewers); reviewer != "" {
-		finalizeArgs = append(finalizeArgs, "--reviewer", reviewer)
-	}
-	if err := a.runScript(ctx, root, env, "gh-pr-lifecycle.sh", finalizeArgs, nil, io.Discard, io.Discard); err != nil {
-		return "", err
-	}
-	if err := a.runScript(ctx, root, env, "gh-issue-queue.sh", []string{"set-status", repo, strconv.Itoa(issueNumber), "needs-review"}, nil, io.Discard, io.Discard); err != nil {
-		return "", err
-	}
-
-	finalizeState, err := updateStateJSON(decideState, func(state map[string]any) {
-		state["phase"] = "FINALIZE"
-		state["finalize_verdict"] = "needs-review"
-		state["issue_status"] = "needs-review"
-	})
-	if err != nil {
-		return "", err
-	}
-
-	doneState, err := updateStateJSON(finalizeState, func(state map[string]any) {
-		state["phase"] = "DONE"
-	})
-	if err != nil {
-		return "", err
-	}
-	return doneState, nil
-}
-
 func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string) (string, issueRunnerResult, error) {
 	a.logInfo("DEVELOP: issue #%d", issueNumber)
 
@@ -832,21 +762,3 @@ func (a *App) handleInitFailure(ctx context.Context, root string, env []string, 
 	return errors.New(reason)
 }
 
-func initFailureState(reason string, branch string, worktree string, prNumber *int) map[string]any {
-	state := map[string]any{
-		"phase":          "FAILED",
-		"failure_stage":  "INIT",
-		"failure_scope":  "internal",
-		"failure_reason": reason,
-	}
-	if strings.TrimSpace(branch) != "" {
-		state["branch"] = branch
-	}
-	if strings.TrimSpace(worktree) != "" {
-		state["worktree"] = worktree
-	}
-	if prNumber != nil {
-		state["pr_number"] = *prNumber
-	}
-	return state
-}

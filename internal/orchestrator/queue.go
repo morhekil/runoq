@@ -248,9 +248,6 @@ func (a *App) runFromCriteria(ctx context.Context, root string, env []string, re
 	if err != nil {
 		return "", err
 	}
-	if metadata.EstimatedComplexity != "low" {
-		return a.phaseCriteriaNeedsReviewHandoff(ctx, root, env, repo, issueNumber, stateJSON, metadata)
-	}
 	return a.runFromDevelop(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 }
 
