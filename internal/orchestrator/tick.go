@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/saruman/runoq/agents"
 	"github.com/saruman/runoq/comments"
 	"github.com/saruman/runoq/internal/dispatchsafety"
 	"github.com/saruman/runoq/internal/issuequeue"
@@ -164,11 +165,6 @@ func (t *tickRunner) run(ctx context.Context) int {
 }
 
 func (t *tickRunner) handleBootstrap(ctx context.Context) int {
-	// Call the existing plan-dispatch pipeline via shell scripts
-	// This is an interim step — M6 will replace with direct Go calls
-	
-	planDispatchScript := filepath.Join(t.cfg.RunoqRoot, "scripts", "plan-dispatch.sh")
-
 	// Create Project Planning epic
 	t.info("creating Project Planning epic")
 	epicNumber, err := t.issueCreate(ctx, t.cfg.Repo, "Project Planning", "## Acceptance Criteria\n\n- [ ] Milestones proposed.", "--type", "epic", "--priority", "1", "--estimated-complexity", "low")
@@ -187,9 +183,25 @@ func (t *tickRunner) handleBootstrap(ctx context.Context) int {
 
 	// Dispatch milestone decomposition
 	t.step("Running milestone decomposition on #" + planningNumber)
-	if err := t.runScript(ctx, planDispatchScript, t.cfg.Repo, planningNumber, "milestone", t.cfg.PlanFile); err != nil {
+	invoker := agents.NewInvoker(agents.InvokerConfig{
+		LogRoot: filepath.Join(t.cfg.RunoqRoot, "log"),
+	})
+	result, err := planning.RunDispatch(ctx, planning.DispatchConfig{
+		ReviewType: "milestone",
+		PlanFile:   t.cfg.PlanFile,
+		RunoqRoot:  t.cfg.RunoqRoot,
+		MaxRounds:  3,
+		Invoker:    invoker,
+		Stderr:     t.cfg.Stderr,
+	})
+	if err != nil {
 		return t.fail("plan dispatch: %v", err)
 	}
+
+	// Write proposal to issue body
+	currentBody, _ := t.ghOutput(ctx, "issue", "view", planningNumber, "--repo", t.cfg.Repo, "--json", "body", "--jq", ".body // \"\"")
+	newBody := planning.ReplaceProposalInBody(currentBody, result.FormattedBody)
+	t.ghEditBody(ctx, planningNumber, newBody)
 
 	// Assign after proposal is posted
 	t.issueAssign(ctx, t.cfg.Repo, planningNumber)
@@ -342,7 +354,7 @@ func (t *tickRunner) handleApprovedAdjustment(ctx context.Context, reviewView st
 				targetIssue := t.findIssueByNumber(*adj.TargetMilestoneNumber)
 				if targetIssue != nil {
 					newBody := targetIssue.Body + "\n\n" + adj.Description
-					t.ghEdit(ctx, target, newBody)
+					t.ghEditBody(ctx, target, newBody)
 				}
 			}
 		case "new_milestone":
@@ -380,22 +392,40 @@ func (t *tickRunner) handlePlanningDispatch(ctx context.Context, planningChild *
 	t.detail("mode", mode)
 	t.detail("issue", fmt.Sprintf("#%d", planningChild.Number))
 
-	planDispatchScript := filepath.Join(t.cfg.RunoqRoot, "scripts", "plan-dispatch.sh")
-	
+	invoker := agents.NewInvoker(agents.InvokerConfig{
+		LogRoot: filepath.Join(t.cfg.RunoqRoot, "log"),
+	})
 
-	if mode == "milestone" {
-		t.runScript(ctx, planDispatchScript, t.cfg.Repo, fmt.Sprintf("%d", planningChild.Number), "milestone", t.cfg.PlanFile)
-	} else {
-		// Write epic data to temp file for task decomposer context
-		milestoneFile, _ := os.CreateTemp("", "runoq-milestone-*.json")
+	var milestoneFile string
+	if mode == "task" {
+		tmp, _ := os.CreateTemp("", "runoq-milestone-*.json")
 		epicJSON, _ := json.Marshal(epic)
-		milestoneFile.Write(epicJSON)
-		milestoneFile.Close()
-		defer os.Remove(milestoneFile.Name())
-		t.runScript(ctx, planDispatchScript, t.cfg.Repo, fmt.Sprintf("%d", planningChild.Number), "task", t.cfg.PlanFile, milestoneFile.Name())
+		tmp.Write(epicJSON)
+		tmp.Close()
+		defer os.Remove(tmp.Name())
+		milestoneFile = tmp.Name()
 	}
 
-	t.issueAssign(ctx, t.cfg.Repo, fmt.Sprintf("%d", planningChild.Number))
+	result, err := planning.RunDispatch(ctx, planning.DispatchConfig{
+		ReviewType:    mode,
+		PlanFile:      t.cfg.PlanFile,
+		MilestoneFile: milestoneFile,
+		RunoqRoot:     t.cfg.RunoqRoot,
+		MaxRounds:     3,
+		Invoker:       invoker,
+		Stderr:        t.cfg.Stderr,
+	})
+	if err != nil {
+		return t.fail("plan dispatch: %v", err)
+	}
+
+	// Write proposal to issue body
+	issueNumber := fmt.Sprintf("%d", planningChild.Number)
+	currentBody, _ := t.ghOutput(ctx, "issue", "view", issueNumber, "--repo", t.cfg.Repo, "--json", "body", "--jq", ".body // \"\"")
+	newBody := planning.ReplaceProposalInBody(currentBody, result.FormattedBody)
+	t.ghEditBody(ctx, issueNumber, newBody)
+
+	t.issueAssign(ctx, t.cfg.Repo, issueNumber)
 	t.success(fmt.Sprintf("Proposal posted on #%d", planningChild.Number))
 	fmt.Fprintf(t.cfg.Stdout, "Proposal posted on #%d\n", planningChild.Number)
 	return 0
@@ -581,7 +611,7 @@ func (t *tickRunner) findIssueByNumber(number int) *issue {
 	return nil
 }
 
-func (t *tickRunner) ghEdit(ctx context.Context, issueNumber string, newBody string) {
+func (t *tickRunner) ghEditBody(ctx context.Context, issueNumber string, newBody string) {
 	tmpFile, _ := os.CreateTemp("", "runoq-edit-*.md")
 	tmpFile.WriteString(newBody)
 	tmpFile.Close()
