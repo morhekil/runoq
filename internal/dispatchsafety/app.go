@@ -261,8 +261,21 @@ func (a *App) reconcileStateFile(ctx context.Context, repo string, file string) 
 	}
 
 	phase := rawStringOr(state["phase"], "")
-	if phase == "DONE" || phase == "FAILED" {
+	if phase == "DONE" {
 		return reconcileAction{}, false, nil
+	}
+	if phase == "FAILED" {
+		// Clean up failed state: close any lingering PR and remove state file
+		prNum := rawStringOr(state["pr_number"], "")
+		if prNum != "" && prNum != "0" {
+			_ = a.runGh(ctx, io.Discard, "pr", "close", prNum, "--repo", repo, "--delete-branch")
+		}
+		_ = os.Remove(file)
+		issueNumber, _ := intValue(state["issue"])
+		return reconcileAction{
+			Issue:  issueNumber,
+			Action: "cleanup-failed",
+		}, true, nil
 	}
 
 	issueNumber, ok := intValue(state["issue"])
