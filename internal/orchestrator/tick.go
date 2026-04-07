@@ -444,12 +444,9 @@ func (t *tickRunner) handlePlanningDispatch(ctx context.Context, planningChild *
 
 func (t *tickRunner) handleImplementation(ctx context.Context) int {
 	t.info("reconciling dispatch safety")
-	dsApp := dispatchsafety.New(
-		[]string{"reconcile", t.cfg.Repo},
-		t.cfg.Env, "", io.Discard, io.Discard,
-	)
+	dsApp := dispatchsafety.New(nil, t.cfg.Env, "", io.Discard, io.Discard)
 	dsApp.SetCommandExecutor(t.cfg.ExecCommand)
-	dsApp.Run(ctx) // best-effort, ignore errors
+	dsApp.Reconcile(ctx, t.cfg.Repo) // best-effort, ignore errors
 
 	t.info("running next issue")
 	runApp := New(

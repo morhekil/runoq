@@ -298,6 +298,70 @@ func TestPlanningEligibilityAllowsMissingAcceptanceCriteria(t *testing.T) {
 	}
 }
 
+func TestReconcileExportedMethodSkipsArgParsing(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := findRepoRoot(t)
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	writeDispatchConfig(t, configPath)
+
+	remoteDir, localDir := newRemoteBackedRepo(t)
+	_ = remoteDir
+	stateDir := filepath.Join(localDir, ".runoq", "state")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatalf("mkdir state dir: %v", err)
+	}
+
+	runCmd(t, localDir, "git", "checkout", "-b", "runoq/42-implement-queue")
+	if err := os.WriteFile(filepath.Join(localDir, "work.txt"), []byte("work\n"), 0o644); err != nil {
+		t.Fatalf("write work file: %v", err)
+	}
+	runCmd(t, localDir, "git", "add", "work.txt")
+	runCmd(t, localDir, "git", "commit", "-m", "Work in progress")
+	runCmd(t, localDir, "git", "push", "-u", "origin", "runoq/42-implement-queue")
+
+	writeIssueStateFile(t, filepath.Join(stateDir, "42.json"), 42, "REVIEW", 2, "runoq/42-implement-queue", "87")
+
+	scenarioPath := filepath.Join(t.TempDir(), "scenario.json")
+	writeFakeGHScenario(t, scenarioPath, `[
+  {
+    "contains": ["pr", "view", "87", "--repo", "owner/repo", "--json", "number"],
+    "stdout": "{\"number\":87}"
+  },
+  {
+    "contains": ["issue", "comment", "42", "--repo", "owner/repo"],
+    "stdout": ""
+  },
+  {
+    "contains": ["pr", "comment", "87", "--repo", "owner/repo"],
+    "stdout": ""
+  },
+  {
+    "contains": ["issue", "list", "--repo", "owner/repo", "--label", "runoq:in-progress"],
+    "stdout": "[]"
+  }
+]`)
+
+	logPath := filepath.Join(t.TempDir(), "fake-gh.log")
+	env := dispatchTestEnv(repoRoot, configPath, localDir, stateDir, scenarioPath, logPath)
+
+	// Call Reconcile directly — no args, no arg parsing
+	var stdout bytes.Buffer
+	app := New(nil, env, localDir, &stdout, &bytes.Buffer{})
+	code := app.Reconcile(context.Background(), "owner/repo")
+	if code != 0 {
+		t.Fatalf("Reconcile returned %d", code)
+	}
+
+	var actions []reconcileAction
+	if err := json.Unmarshal(stdout.Bytes(), &actions); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	if len(actions) != 1 || actions[0].Action != "resume" || actions[0].Issue != 42 {
+		t.Fatalf("unexpected actions: %+v", actions)
+	}
+}
+
 func runApp(t *testing.T, args []string, env []string, cwd string) (int, string, string) {
 	t.Helper()
 

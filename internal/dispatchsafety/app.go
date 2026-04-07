@@ -99,7 +99,7 @@ func (a *App) Run(ctx context.Context) int {
 			a.printUsage()
 			return 1
 		}
-		return a.runReconcile(ctx, a.args[1])
+		return a.Reconcile(ctx, a.args[1])
 	case "eligibility":
 		if len(a.args) != 3 {
 			a.printUsage()
@@ -112,7 +112,9 @@ func (a *App) Run(ctx context.Context) int {
 	}
 }
 
-func (a *App) runReconcile(ctx context.Context, repo string) int {
+// Reconcile checks for interrupted runs and stale labels, posting comments
+// and updating labels as needed. It writes a JSON array of actions to stdout.
+func (a *App) Reconcile(ctx context.Context, repo string) int {
 	activeIssues, err := a.activeStateIssues()
 	if err != nil {
 		return shell.Failf(a.stderr, "%v", err)
