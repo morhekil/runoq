@@ -16,7 +16,7 @@ import (
 	"github.com/saruman/runoq/internal/shell"
 )
 
-func metadataFromIssueView(issue issueView) issueMetadata {
+func metadataFromIssueView(issue issueView) IssueMetadata {
 	meta := parseMetadataBlock(issue.Body)
 	complexity := meta.EstimatedComplexity
 	if complexity == "" {
@@ -27,7 +27,7 @@ func metadataFromIssueView(issue issueView) issueMetadata {
 		issueType = "task"
 	}
 
-	return issueMetadata{
+	return IssueMetadata{
 		Number:              issue.Number,
 		Title:               issue.Title,
 		Body:                issue.Body,
@@ -58,7 +58,7 @@ func formatSkippedSummary(skipped []queueSelectionIssue) string {
 	return strings.Join(parts, "; ")
 }
 
-func issueMetadataFromQueue(raw string, issueNumber int) (issueMetadata, bool) {
+func IssueMetadataFromQueue(raw string, issueNumber int) (IssueMetadata, bool) {
 	var queueEntries []struct {
 		Number              int     `json:"number"`
 		Title               string  `json:"title"`
@@ -69,7 +69,7 @@ func issueMetadataFromQueue(raw string, issueNumber int) (issueMetadata, bool) {
 		Type                string  `json:"type"`
 	}
 	if err := json.Unmarshal([]byte(raw), &queueEntries); err != nil {
-		return issueMetadata{}, false
+		return IssueMetadata{}, false
 	}
 	for _, entry := range queueEntries {
 		if entry.Number != issueNumber {
@@ -83,7 +83,7 @@ func issueMetadataFromQueue(raw string, issueNumber int) (issueMetadata, bool) {
 		if issueType == "" {
 			issueType = "task"
 		}
-		return issueMetadata{
+		return IssueMetadata{
 			Number:              entry.Number,
 			Title:               entry.Title,
 			Body:                entry.Body,
@@ -93,7 +93,7 @@ func issueMetadataFromQueue(raw string, issueNumber int) (issueMetadata, bool) {
 			Type:                issueType,
 		}, true
 	}
-	return issueMetadata{}, false
+	return IssueMetadata{}, false
 }
 
 type metadataBlock struct {

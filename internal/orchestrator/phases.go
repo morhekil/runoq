@@ -245,7 +245,7 @@ func (a *App) phaseInit(ctx context.Context, root string, env []string, repo str
 	return stateJSON, nil
 }
 
-func (a *App) phaseCriteria(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata issueMetadata) (string, error) {
+func (a *App) phaseCriteria(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
 	complexity := strings.TrimSpace(metadata.EstimatedComplexity)
 	if complexity == "" {
 		complexity = "medium"
@@ -265,7 +265,7 @@ func (a *App) phaseCriteria(ctx context.Context, root string, env []string, repo
 	return nextState, nil
 }
 
-func (a *App) phaseCriteriaNeedsReviewHandoff(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata issueMetadata) (string, error) {
+func (a *App) phaseCriteriaNeedsReviewHandoff(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
 	complexity := strings.TrimSpace(metadata.EstimatedComplexity)
 	if complexity == "" {
 		complexity = "medium"
@@ -680,7 +680,7 @@ func (a *App) phaseDecide(ctx context.Context, root string, env []string, issueN
 	return decideState, nil
 }
 
-func (a *App) phaseFinalize(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata issueMetadata) (string, error) {
+func (a *App) phaseFinalize(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
 	var state struct {
 		PRNumber int      `json:"pr_number"`
 		Worktree string   `json:"worktree"`

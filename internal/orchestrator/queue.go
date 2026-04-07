@@ -272,12 +272,26 @@ func (a *App) runQueueDryRun(ctx context.Context, root string, env []string, rep
 	return 0
 }
 
+// RunIssue runs a single issue through the phase machine (INIT→CRITERIA→DEVELOP→REVIEW→DECIDE→FINALIZE).
+// The caller provides metadata so no additional API call is needed for issue details.
+func (a *App) RunIssue(ctx context.Context, repo string, issueNumber int, dryRun bool, title string, metadata IssueMetadata) (string, error) {
+	root := a.runoqRoot()
+	if root == "" {
+		return "", fmt.Errorf("unable to resolve RUNOQ_ROOT")
+	}
+	env := append([]string(nil), a.env...)
+	return a.runIssueWithEnv(ctx, root, env, repo, issueNumber, dryRun, title, metadata)
+}
+
 func (a *App) runSingleIssue(ctx context.Context, root string, env []string, repo string, issueNumber int, dryRun bool, title string) (string, error) {
 	metadata, err := a.getIssueMetadata(ctx, root, env, repo, issueNumber)
 	if err != nil {
 		return "", err
 	}
+	return a.runIssueWithEnv(ctx, root, env, repo, issueNumber, dryRun, title, metadata)
+}
 
+func (a *App) runIssueWithEnv(ctx context.Context, root string, env []string, repo string, issueNumber int, dryRun bool, title string, metadata IssueMetadata) (string, error) {
 	stateJSON, err := a.phaseInit(ctx, root, env, repo, issueNumber, dryRun, title)
 	if err != nil {
 		return "", err
@@ -425,20 +439,20 @@ func (a *App) runEpicSweep(ctx context.Context, root string, env []string, repo 
 	return nil
 }
 
-func (a *App) getIssueMetadata(ctx context.Context, root string, env []string, repo string, issueNumber int) (issueMetadata, error) {
+func (a *App) getIssueMetadata(ctx context.Context, root string, env []string, repo string, issueNumber int) (IssueMetadata, error) {
 	issueOut, err := a.ghOutput(ctx, env, "issue", "view", strconv.Itoa(issueNumber), "--repo", repo, "--json", "number,title,body,labels,url")
 	if err != nil {
-		return issueMetadata{}, err
+		return IssueMetadata{}, err
 	}
 
 	var issue issueView
 	if err := json.Unmarshal([]byte(issueOut), &issue); err != nil {
-		return issueMetadata{}, fmt.Errorf("failed to parse issue metadata: %v", err)
+		return IssueMetadata{}, fmt.Errorf("failed to parse issue metadata: %v", err)
 	}
 
 	cfg, err := a.loadConfig(root, env)
 	if err != nil {
-		return issueMetadata{}, err
+		return IssueMetadata{}, err
 	}
 
 	queueOut, err := a.scriptOutput(ctx, root, env, "gh-issue-queue.sh", []string{"list", repo, cfg.Labels.Ready}, nil)
@@ -446,7 +460,7 @@ func (a *App) getIssueMetadata(ctx context.Context, root string, env []string, r
 		queueOut = "[]"
 	}
 
-	queueMeta, found := issueMetadataFromQueue(queueOut, issueNumber)
+	queueMeta, found := IssueMetadataFromQueue(queueOut, issueNumber)
 	if found {
 		return queueMeta, nil
 	}

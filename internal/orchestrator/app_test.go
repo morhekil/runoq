@@ -1081,6 +1081,42 @@ func TestMentionTriagePropagatesScriptExitCodeAndStderr(t *testing.T) {
 	}
 }
 
+func TestRunIssueExportedMethodSkipsQueueSelection(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+	writeRuntimeConfig(t, root)
+
+	var stdout bytes.Buffer
+	app := New(nil, []string{
+		"RUNOQ_ROOT=" + root,
+		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
+		"TARGET_ROOT=" + root,
+	}, root, &stdout, io.Discard)
+	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
+		switch {
+		case strings.HasSuffix(req.Name, "/dispatch-safety.sh") && strings.Contains(commandLine(req), "eligibility"):
+			_, _ = io.WriteString(req.Stdout, `{"allowed":true,"issue":42,"branch":"runoq/42-implement-queue","reasons":[]}`)
+			return nil
+		default:
+			return nil
+		}
+	})
+
+	meta := IssueMetadata{
+		Number:              42,
+		Title:               "Implement queue",
+		EstimatedComplexity: "low",
+		Type:                "task",
+	}
+	stateJSON, err := app.RunIssue(ctx, "owner/repo", 42, true, "Implement queue", meta)
+	if err != nil {
+		t.Fatalf("RunIssue failed: %v", err)
+	}
+	if !strings.Contains(stateJSON, `"issue":42`) || !strings.Contains(stateJSON, `"dry_run":true`) {
+		t.Fatalf("unexpected state: %s", stateJSON)
+	}
+}
+
 func TestRunQueueExportedMethodSkipsArgParsingAndReconcile(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()

@@ -1,6 +1,7 @@
 package orchestrator
 
-type issueMetadata struct {
+// IssueMetadata holds parsed metadata for an issue being processed.
+type IssueMetadata struct {
 	Number              int
 	Title               string
 	Body                string
