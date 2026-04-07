@@ -1447,12 +1447,12 @@ run_lifecycle() {
       export RUNOQ_CLAUDE_BIN="$claude_wrapper_path"
       export RUNOQ_RUNTIME_BIN="$runtime_bin"
       export PATH="$tmpdir:$PATH"
-      "$root/bin/runoq" run
+      "$root/bin/runoq" tick
     ) >"$run_log" 2>&1
     run_exit="$?"
     set -e
     run_exit_json="$run_exit"
-    smoke_log "runoq run exited with code ${run_exit}"
+    smoke_log "runoq tick exited with code ${run_exit}"
     checks_json="$(append_check "$checks_json" "lifecycle_run_invoked")"
   fi
 
