@@ -173,6 +173,16 @@ func (a *App) runSingleIssue(ctx context.Context, root string, env []string, rep
 }
 
 func (a *App) runIssueWithEnv(ctx context.Context, root string, env []string, repo string, issueNumber int, dryRun bool, title string, metadata IssueMetadata) (string, error) {
+	// Check GitHub for existing work before starting fresh
+	if !dryRun {
+		derivedState, _, found, deriveErr := a.deriveStateFromGitHub(ctx, env, repo, issueNumber)
+		if deriveErr != nil {
+			a.logInfo("State derivation failed (starting fresh): %v", deriveErr)
+		} else if found && derivedState != "" {
+			return a.resumeFromState(ctx, root, env, repo, issueNumber, derivedState, metadata)
+		}
+	}
+
 	stateJSON, err := a.phaseInit(ctx, root, env, repo, issueNumber, dryRun, title)
 	if err != nil {
 		return "", err
@@ -182,6 +192,58 @@ func (a *App) runIssueWithEnv(ctx context.Context, root string, env []string, re
 		return stateJSON, nil
 	}
 
+	return a.runFromCriteria(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+}
+
+func (a *App) resumeFromState(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
+	var state struct {
+		Phase    string `json:"phase"`
+		PRNumber int    `json:"pr_number"`
+	}
+	if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
+		return "", fmt.Errorf("failed to parse derived state: %v", err)
+	}
+	a.logInfo("RESUME: issue #%d from phase %s (PR #%d)", issueNumber, state.Phase, state.PRNumber)
+
+	switch state.Phase {
+	case "DONE", "FINALIZE":
+		a.logInfo("RESUME: issue #%d already at terminal phase %s", issueNumber, state.Phase)
+		return stateJSON, nil
+	case "INIT":
+		return a.runFromCriteria(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+	case "CRITERIA":
+		return a.runFromDevelop(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+	case "DEVELOP":
+		return a.runFromReview(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+	case "REVIEW":
+		return a.runFromDecide(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+	case "DECIDE":
+		var decideState struct {
+			Decision        string `json:"decision"`
+			NextPhase       string `json:"next_phase"`
+			ReviewChecklist string `json:"review_checklist"`
+		}
+		if err := json.Unmarshal([]byte(stateJSON), &decideState); err != nil {
+			return "", fmt.Errorf("failed to parse decide state for resume: %v", err)
+		}
+		if decideState.NextPhase == "DEVELOP" && decideState.Decision == "iterate" {
+			stateJSON, err := updateStateJSON(stateJSON, func(s map[string]any) {
+				s["previous_checklist"] = decideState.ReviewChecklist
+			})
+			if err != nil {
+				return "", err
+			}
+			return a.runFromDevelop(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+		}
+		return a.phaseFinalize(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+	default:
+		a.logInfo("RESUME: unknown phase %q, starting from criteria", state.Phase)
+		return a.runFromCriteria(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+	}
+}
+
+func (a *App) runFromCriteria(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
+	var err error
 	stateJSON, err = a.phaseCriteria(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 	if err != nil {
 		return "", err
@@ -189,9 +251,13 @@ func (a *App) runIssueWithEnv(ctx context.Context, root string, env []string, re
 	if metadata.EstimatedComplexity != "low" {
 		return a.phaseCriteriaNeedsReviewHandoff(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 	}
+	return a.runFromDevelop(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+}
 
+func (a *App) runFromDevelop(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
 	for {
 		var developResult issueRunnerResult
+		var err error
 		stateJSON, developResult, err = a.phaseDevelop(ctx, root, env, repo, issueNumber, stateJSON)
 		if err != nil {
 			return "", err
@@ -201,17 +267,13 @@ func (a *App) runIssueWithEnv(ctx context.Context, root string, env []string, re
 			return a.phaseDevelopNeedsReview(ctx, root, env, repo, issueNumber, stateJSON)
 		}
 
-		stateJSON, err = a.phaseReview(ctx, root, env, repo, issueNumber, stateJSON)
-		if err != nil {
-			return "", err
-		}
-
-		stateJSON, err = a.phaseDecide(ctx, root, env, issueNumber, stateJSON)
+		stateJSON, err = a.runFromReviewLoop(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 		if err != nil {
 			return "", err
 		}
 
 		var decideState struct {
+			Phase           string `json:"phase"`
 			Decision        string `json:"decision"`
 			NextPhase       string `json:"next_phase"`
 			ReviewChecklist string `json:"review_checklist"`
@@ -235,6 +297,54 @@ func (a *App) runIssueWithEnv(ctx context.Context, root string, env []string, re
 
 		return a.phaseFinalize(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 	}
+}
+
+func (a *App) runFromReview(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
+	stateJSON, err := a.runFromReviewLoop(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+	if err != nil {
+		return "", err
+	}
+	return a.phaseFinalize(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+}
+
+func (a *App) runFromDecide(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
+	var err error
+	stateJSON, err = a.phaseDecide(ctx, root, env, issueNumber, stateJSON)
+	if err != nil {
+		return "", err
+	}
+	var decideState struct {
+		Decision        string `json:"decision"`
+		NextPhase       string `json:"next_phase"`
+		ReviewChecklist string `json:"review_checklist"`
+	}
+	if err := json.Unmarshal([]byte(stateJSON), &decideState); err != nil {
+		return "", fmt.Errorf("failed to parse decide state: %v", err)
+	}
+	if decideState.NextPhase == "DEVELOP" && decideState.Decision == "iterate" {
+		stateJSON, err = updateStateJSON(stateJSON, func(s map[string]any) {
+			s["previous_checklist"] = decideState.ReviewChecklist
+		})
+		if err != nil {
+			return "", err
+		}
+		return a.runFromDevelop(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+	}
+	return a.phaseFinalize(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+}
+
+// runFromReviewLoop runs review + decide phases (single pass, no loop).
+func (a *App) runFromReviewLoop(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
+	var err error
+	stateJSON, err = a.phaseReview(ctx, root, env, repo, issueNumber, stateJSON)
+	if err != nil {
+		return "", err
+	}
+	stateJSON, err = a.phaseDecide(ctx, root, env, issueNumber, stateJSON)
+	if err != nil {
+		return "", err
+	}
+	return stateJSON, nil
 }
 
 func (a *App) getIssueMetadata(ctx context.Context, root string, env []string, repo string, issueNumber int) (IssueMetadata, error) {

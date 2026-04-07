@@ -431,6 +431,9 @@ func TestRunLowComplexityDevelopFailureCompletesNeedsReviewHandoff(t *testing.T)
 			return nil
 		case strings.HasSuffix(req.Name, "/dispatch-safety.sh") && strings.Join(req.Args, " ") == "reconcile owner/repo":
 			return nil
+		case req.Name == "gh" && strings.Contains(strings.Join(req.Args, " "), "pr list") && strings.Contains(strings.Join(req.Args, " "), "closes #42"):
+			_, _ = io.WriteString(req.Stdout, `[]`)
+			return nil
 		case req.Name == "gh" && strings.Join(req.Args, " ") == "issue view 42 --repo owner/repo --json title":
 			_, _ = io.WriteString(req.Stdout, `{"title":"Implement queue"}`)
 			return nil
@@ -552,6 +555,9 @@ func TestRunLowComplexityReviewReadyAutoMergesAndCleansUp(t *testing.T) {
 			}
 			return nil
 		case strings.HasSuffix(req.Name, "/dispatch-safety.sh") && strings.Join(req.Args, " ") == "reconcile owner/repo":
+			return nil
+		case req.Name == "gh" && strings.Contains(strings.Join(req.Args, " "), "pr list") && strings.Contains(strings.Join(req.Args, " "), "closes #42"):
+			_, _ = io.WriteString(req.Stdout, `[]`)
 			return nil
 		case req.Name == "gh" && strings.Join(req.Args, " ") == "issue view 42 --repo owner/repo --json title":
 			_, _ = io.WriteString(req.Stdout, `{"title":"Implement queue"}`)
@@ -726,6 +732,9 @@ func TestRunLowComplexityIterateReentersDevelopWithChecklist(t *testing.T) {
 			return nil
 		case strings.HasSuffix(req.Name, "/dispatch-safety.sh") && strings.Join(req.Args, " ") == "reconcile owner/repo":
 			return nil
+		case req.Name == "gh" && strings.Contains(strings.Join(req.Args, " "), "pr list") && strings.Contains(strings.Join(req.Args, " "), "closes #42"):
+			_, _ = io.WriteString(req.Stdout, `[]`)
+			return nil
 		case req.Name == "gh" && strings.Join(req.Args, " ") == "issue view 42 --repo owner/repo --json title":
 			_, _ = io.WriteString(req.Stdout, `{"title":"Implement queue"}`)
 			return nil
@@ -851,6 +860,9 @@ func TestRunNonLowComplexityCriteriaNeedsReviewHandoffSkipsDevelop(t *testing.T)
 		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "configure_git_bot_remote"):
 			return nil
 		case strings.HasSuffix(req.Name, "/dispatch-safety.sh") && strings.Join(req.Args, " ") == "reconcile owner/repo":
+			return nil
+		case req.Name == "gh" && strings.Contains(strings.Join(req.Args, " "), "pr list") && strings.Contains(strings.Join(req.Args, " "), "closes #42"):
+			_, _ = io.WriteString(req.Stdout, `[]`)
 			return nil
 		case req.Name == "gh" && strings.Join(req.Args, " ") == "issue view 42 --repo owner/repo --json title":
 			_, _ = io.WriteString(req.Stdout, `{"title":"Coordinate migration"}`)
@@ -1319,6 +1331,101 @@ func TestRunIssueExportedMethodSkipsQueueSelection(t *testing.T) {
 	}
 	if !strings.Contains(stateJSON, `"issue":42`) || !strings.Contains(stateJSON, `"dry_run":true`) {
 		t.Fatalf("unexpected state: %s", stateJSON)
+	}
+}
+
+func TestRunIssueResumesFromDevelopState(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+	writeRuntimeConfig(t, root)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	var calls []string
+	var savedStates []string
+
+	// State as it would appear in a develop-phase audit comment
+	developState := `{"phase":"DEVELOP","issue":42,"pr_number":87,"branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","round":1,"cumulative_tokens":12,"baseline_hash":"base","head_hash":"head","commit_range":"base..head","review_log_path":"log/issue-42/round-1-diff-review.md","spec_requirements":"## AC","changed_files":["src/queue.ts"],"related_files":["src/queue.ts"],"verification_passed":true,"verification_failures":[],"caveats":[],"summary":"Ready for review","complexity":"low","issue_type":"task","status":"review_ready"}`
+
+	app := New(nil, []string{
+		"RUNOQ_ROOT=" + root,
+		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
+		"TARGET_ROOT=" + root,
+	}, root, &stdout, &stderr)
+	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
+		calls = append(calls, commandLine(req))
+		args := strings.Join(req.Args, " ")
+		switch {
+		// deriveStateFromGitHub: find linked PR
+		case req.Name == "gh" && strings.Contains(args, "pr list") && strings.Contains(args, `closes #42`):
+			_, _ = io.WriteString(req.Stdout, `[{"number":87,"headRefName":"runoq/42-implement-queue"}]`)
+			return nil
+		// deriveStateFromGitHub: fetch PR comments with state blocks
+		case req.Name == "gh" && strings.Contains(args, "pr view 87") && strings.Contains(args, "comments"):
+			_, _ = io.WriteString(req.Stdout, `{"comments":[{"body":"<!-- runoq:event:init -->\n<!-- runoq:state:{\"phase\":\"INIT\",\"pr_number\":87} -->\n> init"},{"body":"<!-- runoq:event:develop -->\n<!-- runoq:state:`+strings.ReplaceAll(developState, `"`, `\"`)+` -->\n> develop"}]}`)
+			return nil
+		// Review phase: claude_stream for diff-reviewer
+		case req.Name == "bash" && strings.Contains(args, "runoq::claude_stream"):
+			reviewOutputPath := req.Args[4]
+			if err := os.WriteFile(reviewOutputPath, []byte("REVIEW-TYPE: diff-review\nVERDICT: PASS\nSCORE: 42\nCHECKLIST:\n- OK.\n"), 0o644); err != nil {
+				t.Fatalf("write review output: %v", err)
+			}
+			return nil
+		// PR comment posting
+		case strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") && strings.HasPrefix(args, "comment owner/repo 87 "):
+			return nil
+		// State save
+		case strings.HasSuffix(req.Name, "/state.sh") && args == "save 42":
+			payload, _ := io.ReadAll(req.Stdin)
+			savedStates = append(savedStates, string(payload))
+			return nil
+		// Finalize
+		case strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") && strings.HasPrefix(args, "finalize owner/repo 87"):
+			return nil
+		case strings.HasSuffix(req.Name, "/gh-issue-queue.sh") && strings.HasPrefix(args, "set-status owner/repo 42"):
+			return nil
+		case strings.HasSuffix(req.Name, "/worktree.sh") && args == "remove 42":
+			return nil
+		// PR body update
+		case req.Name == "gh" && strings.Contains(args, "pr view 87") && strings.Contains(args, "--json body"):
+			_, _ = io.WriteString(req.Stdout, `{"body":"## Summary\n<!-- runoq:summary:start -->\nPending.\n<!-- runoq:summary:end -->\n\n## Linked Issue\nCloses #42\n"}`)
+			return nil
+		case req.Name == "gh" && strings.Contains(args, "pr edit 87") && strings.Contains(args, "--body-file"):
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s", commandLine(req))
+			return nil
+		}
+	})
+
+	meta := IssueMetadata{
+		Number:              42,
+		Title:               "Implement queue",
+		EstimatedComplexity: "low",
+		Type:                "task",
+	}
+	stateJSON, err := app.RunIssue(ctx, "owner/repo", 42, false, "Implement queue", meta)
+	if err != nil {
+		t.Fatalf("RunIssue failed: %v", err)
+	}
+	if !strings.Contains(stateJSON, `"phase":"DONE"`) {
+		t.Fatalf("expected DONE, got %s", stateJSON)
+	}
+	// Must NOT have called phaseInit (no PR creation, no worktree creation, no eligibility check)
+	for _, call := range calls {
+		if strings.Contains(call, "dispatch-safety.sh eligibility") {
+			t.Fatalf("should not have called eligibility check on resume, got: %v", calls)
+		}
+		if strings.Contains(call, "gh-pr-lifecycle.sh create") {
+			t.Fatalf("should not have created PR on resume, got: %v", calls)
+		}
+		if strings.Contains(call, "worktree.sh create") {
+			t.Fatalf("should not have created worktree on resume, got: %v", calls)
+		}
+	}
+	// Should have gone through REVIEW phase
+	if !strings.Contains(stderr.String(), "REVIEW:") {
+		t.Fatalf("expected REVIEW phase log on resume, got %q", stderr.String())
 	}
 }
 
