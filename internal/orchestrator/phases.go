@@ -448,10 +448,9 @@ func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo 
 		return "", issueRunnerResult{}, err
 	}
 
-	runnerOut, runnerStderr, err := a.scriptOutputWithStderr(ctx, root, env, "issue-runner.sh", []string{"run", payloadFile.Name()}, nil)
-	if strings.TrimSpace(runnerStderr) != "" {
-		a.logInfo("DEVELOP: issue-runner stderr: %s", runnerStderr)
-	}
+	var runnerStdout bytes.Buffer
+	err = a.runScript(ctx, root, env, "issue-runner.sh", []string{"run", payloadFile.Name()}, nil, &runnerStdout, a.stderr)
+	runnerOut := strings.TrimSpace(runnerStdout.String())
 	if err != nil {
 		return "", issueRunnerResult{}, err
 	}
