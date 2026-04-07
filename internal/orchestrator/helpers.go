@@ -485,6 +485,86 @@ func updateStateJSON(stateJSON string, update func(map[string]any)) (string, err
 	return marshalJSON(state)
 }
 
+// deriveStateFromGitHub finds the linked PR for an issue and extracts the latest
+// orchestrator state from audit comments. Returns found=false if no PR exists.
+func (a *App) deriveStateFromGitHub(ctx context.Context, env []string, repo string, issueNumber int) (stateJSON string, prNumber int, found bool, err error) {
+	// Find linked PR via search
+	prListOut, err := a.ghOutput(ctx, env, "pr", "list", "--repo", repo, "--search", fmt.Sprintf("closes #%d", issueNumber), "--json", "number,headRefName")
+	if err != nil {
+		return "", 0, false, fmt.Errorf("failed to list PRs for issue #%d: %v", issueNumber, err)
+	}
+	var prs []struct {
+		Number      int    `json:"number"`
+		HeadRefName string `json:"headRefName"`
+	}
+	if err := json.Unmarshal([]byte(prListOut), &prs); err != nil {
+		return "", 0, false, fmt.Errorf("failed to parse PR list: %v", err)
+	}
+	if len(prs) == 0 {
+		return "", 0, false, nil
+	}
+	pr := prs[0]
+
+	// Fetch PR comments
+	prViewOut, err := a.ghOutput(ctx, env, "pr", "view", strconv.Itoa(pr.Number), "--repo", repo, "--json", "comments")
+	if err != nil {
+		return "", pr.Number, false, fmt.Errorf("failed to view PR #%d comments: %v", pr.Number, err)
+	}
+	var prView struct {
+		Comments json.RawMessage `json:"comments"`
+	}
+	if err := json.Unmarshal([]byte(prViewOut), &prView); err != nil {
+		return "", pr.Number, false, fmt.Errorf("failed to parse PR view: %v", err)
+	}
+
+	// Try to extract structured state from comments
+	state, err := parseStateFromComments(string(prView.Comments))
+	if err != nil {
+		return "", pr.Number, false, err
+	}
+	if state != "" {
+		return state, pr.Number, true, nil
+	}
+
+	// Fallback: derive phase from latest runoq:event marker
+	phase := derivePhaseFromEventMarkers(string(prView.Comments))
+	if phase == "" {
+		return "", pr.Number, true, nil
+	}
+
+	fallbackState, err := marshalJSON(map[string]any{
+		"phase":     phase,
+		"pr_number": pr.Number,
+		"branch":    pr.HeadRefName,
+		"issue":     issueNumber,
+	})
+	if err != nil {
+		return "", pr.Number, false, err
+	}
+	return fallbackState, pr.Number, true, nil
+}
+
+// derivePhaseFromEventMarkers scans comments for the latest <!-- runoq:event:X --> marker
+// and returns the phase name. Used as fallback when no structured state block exists.
+func derivePhaseFromEventMarkers(commentsJSON string) string {
+	var comments []struct {
+		Body string `json:"body"`
+	}
+	if err := json.Unmarshal([]byte(commentsJSON), &comments); err != nil {
+		return ""
+	}
+	var latest string
+	for _, c := range comments {
+		for line := range strings.SplitSeq(c.Body, "\n") {
+			if strings.HasPrefix(line, "<!-- runoq:event:") && strings.HasSuffix(line, " -->") {
+				event := line[len("<!-- runoq:event:") : len(line)-len(" -->")]
+				latest = strings.ToUpper(event)
+			}
+		}
+	}
+	return latest
+}
+
 func envOrDefault(env []string, key string, fallback string) string {
 	if value, ok := shell.EnvLookup(env, key); ok && value != "" {
 		return value

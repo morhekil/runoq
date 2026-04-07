@@ -95,6 +95,124 @@ func TestAuditCommentRoundTrip(t *testing.T) {
 	}
 }
 
+func TestDeriveStateFromGitHubFindsLinkedPR(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+	writeRuntimeConfig(t, root)
+
+	var stdout, stderr bytes.Buffer
+	app := New(nil, []string{
+		"RUNOQ_ROOT=" + root,
+		"TARGET_ROOT=" + root,
+	}, root, &stdout, &stderr)
+
+	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
+		args := strings.Join(req.Args, " ")
+		switch {
+		case req.Name == "gh" && strings.Contains(args, "pr list") && strings.Contains(args, `closes #42`):
+			_, _ = io.WriteString(req.Stdout, `[{"number":87,"headRefName":"runoq/42-implement-queue"}]`)
+			return nil
+		case req.Name == "gh" && strings.Contains(args, "pr view 87") && strings.Contains(args, "comments"):
+			_, _ = io.WriteString(req.Stdout, `{"comments":[{"body":"<!-- runoq:event:init -->\n<!-- runoq:state:{\"phase\":\"INIT\",\"pr_number\":87,\"branch\":\"runoq/42-implement-queue\",\"worktree\":\"/tmp/runoq-wt-42\"} -->\n> Posted by orchestrator"},{"body":"<!-- runoq:event:develop -->\n<!-- runoq:state:{\"phase\":\"DEVELOP\",\"round\":1,\"pr_number\":87,\"branch\":\"runoq/42-implement-queue\",\"worktree\":\"/tmp/runoq-wt-42\",\"cumulative_tokens\":12} -->\n> Posted by orchestrator"}]}`)
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s %s", req.Name, args)
+			return nil
+		}
+	})
+
+	stateJSON, prNumber, found, err := app.deriveStateFromGitHub(ctx, app.env, "owner/repo", 42)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected state to be found")
+	}
+	if prNumber != 87 {
+		t.Fatalf("expected PR 87, got %d", prNumber)
+	}
+	if !strings.Contains(stateJSON, `"phase":"DEVELOP"`) {
+		t.Fatalf("expected DEVELOP phase, got %q", stateJSON)
+	}
+	if !strings.Contains(stateJSON, `"round":1`) {
+		t.Fatalf("expected round 1, got %q", stateJSON)
+	}
+}
+
+func TestDeriveStateFromGitHubNoPR(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+	writeRuntimeConfig(t, root)
+
+	var stdout, stderr bytes.Buffer
+	app := New(nil, []string{
+		"RUNOQ_ROOT=" + root,
+		"TARGET_ROOT=" + root,
+	}, root, &stdout, &stderr)
+
+	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
+		args := strings.Join(req.Args, " ")
+		switch {
+		case req.Name == "gh" && strings.Contains(args, "pr list") && strings.Contains(args, `closes #42`):
+			_, _ = io.WriteString(req.Stdout, `[]`)
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s %s", req.Name, args)
+			return nil
+		}
+	})
+
+	_, _, found, err := app.deriveStateFromGitHub(ctx, app.env, "owner/repo", 42)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if found {
+		t.Fatal("expected no state found for issue without PR")
+	}
+}
+
+func TestDeriveStateFromGitHubOldFormatComments(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+	writeRuntimeConfig(t, root)
+
+	var stdout, stderr bytes.Buffer
+	app := New(nil, []string{
+		"RUNOQ_ROOT=" + root,
+		"TARGET_ROOT=" + root,
+	}, root, &stdout, &stderr)
+
+	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
+		args := strings.Join(req.Args, " ")
+		switch {
+		case req.Name == "gh" && strings.Contains(args, "pr list") && strings.Contains(args, `closes #42`):
+			_, _ = io.WriteString(req.Stdout, `[{"number":87,"headRefName":"runoq/42-implement-queue"}]`)
+			return nil
+		case req.Name == "gh" && strings.Contains(args, "pr view 87") && strings.Contains(args, "comments"):
+			_, _ = io.WriteString(req.Stdout, `{"comments":[{"body":"<!-- runoq:event:init -->\n> Posted by orchestrator — init phase\n\nOrchestrator initialized. Branch: runoq/42"}]}`)
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s %s", req.Name, args)
+			return nil
+		}
+	})
+
+	stateJSON, prNumber, found, err := app.deriveStateFromGitHub(ctx, app.env, "owner/repo", 42)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected state found (PR exists even without state blocks)")
+	}
+	if prNumber != 87 {
+		t.Fatalf("expected PR 87, got %d", prNumber)
+	}
+	// Old format: no state block, so derive phase from event marker
+	if !strings.Contains(stateJSON, `"phase":"INIT"`) {
+		t.Fatalf("expected INIT phase derived from event marker, got %q", stateJSON)
+	}
+}
+
 func TestParseStateFromCommentsEmpty(t *testing.T) {
 	stateJSON, err := parseStateFromComments("[]")
 	if err != nil {
