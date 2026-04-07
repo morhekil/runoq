@@ -579,6 +579,71 @@ func (t *tickRunner) planningNeedsDispatch(ctx context.Context, iss *issue) bool
 	return !strings.Contains(v.Body, "runoq:payload:plan-proposal")
 }
 
+// selectNextTask finds the highest-priority unblocked task child of the given epic.
+// It uses the already-fetched issue list — no API calls needed.
+func (t *tickRunner) selectNextTask(epicNumber int) *issue {
+	epicStr := fmt.Sprintf("%d", epicNumber)
+
+	// Collect open task children of this epic
+	type candidate struct {
+		issue    *issue
+		priority int
+	}
+	var candidates []candidate
+	for i := range t.issues {
+		iss := &t.issues[i]
+		if iss.State != "OPEN" {
+			continue
+		}
+		if planning.MetadataValue(iss.Body, "parent_epic") != epicStr {
+			continue
+		}
+		if planning.MetadataValue(iss.Body, "type") != "task" {
+			continue
+		}
+		candidates = append(candidates, candidate{
+			issue:    iss,
+			priority: planning.MetadataPriority(iss.Body),
+		})
+	}
+
+	// Sort by priority (ascending), then issue number
+	slices.SortFunc(candidates, func(a, b candidate) int {
+		if a.priority != b.priority {
+			return cmp.Compare(a.priority, b.priority)
+		}
+		return cmp.Compare(a.issue.Number, b.issue.Number)
+	})
+
+	// Select the first unblocked candidate
+	for _, c := range candidates {
+		if t.isBlocked(c.issue) {
+			continue
+		}
+		return c.issue
+	}
+	return nil
+}
+
+// isBlocked checks if an issue's dependencies are all satisfied (CLOSED).
+func (t *tickRunner) isBlocked(iss *issue) bool {
+	depsRaw := planning.MetadataValue(iss.Body, "depends_on")
+	if depsRaw == "" {
+		return false
+	}
+	var deps []int
+	if err := json.Unmarshal([]byte(depsRaw), &deps); err != nil {
+		return false // unparseable deps treated as no deps
+	}
+	for _, dep := range deps {
+		depIssue := t.findIssueByNumber(dep)
+		if depIssue == nil || depIssue.State != "CLOSED" {
+			return true
+		}
+	}
+	return false
+}
+
 func (t *tickRunner) countOpenChildren(epicNumber int) (int, bool) {
 	epicStr := fmt.Sprintf("%d", epicNumber)
 	count := 0
