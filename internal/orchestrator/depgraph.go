@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/saruman/runoq/planning"
@@ -28,7 +29,6 @@ type depNode struct {
 // Only OPEN task children of the given epic with the ready label are included as candidates.
 // CLOSED issues are tracked for dependency resolution.
 func BuildDepGraph(issues []issue, epicNumber int, readyLabel string) *DepGraph {
-	epicStr := fmt.Sprintf("%d", epicNumber)
 	g := &DepGraph{
 		nodes:      make(map[int]*depNode),
 		readyLabel: readyLabel,
@@ -46,7 +46,7 @@ func BuildDepGraph(issues []issue, epicNumber int, readyLabel string) *DepGraph 
 		if iss.State != "OPEN" {
 			continue
 		}
-		if planning.MetadataValue(iss.Body, "parent_epic") != epicStr {
+		if issueParentEpic(iss) != epicNumber {
 			continue
 		}
 		if issueTypeOf(*iss) != "task" {
@@ -439,6 +439,20 @@ func fetchIssueTypes(issues []issue, graphqlResponse string) {
 
 // issueType returns the issue's type, preferring the native GitHub IssueType field
 // and falling back to the metadata block for backward compatibility.
+// issueParentEpic returns the parent epic number, preferring the native ParentEpic field
+// and falling back to the metadata block for backward compatibility.
+func issueParentEpic(iss *issue) int {
+	if iss.ParentEpic != 0 {
+		return iss.ParentEpic
+	}
+	raw := planning.MetadataValue(iss.Body, "parent_epic")
+	if raw == "" || raw == "null" {
+		return 0
+	}
+	n, _ := strconv.Atoi(raw)
+	return n
+}
+
 func issueTypeOf(iss issue) string {
 	if iss.IssueType != "" {
 		return iss.IssueType

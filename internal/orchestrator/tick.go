@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -45,8 +46,9 @@ type issue struct {
 	Body      string   `json:"body"`
 	URL       string   `json:"url"`
 	Labels    []label  `json:"labels"`
-	BlockedBy []int    `json:"-"` // populated from GitHub's blockedBy API
-	IssueType string   `json:"-"` // populated from GitHub's issueType API
+	BlockedBy   []int  `json:"-"` // populated from GitHub's blockedBy API
+	IssueType   string `json:"-"` // populated from GitHub's issueType API
+	ParentEpic  int    `json:"-"` // populated from sub-issues API
 }
 
 type label struct {
@@ -126,7 +128,7 @@ func (t *tickRunner) run(ctx context.Context) int {
 	t.step("Checking for approved review")
 	if approved := t.findReviewIssue("approved", planApprovedLabel); approved != nil {
 		reviewType := issueTypeOf(*approved)
-		reviewParent := planning.MetadataValue(approved.Body, "parent_epic")
+		reviewParent := strconv.Itoa(issueParentEpic(approved))
 		t.info(fmt.Sprintf("found approved %s review #%d (parent #%s)", reviewType, approved.Number, reviewParent))
 
 		t.step(fmt.Sprintf("Loading review details for #%d", approved.Number))
@@ -652,13 +654,12 @@ func (t *tickRunner) issueHasLabel(iss *issue, labelName string) bool {
 }
 
 func (t *tickRunner) findPlanningChild(epicNumber int) *issue {
-	epicStr := fmt.Sprintf("%d", epicNumber)
 	for i := range t.issues {
 		iss := &t.issues[i]
 		if iss.State != "OPEN" {
 			continue
 		}
-		if planning.MetadataValue(iss.Body, "parent_epic") != epicStr {
+		if issueParentEpic(iss) != epicNumber {
 			continue
 		}
 		if issueTypeOf(*iss) == "planning" {
@@ -684,13 +685,12 @@ func (t *tickRunner) findInProgressTask(epicNumber int) *issue {
 	if t.cfg.InProgressLabel == "" {
 		return nil
 	}
-	epicStr := fmt.Sprintf("%d", epicNumber)
 	for i := range t.issues {
 		iss := &t.issues[i]
 		if iss.State != "OPEN" {
 			continue
 		}
-		if planning.MetadataValue(iss.Body, "parent_epic") != epicStr {
+		if issueParentEpic(iss) != epicNumber {
 			continue
 		}
 		if issueTypeOf(*iss) != "task" {
@@ -706,18 +706,18 @@ func (t *tickRunner) findInProgressTask(epicNumber int) *issue {
 // selectNextTask finds the highest-priority unblocked task child of the given epic.
 // It uses the already-fetched issue list — no API calls needed.
 func (t *tickRunner) countOpenChildren(epicNumber int) (int, bool) {
-	epicStr := fmt.Sprintf("%d", epicNumber)
 	count := 0
 	hasTask := false
-	for _, iss := range t.issues {
+	for i := range t.issues {
+		iss := &t.issues[i]
 		if iss.State != "OPEN" {
 			continue
 		}
-		if planning.MetadataValue(iss.Body, "parent_epic") != epicStr {
+		if issueParentEpic(iss) != epicNumber {
 			continue
 		}
 		count++
-		if issueTypeOf(iss) == "task" {
+		if issueTypeOf(*iss) == "task" {
 			hasTask = true
 		}
 	}
@@ -737,6 +737,29 @@ func (t *tickRunner) addBlockedBy(ctx context.Context, issueNodeID, blockingNode
 	_, _ = t.ghOutput(ctx, "api", "graphql", "-f", "query="+query)
 }
 
+func (t *tickRunner) fetchParentEpics(ctx context.Context) {
+	// For each epic, query its sub-issues and build child→parent map
+	for i := range t.issues {
+		iss := &t.issues[i]
+		if issueTypeOf(*iss) != "epic" {
+			continue
+		}
+		raw, err := t.ghOutput(ctx, "api", fmt.Sprintf("repos/%s/issues/%d/sub_issues", t.cfg.Repo, iss.Number), "--paginate", "--jq", ".[].number")
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
+			if num, err := strconv.Atoi(strings.TrimSpace(line)); err == nil {
+				for j := range t.issues {
+					if t.issues[j].Number == num {
+						t.issues[j].ParentEpic = iss.Number
+					}
+				}
+			}
+		}
+	}
+}
+
 func (t *tickRunner) fetchDependencies(ctx context.Context) {
 	owner, repo, ok := strings.Cut(t.cfg.Repo, "/")
 	if !ok {
@@ -750,6 +773,9 @@ func (t *tickRunner) fetchDependencies(ctx context.Context) {
 	}
 	fetchBlockedBy(t.issues, raw)
 	fetchIssueTypes(t.issues, raw)
+
+	// Populate parent-epic from sub-issues relationships
+	t.fetchParentEpics(ctx)
 }
 
 func (t *tickRunner) titleForIssue(numberStr string) string {

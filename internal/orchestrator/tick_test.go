@@ -267,10 +267,10 @@ func TestTickSuccessIncludesElapsed(t *testing.T) {
 func TestDepGraphUsesIssueTypeField(t *testing.T) {
 	t.Parallel()
 
-	// Issues with IssueType field set — type in body is NOT set, but parent_epic still needed until M3
+	// Issues with IssueType and ParentEpic fields set — no body metadata needed
 	issues := []issue{
-		{Number: 9, Title: "Epic", State: "OPEN", Body: "<!-- runoq:meta\nparent_epic: null\n-->", IssueType: "epic"},
-		{Number: 10, Title: "Task", State: "OPEN", Body: "<!-- runoq:meta\nparent_epic: 9\n-->", IssueType: "task", Labels: []label{{Name: "runoq:ready"}}},
+		{Number: 9, Title: "Epic", State: "OPEN", Body: "## AC", IssueType: "epic"},
+		{Number: 10, Title: "Task", State: "OPEN", Body: "## AC", IssueType: "task", ParentEpic: 9, Labels: []label{{Name: "runoq:ready"}}},
 	}
 	g := BuildDepGraph(issues, 9, "runoq:ready")
 	task := g.Next()
