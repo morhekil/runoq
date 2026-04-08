@@ -1043,10 +1043,20 @@ func resolveDependsOn(keys []string, keyToNumber map[string]string) string {
 }
 
 func extractIssueNumber(ghOutput string) string {
+	trimmed := strings.TrimSpace(ghOutput)
+	// Try JSON format first: {"title":"...","url":"https://.../.../issues/42"}
+	if strings.HasPrefix(trimmed, "{") {
+		var result struct {
+			URL string `json:"url"`
+		}
+		if json.Unmarshal([]byte(trimmed), &result) == nil && result.URL != "" {
+			trimmed = result.URL
+		}
+	}
 	// Extract number from URL like https://github.com/owner/repo/issues/42
-	parts := strings.Split(strings.TrimSpace(ghOutput), "/")
+	parts := strings.Split(trimmed, "/")
 	if len(parts) > 0 {
-		return parts[len(parts)-1]
+		return strings.TrimSpace(parts[len(parts)-1])
 	}
 	return ""
 }
