@@ -23,6 +23,7 @@ type DispatchConfig struct {
 	PriorFindingsFile string // optional
 	RunoqRoot         string
 	MaxRounds         int
+	ClaudeBin         string // optional, defaults to "claude"
 	Invoker           AgentInvoker
 	Stderr            io.Writer
 }
@@ -43,6 +44,11 @@ func RunDispatch(ctx context.Context, cfg DispatchConfig) (DispatchResult, error
 	maxRounds := cfg.MaxRounds
 	if maxRounds <= 0 {
 		maxRounds = 3
+	}
+
+	claudeBin := cfg.ClaudeBin
+	if claudeBin == "" {
+		claudeBin = "claude"
 	}
 
 	decomposer := "milestone-decomposer"
@@ -82,7 +88,7 @@ func RunDispatch(ctx context.Context, cfg DispatchConfig) (DispatchResult, error
 		resp, err := cfg.Invoker.Invoke(ctx, agents.InvokeOptions{
 			Backend: agents.Claude,
 			Agent:   decomposer,
-			Bin:     "claude",
+			Bin:     claudeBin,
 			RawArgs: buildAgentArgs(decomposer, cfg.RunoqRoot, addDirs, payload),
 			WorkDir: planDir,
 			Payload: payload,
@@ -104,7 +110,7 @@ func RunDispatch(ctx context.Context, cfg DispatchConfig) (DispatchResult, error
 		techResp, err := cfg.Invoker.Invoke(ctx, agents.InvokeOptions{
 			Backend: agents.Claude,
 			Agent:   "plan-reviewer-technical",
-			Bin:     "claude",
+			Bin:     claudeBin,
 			RawArgs: buildAgentArgs("plan-reviewer-technical", cfg.RunoqRoot, addDirs, ""),
 			WorkDir: planDir,
 		})
@@ -120,7 +126,7 @@ func RunDispatch(ctx context.Context, cfg DispatchConfig) (DispatchResult, error
 		prodResp, err := cfg.Invoker.Invoke(ctx, agents.InvokeOptions{
 			Backend: agents.Claude,
 			Agent:   "plan-reviewer-product",
-			Bin:     "claude",
+			Bin:     claudeBin,
 			RawArgs: buildAgentArgs("plan-reviewer-product", cfg.RunoqRoot, addDirs, ""),
 			WorkDir: planDir,
 		})

@@ -318,6 +318,7 @@ func (t *tickRunner) handleBootstrap(ctx context.Context) int {
 		PlanFile:   t.cfg.PlanFile,
 		RunoqRoot:  t.cfg.RunoqRoot,
 		MaxRounds:  3,
+		ClaudeBin:  envOrDefault(t.cfg.Env, "RUNOQ_CLAUDE_BIN", "claude"),
 		Invoker:    invoker,
 		Stderr:     t.cfg.Stderr,
 	})
@@ -576,6 +577,7 @@ func (t *tickRunner) handlePlanningDispatch(ctx context.Context, planningChild *
 		MilestoneFile: milestoneFile,
 		RunoqRoot:     t.cfg.RunoqRoot,
 		MaxRounds:     3,
+		ClaudeBin:     envOrDefault(t.cfg.Env, "RUNOQ_CLAUDE_BIN", "claude"),
 		Invoker:       invoker,
 		Stderr:        t.cfg.Stderr,
 	})
