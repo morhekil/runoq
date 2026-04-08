@@ -68,6 +68,72 @@ type exitCodeError struct {
 func (e exitCodeError) Error() string { return e.msg }
 func (e exitCodeError) ExitCode() int { return e.code }
 
+func TestRunCreatesLogFile(t *testing.T) {
+	t.Parallel()
+
+	targetRoot := t.TempDir()
+	// Create .git so FindRoot works if TARGET_ROOT is somehow not set
+	os.Mkdir(filepath.Join(targetRoot, ".git"), 0o755)
+
+	executor := &scriptedExecutor{
+		t: t,
+		matchers: []callMatcher{
+			{
+				name: "git",
+				args: []string{"-C", targetRoot, "remote", "get-url", "origin"},
+				result: callResult{
+					stdout: "git@github.com:owner/repo.git\n",
+				},
+			},
+			{
+				name:       "bash",
+				argsPrefix: []string{"-lc"},
+				result: callResult{
+					stdout: "runtime-token",
+				},
+			},
+			{
+				name:       "/runoq/scripts/run.sh",
+				argsPrefix: []string{},
+			},
+		},
+	}
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	app := New(
+		[]string{"run", "--issue", "42", "--dry-run"},
+		[]string{"RUNOQ_ROOT=/runoq", "TARGET_ROOT=" + targetRoot, "PATH=/usr/bin"},
+		targetRoot,
+		&stdout,
+		&stderr,
+		"",
+	)
+	app.SetCommandExecutor(executor.run)
+
+	code := app.Run(context.Background())
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d (stderr=%q)", code, stderr.String())
+	}
+
+	// Verify a log file was created in TARGET_ROOT/log/
+	logDir := filepath.Join(targetRoot, "log")
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		t.Fatalf("expected log dir at %s: %v", logDir, err)
+	}
+	found := false
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "runoq-") && strings.HasSuffix(e.Name(), ".log") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected runoq-*.log in %s, got %v", logDir, entries)
+	}
+}
+
 func TestRunRunSubcommandRoutesToRunScript(t *testing.T) {
 	t.Parallel()
 

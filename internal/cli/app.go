@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/saruman/runoq/internal/gitops"
+	"github.com/saruman/runoq/internal/runlog"
 	"github.com/saruman/runoq/internal/orchestrator"
 	"github.com/saruman/runoq/internal/report"
 	"github.com/saruman/runoq/internal/shell"
@@ -114,6 +115,7 @@ type App struct {
 	stderr         io.Writer
 	executablePath string
 	execCommand    shell.CommandExecutor
+	logCloser      io.Closer // set when log writer is created
 }
 
 func New(args []string, env []string, cwd string, stdout io.Writer, stderr io.Writer, executablePath string) *App {
@@ -137,6 +139,12 @@ func (a *App) SetCommandExecutor(execFn shell.CommandExecutor) {
 }
 
 func (a *App) Run(ctx context.Context) int {
+	defer func() {
+		if a.logCloser != nil {
+			_ = a.logCloser.Close()
+		}
+	}()
+
 	runoqRoot, env, ok := a.resolveRuntimeEnv()
 	if !ok {
 		return shell.Fail(a.stderr, "Unable to resolve RUNOQ_ROOT for runtime mode.")
@@ -269,6 +277,14 @@ func (a *App) prepareTargetContext(ctx context.Context, runoqRoot string, env []
 		if err != nil {
 			return nil, shell.Fail(a.stderr, "Run runoq from inside a git repository.")
 		}
+	}
+
+	// Create persistent log file
+	logDir := filepath.Join(targetRoot, "log")
+	logWriter, logErr := runlog.NewWriter(a.stderr, logDir)
+	if logErr == nil {
+		a.stderr = logWriter
+		a.logCloser = logWriter
 	}
 
 	repo, err := a.resolveRepo(ctx, env, targetRoot)
