@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -139,21 +138,6 @@ func extractMetaBlock(body string) string {
 	return block.String()
 }
 
-func parsePRNumber(raw string) (int, bool) {
-	var payload prCreateResult
-	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		return 0, false
-	}
-	switch value := payload.Number.(type) {
-	case float64:
-		return int(value), true
-	case int:
-		return value, true
-	default:
-		return 0, false
-	}
-}
-
 type reviewVerdictResult struct {
 	ReviewType string
 	Verdict    string
@@ -280,23 +264,6 @@ func (a *App) ghOutput(ctx context.Context, env []string, args ...string) (strin
 	})
 }
 
-func (a *App) scriptOutput(ctx context.Context, root string, env []string, script string, args []string, stdin io.Reader) (string, error) {
-	var stdout bytes.Buffer
-	err := a.runScript(ctx, root, env, script, args, stdin, &stdout, io.Discard)
-	return strings.TrimSpace(stdout.String()), err
-}
-
-func (a *App) scriptOutputWithStderr(ctx context.Context, root string, env []string, script string, args []string, stdin io.Reader) (string, string, error) {
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	err := a.runScript(ctx, root, env, script, args, stdin, &stdout, &stderr)
-	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
-}
-
-func (a *App) runScript(ctx context.Context, root string, env []string, script string, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
-	return a.runProgram(ctx, env, filepath.Join(root, "scripts", script), args, stdin, stdout, stderr)
-}
-
 func (a *App) runProgram(ctx context.Context, env []string, name string, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
 	if a.logWriter != nil {
 		stdout = teeWriter(stdout, a.logWriter)
@@ -346,13 +313,6 @@ func nullableString(value string) *string {
 		return nil
 	}
 	return &trimmed
-}
-
-func stderrOrUnknown(stderr string) string {
-	if strings.TrimSpace(stderr) == "" {
-		return "unknown error"
-	}
-	return stderr
 }
 
 func finalizeDecision(state struct {
