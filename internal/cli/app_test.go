@@ -289,13 +289,17 @@ func TestTickSubcommandCallsRunTick(t *testing.T) {
 	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
 		if req.Name == "gh" {
 			ghCalled = true
+			args := strings.Join(req.Args, " ")
 			if req.Stdout != nil {
-				// Return all-closed epic so tick reports "All milestones complete"
-				req.Stdout.Write([]byte(`[{"number":1,"title":"Done","state":"CLOSED","body":"<!-- runoq:meta\ntype: epic\n-->","labels":[],"url":"u"}]`))
+				switch {
+				case strings.Contains(args, "issue list"):
+					req.Stdout.Write([]byte(`[{"number":1,"title":"Done","state":"CLOSED","body":"","labels":[],"url":"u"}]`))
+				case strings.Contains(args, "api graphql"):
+					req.Stdout.Write([]byte(`{"data":{"repository":{"issues":{"nodes":[{"number":1,"blockedBy":{"nodes":[]},"issueType":{"name":"Epic"}}]}}}}`))
+				}
 			}
 			return nil
 		}
-		// Allow any other command to pass
 		return nil
 	})
 

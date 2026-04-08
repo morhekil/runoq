@@ -199,7 +199,8 @@ func TestRunTickAllClosedReturnsComplete(t *testing.T) {
 
 	stub := &ghStub{
 		rules: []ghStubRule{
-			{contains: "issue list", stdout: `[{"number":1,"title":"M1","state":"CLOSED","body":"<!-- runoq:meta\ntype: epic\n-->","labels":[],"url":"u"}]`},
+			{contains: "issue list", stdout: `[{"number":1,"title":"M1","state":"CLOSED","body":"","labels":[],"url":"u"}]`},
+			{contains: "api graphql", stdout: `{"data":{"repository":{"issues":{"nodes":[{"number":1,"blockedBy":{"nodes":[]},"issueType":{"name":"Epic"}}]}}}}`},
 		},
 	}
 
@@ -225,13 +226,13 @@ func TestGraphPrioritySortAndDependencyFiltering(t *testing.T) {
 	t.Parallel()
 
 	issues := []issue{
-		{Number: 9, Title: "Epic", State: "OPEN", Body: "<!-- runoq:meta\ntype: epic\npriority: 1\n-->"},
-		// Task #11: priority 2, no deps
-		{Number: 11, Title: "Second task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 2\n-->"},
-		// Task #10: priority 1, blocked by #12 which is OPEN
-		{Number: 10, Title: "First task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 1\n-->", BlockedBy: []int{12}},
-		// Task #12: priority 3, no deps — should be selected (deeper chain: #10 depends on it)
-		{Number: 12, Title: "Third task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 3\n-->"},
+		{Number: 9, Title: "Epic", State: "OPEN", IssueType: "epic"},
+		// Task #11: no deps
+		{Number: 11, Title: "Second task", State: "OPEN", IssueType: "task", ParentEpic: 9},
+		// Task #10: blocked by #12 which is OPEN
+		{Number: 10, Title: "First task", State: "OPEN", IssueType: "task", ParentEpic: 9, BlockedBy: []int{12}},
+		// Task #12: no deps — should be selected (deeper chain: #10 depends on it)
+		{Number: 12, Title: "Third task", State: "OPEN", IssueType: "task", ParentEpic: 9},
 	}
 	g := BuildDepGraph(issues, 9, "")
 	task := g.Next()
@@ -250,11 +251,11 @@ func TestGraphSkipsNonReadyLabels(t *testing.T) {
 	t.Parallel()
 
 	issues := []issue{
-		{Number: 9, Title: "Epic", State: "OPEN", Body: "<!-- runoq:meta\ntype: epic\npriority: 1\n-->"},
+		{Number: 9, Title: "Epic", State: "OPEN", IssueType: "epic"},
 		// Task #10: no ready label — skip
-		{Number: 10, Title: "Needs review", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 1\n-->", Labels: []label{{Name: "runoq:needs-human-review"}}},
+		{Number: 10, Title: "Needs review", State: "OPEN", IssueType: "task", ParentEpic: 9, Labels: []label{{Name: "runoq:needs-human-review"}}},
 		// Task #11: has ready label
-		{Number: 11, Title: "Ready task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 2\n-->", Labels: []label{{Name: "runoq:ready"}}},
+		{Number: 11, Title: "Ready task", State: "OPEN", IssueType: "task", ParentEpic: 9, Labels: []label{{Name: "runoq:ready"}}},
 	}
 	g := BuildDepGraph(issues, 9, "runoq:ready")
 	task := g.Next()
@@ -270,9 +271,9 @@ func TestGraphAllBlockedCycle(t *testing.T) {
 	t.Parallel()
 
 	issues := []issue{
-		{Number: 9, Title: "Epic", State: "OPEN", Body: "<!-- runoq:meta\ntype: epic\npriority: 1\n-->"},
-		{Number: 10, Title: "Task A", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 1\n-->", BlockedBy: []int{11}},
-		{Number: 11, Title: "Task B", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 2\n-->", BlockedBy: []int{10}},
+		{Number: 9, Title: "Epic", State: "OPEN", IssueType: "epic"},
+		{Number: 10, Title: "Task A", State: "OPEN", IssueType: "task", ParentEpic: 9, BlockedBy: []int{11}},
+		{Number: 11, Title: "Task B", State: "OPEN", IssueType: "task", ParentEpic: 9, BlockedBy: []int{10}},
 	}
 	g := BuildDepGraph(issues, 9, "")
 	task := g.Next()
@@ -288,10 +289,10 @@ func TestGraphSkipsClosedAndNonTaskTypes(t *testing.T) {
 	t.Parallel()
 
 	issues := []issue{
-		{Number: 9, Title: "Epic", State: "OPEN", Body: "<!-- runoq:meta\ntype: epic\npriority: 1\n-->"},
-		{Number: 10, Title: "Done task", State: "CLOSED", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 1\n-->"},
-		{Number: 11, Title: "Planning", State: "OPEN", Body: "<!-- runoq:meta\ntype: planning\nparent_epic: 9\npriority: 1\n-->"},
-		{Number: 12, Title: "Ready task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 2\n-->", BlockedBy: []int{10}},
+		{Number: 9, Title: "Epic", State: "OPEN", IssueType: "epic"},
+		{Number: 10, Title: "Done task", State: "CLOSED", IssueType: "task", ParentEpic: 9},
+		{Number: 11, Title: "Planning", State: "OPEN", IssueType: "task", ParentEpic: 9, Labels: []label{{Name: "runoq:planning"}}},
+		{Number: 12, Title: "Ready task", State: "OPEN", IssueType: "task", ParentEpic: 9, BlockedBy: []int{10}},
 	}
 	g := BuildDepGraph(issues, 9, "")
 	task := g.Next()
@@ -309,11 +310,11 @@ func TestFindInProgressTaskReturnsInProgressIssue(t *testing.T) {
 	runner := &tickRunner{
 		cfg: TickConfig{InProgressLabel: "runoq:in-progress"},
 		issues: []issue{
-			{Number: 9, Title: "Epic", State: "OPEN", Body: "<!-- runoq:meta\ntype: epic\npriority: 1\n-->"},
+			{Number: 9, Title: "Epic", State: "OPEN", IssueType: "epic"},
 			// Ready task
-			{Number: 10, Title: "Ready task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 1\n-->", Labels: []label{{Name: "runoq:ready"}}},
+			{Number: 10, Title: "Ready task", State: "OPEN", IssueType: "task", ParentEpic: 9, Labels: []label{{Name: "runoq:ready"}}},
 			// In-progress task
-			{Number: 11, Title: "In-progress task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 2\n-->", Labels: []label{{Name: "runoq:in-progress"}}},
+			{Number: 11, Title: "In-progress task", State: "OPEN", IssueType: "task", ParentEpic: 9, Labels: []label{{Name: "runoq:in-progress"}}},
 		},
 	}
 
@@ -332,8 +333,8 @@ func TestFindInProgressTaskReturnsNilWhenNone(t *testing.T) {
 	runner := &tickRunner{
 		cfg: TickConfig{InProgressLabel: "runoq:in-progress"},
 		issues: []issue{
-			{Number: 9, Title: "Epic", State: "OPEN", Body: "<!-- runoq:meta\ntype: epic\npriority: 1\n-->"},
-			{Number: 10, Title: "Ready task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 1\n-->", Labels: []label{{Name: "runoq:ready"}}},
+			{Number: 9, Title: "Epic", State: "OPEN", IssueType: "epic"},
+			{Number: 10, Title: "Ready task", State: "OPEN", IssueType: "task", ParentEpic: 9, Labels: []label{{Name: "runoq:ready"}}},
 		},
 	}
 
@@ -421,8 +422,8 @@ func TestPostDAGCommentUsesTickConfigLabels(t *testing.T) {
 			},
 		},
 		issues: []issue{
-			makeIssue(10, 1, "OPEN", nil),
-			makeIssue(11, 1, "OPEN", []int{10}),
+			makeIssue(10, "OPEN", nil),
+			makeIssue(11, "OPEN", []int{10}),
 		},
 	}
 
@@ -480,7 +481,7 @@ func TestHandleActiveConversationsFindsAndResponds(t *testing.T) {
 			Stderr:          io.Discard,
 		},
 		issues: []issue{
-			{Number: 10, Title: "Task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\n-->", Labels: []label{{Name: "runoq:in-progress"}}},
+			{Number: 10, Title: "Task", State: "OPEN", IssueType: "task", Labels: []label{{Name: "runoq:in-progress"}}},
 		},
 	}
 
@@ -519,7 +520,7 @@ func TestHandleActiveConversationsNoInProgressTasks(t *testing.T) {
 			Stderr:          io.Discard,
 		},
 		issues: []issue{
-			{Number: 10, Title: "Task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\n-->", Labels: []label{{Name: "runoq:ready"}}},
+			{Number: 10, Title: "Task", State: "OPEN", IssueType: "task", Labels: []label{{Name: "runoq:ready"}}},
 		},
 	}
 	runner.cfg.ExecCommand = func(_ context.Context, req shell.CommandRequest) error {
@@ -539,19 +540,29 @@ func TestTickSelectsTaskAndCallsRunIssue(t *testing.T) {
 	configPath := filepath.Join(tmpDir, "runoq.json")
 	os.WriteFile(configPath, []byte(`{"labels":{"ready":"runoq:ready","inProgress":"runoq:in-progress","done":"runoq:done","needsReview":"runoq:needs-human-review","blocked":"runoq:blocked","planApproved":"runoq:plan-approved"}}`), 0o644)
 
-	// Epic #9 with task children #10 (priority 2) and #11 (priority 1)
+	// Epic #9 with task children #10 and #11
 	issueList := `[
-		{"number":9,"title":"M1","state":"OPEN","body":"<!-- runoq:meta\ntype: epic\npriority: 1\n-->","labels":[],"url":"u"},
-		{"number":10,"title":"Second task","state":"OPEN","body":"<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 2\nestimated_complexity: low\n-->","labels":[],"url":"u"},
-		{"number":11,"title":"First task","state":"OPEN","body":"<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 1\nestimated_complexity: low\n-->","labels":[],"url":"u"}
+		{"number":9,"title":"M1","state":"OPEN","body":"","labels":[],"url":"u"},
+		{"number":10,"title":"Second task","state":"OPEN","body":"","labels":[],"url":"u"},
+		{"number":11,"title":"First task","state":"OPEN","body":"","labels":[],"url":"u"}
 	]`
+
+	graphqlResponse := `{"data":{"repository":{"issues":{"nodes":[
+		{"number":9,"blockedBy":{"nodes":[]},"issueType":{"name":"Epic"}},
+		{"number":10,"blockedBy":{"nodes":[]},"issueType":{"name":"Task"}},
+		{"number":11,"blockedBy":{"nodes":[]},"issueType":{"name":"Task"}}
+	]}}}}`
 
 	var eligibilityIssue string
 	stub := &ghStub{
 		rules: []ghStubRule{
 			{contains: "issue list", stdout: issueList},
+			// GraphQL: fetch blockedBy and issueType
+			{contains: "api graphql", stdout: graphqlResponse},
+			// Sub-issues: epic #9 has children #10 and #11
+			{contains: "sub_issues", stdout: "10\n11\n"},
 			// CheckEligibility: issue view (from dispatchsafety via runoq::gh)
-			{contains: "issue view 11", stdout: `{"number":11,"title":"First task","body":"<!-- runoq:meta\ntype: task\npriority: 1\nestimated_complexity: low\n-->\n\n## Acceptance Criteria\n\n- [ ] Works.","labels":[],"url":"u"}`},
+			{contains: "issue view 11", stdout: `{"number":11,"title":"First task","body":"## Acceptance Criteria\n\n- [ ] Works.","labels":[],"url":"u"}`},
 			// CheckEligibility: pr list (open PR check)
 			{contains: "pr list", stdout: `[]`},
 			// issuequeue set-status (via ghClient)

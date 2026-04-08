@@ -1,33 +1,28 @@
 package orchestrator
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 )
 
-func makeIssue(number int, priority int, state string, deps []int) issue {
-	body := "<!-- runoq:meta\ntype: task\nparent_epic: 1\npriority: " + itoa(priority) + "\n-->"
+func makeIssue(number int, state string, deps []int) issue {
 	return issue{
 		Number:     number,
 		State:      state,
-		Body:       body,
+		IssueType:  "task",
+		ParentEpic: 1,
 		Labels:     []label{{Name: "runoq:ready"}},
 		BlockedBy:  deps,
 	}
-}
-
-func itoa(n int) string {
-	return fmt.Sprintf("%d", n)
 }
 
 func TestDepGraphLinearChainReturnsRoot(t *testing.T) {
 	t.Parallel()
 
 	issues := []issue{
-		makeIssue(10, 1, "OPEN", nil),       // A — root, no deps
-		makeIssue(11, 1, "OPEN", []int{10}), // B → A
-		makeIssue(12, 1, "OPEN", []int{11}), // C → B
+		makeIssue(10, "OPEN", nil),       // A — root, no deps
+		makeIssue(11, "OPEN", []int{10}), // B → A
+		makeIssue(12, "OPEN", []int{11}), // C → B
 	}
 	g := BuildDepGraph(issues, 1, "runoq:ready")
 	next := g.Next()
@@ -43,11 +38,11 @@ func TestDepGraphParallelChainsPicksDeeper(t *testing.T) {
 	t.Parallel()
 
 	issues := []issue{
-		makeIssue(10, 1, "OPEN", nil),       // A — root of 3-deep chain
-		makeIssue(11, 1, "OPEN", []int{10}), // B → A
-		makeIssue(12, 1, "OPEN", []int{11}), // C → B
-		makeIssue(20, 1, "OPEN", nil),       // D — root of 2-deep chain
-		makeIssue(21, 1, "OPEN", []int{20}), // E → D
+		makeIssue(10, "OPEN", nil),       // A — root of 3-deep chain
+		makeIssue(11, "OPEN", []int{10}), // B → A
+		makeIssue(12, "OPEN", []int{11}), // C → B
+		makeIssue(20, "OPEN", nil),       // D — root of 2-deep chain
+		makeIssue(21, "OPEN", []int{20}), // E → D
 	}
 	g := BuildDepGraph(issues, 1, "runoq:ready")
 	next := g.Next()
@@ -63,9 +58,11 @@ func TestDepGraphPriorityNeverOverridesBlocking(t *testing.T) {
 	t.Parallel()
 
 	issues := []issue{
-		makeIssue(10, 0, "OPEN", []int{99}), // A — highest priority but blocked by missing #99
-		makeIssue(20, 1, "OPEN", nil),        // B — lower priority but ready
+		makeIssue(10, "OPEN", []int{99}), // A — highest priority but blocked by missing #99
+		makeIssue(20, "OPEN", nil),        // B — lower priority but ready
 	}
+	// Give #10 the priority label (pri=0) — still shouldn't override blocking
+	issues[0].Labels = append(issues[0].Labels, label{Name: "runoq:priority"})
 	g := BuildDepGraph(issues, 1, "runoq:ready")
 	next := g.Next()
 	if next == nil {
@@ -80,11 +77,13 @@ func TestDepGraphPriorityBubblesUpDAG(t *testing.T) {
 	t.Parallel()
 
 	issues := []issue{
-		makeIssue(10, 1, "OPEN", nil),       // A — pri=1
-		makeIssue(11, 1, "OPEN", []int{10}), // B → A, pri=1
-		makeIssue(12, 0, "OPEN", []int{11}), // C → B, pri=0 — bubbles up to make A effective pri=0
-		makeIssue(20, 1, "OPEN", nil),       // D — independent, pri=1
+		makeIssue(10, "OPEN", nil),       // A — pri=1
+		makeIssue(11, "OPEN", []int{10}), // B → A, pri=1
+		makeIssue(12, "OPEN", []int{11}), // C → B, pri=0 — bubbles up to make A effective pri=0
+		makeIssue(20, "OPEN", nil),       // D — independent, pri=1
 	}
+	// Give #12 the priority label (pri=0)
+	issues[2].Labels = append(issues[2].Labels, label{Name: "runoq:priority"})
 	g := BuildDepGraph(issues, 1, "runoq:ready")
 	next := g.Next()
 	if next == nil {
@@ -99,8 +98,8 @@ func TestDepGraphCycleDetection(t *testing.T) {
 	t.Parallel()
 
 	issues := []issue{
-		makeIssue(10, 1, "OPEN", []int{11}), // A → B
-		makeIssue(11, 1, "OPEN", []int{10}), // B → A (cycle)
+		makeIssue(10, "OPEN", []int{11}), // A → B
+		makeIssue(11, "OPEN", []int{10}), // B → A (cycle)
 	}
 	g := BuildDepGraph(issues, 1, "runoq:ready")
 	if !g.HasCycle() {
@@ -120,8 +119,8 @@ func TestDepGraphBlockedReason(t *testing.T) {
 	t.Parallel()
 
 	issues := []issue{
-		makeIssue(10, 1, "OPEN", nil),
-		makeIssue(11, 1, "OPEN", []int{10, 99}), // blocked by #10 (OPEN) and #99 (missing)
+		makeIssue(10, "OPEN", nil),
+		makeIssue(11, "OPEN", []int{10, 99}), // blocked by #10 (OPEN) and #99 (missing)
 	}
 	g := BuildDepGraph(issues, 1, "runoq:ready")
 	reason := g.BlockedReason(11)
@@ -140,9 +139,9 @@ func TestDepGraphNoDepsUsesIssueNumberTiebreak(t *testing.T) {
 	t.Parallel()
 
 	issues := []issue{
-		makeIssue(30, 1, "OPEN", nil),
-		makeIssue(20, 1, "OPEN", nil),
-		makeIssue(10, 1, "OPEN", nil),
+		makeIssue(30, "OPEN", nil),
+		makeIssue(20, "OPEN", nil),
+		makeIssue(10, "OPEN", nil),
 	}
 	g := BuildDepGraph(issues, 1, "runoq:ready")
 	next := g.Next()
@@ -158,9 +157,9 @@ func TestDepGraphContinueSubtreeOverParallel(t *testing.T) {
 	t.Parallel()
 
 	issues := []issue{
-		makeIssue(10, 1, "CLOSED", nil),      // A — done
-		makeIssue(11, 1, "OPEN", []int{10}),  // B → A — ready (continue chain)
-		makeIssue(20, 1, "OPEN", nil),         // D — independent, also ready
+		makeIssue(10, "CLOSED", nil),      // A — done
+		makeIssue(11, "OPEN", []int{10}),  // B → A — ready (continue chain)
+		makeIssue(20, "OPEN", nil),         // D — independent, also ready
 	}
 	g := BuildDepGraph(issues, 1, "runoq:ready")
 	next := g.NextAfter(10)
@@ -176,10 +175,12 @@ func TestDepGraphMultipleDescendantsPriorityDisambiguates(t *testing.T) {
 	t.Parallel()
 
 	issues := []issue{
-		makeIssue(10, 1, "CLOSED", nil),      // A — done
-		makeIssue(11, 1, "OPEN", []int{10}),  // B → A, pri=1
-		makeIssue(12, 0, "OPEN", []int{10}),  // C → A, pri=0 (higher urgency)
+		makeIssue(10, "CLOSED", nil),      // A — done
+		makeIssue(11, "OPEN", []int{10}),  // B → A, pri=1
+		makeIssue(12, "OPEN", []int{10}),  // C → A, pri=0 (higher urgency)
 	}
+	// Give #12 the priority label (pri=0)
+	issues[2].Labels = append(issues[2].Labels, label{Name: "runoq:priority"})
 	g := BuildDepGraph(issues, 1, "runoq:ready")
 	next := g.NextAfter(10)
 	if next == nil {
@@ -194,9 +195,9 @@ func TestDepGraphNoLastCompletedFallsBackToDepthFirst(t *testing.T) {
 	t.Parallel()
 
 	issues := []issue{
-		makeIssue(10, 1, "OPEN", nil),       // A — 2-deep chain
-		makeIssue(11, 1, "OPEN", []int{10}), // B → A
-		makeIssue(20, 1, "OPEN", nil),       // C — 1-deep
+		makeIssue(10, "OPEN", nil),       // A — 2-deep chain
+		makeIssue(11, "OPEN", []int{10}), // B → A
+		makeIssue(20, "OPEN", nil),       // C — 1-deep
 	}
 	g := BuildDepGraph(issues, 1, "runoq:ready")
 	next := g.NextAfter(0) // no last completed
@@ -212,9 +213,9 @@ func TestDepGraphPartiallyDone(t *testing.T) {
 	t.Parallel()
 
 	issues := []issue{
-		makeIssue(10, 1, "CLOSED", nil),      // A — done
-		makeIssue(11, 1, "OPEN", []int{10}),  // B → A — ready (A is done)
-		makeIssue(12, 1, "OPEN", []int{11}),  // C → B — blocked
+		makeIssue(10, "CLOSED", nil),      // A — done
+		makeIssue(11, "OPEN", []int{10}),  // B → A — ready (A is done)
+		makeIssue(12, "OPEN", []int{11}),  // C → B — blocked
 	}
 	g := BuildDepGraph(issues, 1, "runoq:ready")
 	next := g.Next()
@@ -270,9 +271,9 @@ func TestRenderMermaidLinearChain(t *testing.T) {
 	t.Parallel()
 
 	issues := []issue{
-		makeIssue(10, 1, "OPEN", nil),
-		makeIssue(11, 1, "OPEN", []int{10}),
-		makeIssue(12, 1, "OPEN", []int{11}),
+		makeIssue(10, "OPEN", nil),
+		makeIssue(11, "OPEN", []int{10}),
+		makeIssue(12, "OPEN", []int{11}),
 	}
 	// Mark #10 as in-progress for icon test
 	issues[0].Labels = append(issues[0].Labels, label{Name: "runoq:in-progress"})
@@ -303,9 +304,9 @@ func TestRenderMermaidDoneAndBlocked(t *testing.T) {
 	t.Parallel()
 
 	issues := []issue{
-		makeIssue(10, 1, "CLOSED", nil),
-		makeIssue(11, 1, "OPEN", []int{10}),
-		makeIssue(12, 1, "OPEN", []int{99}), // blocked by missing dep
+		makeIssue(10, "CLOSED", nil),
+		makeIssue(11, "OPEN", []int{10}),
+		makeIssue(12, "OPEN", []int{99}), // blocked by missing dep
 	}
 	issues[0].Labels = append(issues[0].Labels, label{Name: "runoq:done"})
 
@@ -333,37 +334,38 @@ func containsStr(s, sub string) bool {
 	return false
 }
 
-func TestMetadataDependsOn(t *testing.T) {
+func TestIssueTypeOfUsesLabels(t *testing.T) {
 	t.Parallel()
+
 	tests := []struct {
-		body string
-		want []int
+		name      string
+		issueType string
+		labels    []label
+		want      string
 	}{
-		{"<!-- runoq:meta\ndepends_on: 5,8\n-->", []int{5, 8}},
-		{"<!-- runoq:meta\ndepends_on: 12\n-->", []int{12}},
-		{"<!-- runoq:meta\ntype: task\n-->", nil},
-		{"no metadata", nil},
+		{"native task", "task", nil, "task"},
+		{"native epic", "epic", nil, "epic"},
+		{"planning label", "task", []label{{Name: "runoq:planning"}}, "planning"},
+		{"adjustment label", "task", []label{{Name: "runoq:adjustment"}}, "adjustment"},
+		{"no type defaults to task", "", nil, "task"},
 	}
 	for _, tt := range tests {
-		got := metadataDependsOn(tt.body)
-		if len(got) != len(tt.want) {
-			t.Errorf("metadataDependsOn(%q) = %v, want %v", tt.body, got, tt.want)
-			continue
-		}
-		for i := range got {
-			if got[i] != tt.want[i] {
-				t.Errorf("metadataDependsOn(%q)[%d] = %d, want %d", tt.body, i, got[i], tt.want[i])
+		t.Run(tt.name, func(t *testing.T) {
+			iss := issue{IssueType: tt.issueType, Labels: tt.labels}
+			got := issueTypeOf(iss)
+			if got != tt.want {
+				t.Errorf("issueTypeOf() = %q, want %q", got, tt.want)
 			}
-		}
+		})
 	}
 }
 
-func TestBuildDepGraphMetadataFallback(t *testing.T) {
+func TestBuildDepGraphUsesNativeFields(t *testing.T) {
 	t.Parallel()
 	issues := []issue{
-		{Number: 1, State: "OPEN", Body: "<!-- runoq:meta\ntype: epic\npriority: 1\n-->"},
-		{Number: 2, State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 1\npriority: 1\n-->"},
-		{Number: 3, State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 1\npriority: 1\ndepends_on: 2\n-->"},
+		{Number: 1, State: "OPEN", IssueType: "epic"},
+		{Number: 2, State: "OPEN", IssueType: "task", ParentEpic: 1},
+		{Number: 3, State: "OPEN", IssueType: "task", ParentEpic: 1, BlockedBy: []int{2}},
 	}
 	g := BuildDepGraph(issues, 1, "")
 	next := g.Next()

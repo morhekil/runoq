@@ -4,10 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
-
-	"github.com/saruman/runoq/planning"
 )
 
 // DepGraph is a dependency DAG built from GitHub issues under an epic.
@@ -57,10 +54,6 @@ func BuildDepGraph(issues []issue, epicNumber int, readyLabel string) *DepGraph 
 		}
 
 		deps := iss.BlockedBy
-		// Fall back to body metadata if GitHub API didn't populate dependencies
-		if len(deps) == 0 {
-			deps = metadataDependsOn(iss.Body)
-		}
 
 		var blockedBy []int
 		for _, dep := range deps {
@@ -445,54 +438,32 @@ func fetchIssueTypes(issues []issue, graphqlResponse string) {
 // and falling back to the metadata block for backward compatibility.
 // issueParentEpic returns the parent epic number, preferring the native ParentEpic field
 // and falling back to the metadata block for backward compatibility.
-// metadataDependsOn extracts dependency issue numbers from body metadata.
-// Format: "depends_on: 5,8,12"
-func metadataDependsOn(body string) []int {
-	raw := planning.MetadataValue(body, "depends_on")
-	if raw == "" {
-		return nil
-	}
-	var result []int
-	for _, part := range strings.Split(raw, ",") {
-		part = strings.TrimSpace(part)
-		if n, err := strconv.Atoi(part); err == nil && n > 0 {
-			result = append(result, n)
-		}
-	}
-	return result
-}
-
 func issueParentEpic(iss *issue) int {
-	if iss.ParentEpic != 0 {
-		return iss.ParentEpic
-	}
-	raw := planning.MetadataValue(iss.Body, "parent_epic")
-	if raw == "" || raw == "null" {
-		return 0
-	}
-	n, _ := strconv.Atoi(raw)
-	return n
+	return iss.ParentEpic
 }
 
 // issuePriority returns 0 if the issue has the runoq:priority label (human-bumped),
-// 1 otherwise (default). Falls back to metadata priority for backward compat.
+// 1 otherwise (default).
 func issuePriority(iss *issue) int {
 	if hasLabel(iss, "runoq:priority") {
 		return 0
 	}
-	// Fallback to metadata for old issues
-	p := planning.MetadataPriority(iss.Body)
-	if p != 999999 && p != 1 {
-		return p // non-default metadata priority
-	}
 	return 1
 }
 
+// issueTypeOf returns the issue type from native GitHub API fields and labels.
+// planning/adjustment are workflow states stored as labels, not GitHub types.
 func issueTypeOf(iss issue) string {
+	if hasLabel(&iss, "runoq:planning") {
+		return "planning"
+	}
+	if hasLabel(&iss, "runoq:adjustment") {
+		return "adjustment"
+	}
 	if iss.IssueType != "" {
 		return iss.IssueType
 	}
-	return planning.MetadataValue(iss.Body, "type")
+	return "task"
 }
 
 func hasLabel(iss *issue, name string) bool {
