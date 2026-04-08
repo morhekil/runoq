@@ -109,8 +109,10 @@ func (t *tickRunner) run(ctx context.Context) int {
 	}
 	t.info(fmt.Sprintf("found %d issues", len(t.issues)))
 
-	// Populate dependency info from GitHub's native blockedBy API
-	t.fetchDependencies(ctx)
+	// Populate dependency info from GitHub's native APIs
+	if err := t.fetchDependencies(ctx); err != nil {
+		return t.fail("%v", err)
+	}
 
 	t.step("Finding current epic")
 	epic := t.firstOpenEpic()
@@ -912,22 +914,37 @@ func (t *tickRunner) fetchParentEpics(ctx context.Context) {
 	}
 }
 
-func (t *tickRunner) fetchDependencies(ctx context.Context) {
+func (t *tickRunner) fetchDependencies(ctx context.Context) error {
 	owner, repo, ok := strings.Cut(t.cfg.Repo, "/")
 	if !ok {
-		return
+		return fmt.Errorf("dependency fetch failed: invalid repo format %q", t.cfg.Repo)
 	}
 	query := fmt.Sprintf(`query { repository(owner: %q, name: %q) { issues(first: 200, states: [OPEN, CLOSED]) { nodes { number blockedBy(first: 20) { nodes { number } } issueType { name } } } } }`, owner, repo)
-	raw, err := t.ghOutput(ctx, "api", "graphql", "-f", "query="+query)
-	if err != nil {
-		t.info("dependency/type fetch failed (falling back to metadata)")
-		return
+
+	var raw string
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		var err error
+		raw, err = t.ghOutput(ctx, "api", "graphql", "-f", "query="+query)
+		if err == nil {
+			lastErr = nil
+			break
+		}
+		lastErr = err
+		if attempt < 3 {
+			time.Sleep(3 * time.Second)
+		}
 	}
+	if lastErr != nil {
+		return fmt.Errorf("dependency fetch failed after 3 attempts: %w", lastErr)
+	}
+
 	fetchBlockedBy(t.issues, raw)
 	fetchIssueTypes(t.issues, raw)
 
 	// Populate parent-epic from sub-issues relationships
 	t.fetchParentEpics(ctx)
+	return nil
 }
 
 func (t *tickRunner) titleForIssue(numberStr string) string {

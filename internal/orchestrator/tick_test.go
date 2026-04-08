@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -37,6 +38,122 @@ func (s *ghStub) exec(_ context.Context, req shell.CommandRequest) error {
 		}
 	}
 	return nil
+}
+
+// countingStub tracks call counts per substring and can return different
+// results for successive calls to the same pattern.
+type countingStub struct {
+	counts map[string]int
+	rules  []countingRule
+	calls  []string
+}
+
+type countingRule struct {
+	contains  string
+	failUntil int    // fail this many times before succeeding
+	stdout    string // output on success
+	failErr   error  // error to return on failure
+}
+
+func (s *countingStub) exec(_ context.Context, req shell.CommandRequest) error {
+	cmd := req.Name + " " + strings.Join(req.Args, " ")
+	s.calls = append(s.calls, cmd)
+	if s.counts == nil {
+		s.counts = make(map[string]int)
+	}
+	for _, r := range s.rules {
+		if strings.Contains(cmd, r.contains) {
+			s.counts[r.contains]++
+			if s.counts[r.contains] <= r.failUntil {
+				return r.failErr
+			}
+			if req.Stdout != nil && r.stdout != "" {
+				req.Stdout.Write([]byte(r.stdout))
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+func TestFetchDependenciesRetriesOnFailure(t *testing.T) {
+	t.Parallel()
+
+	graphqlResponse := `{"data":{"repository":{"issues":{"nodes":[
+		{"number":1,"blockedBy":{"nodes":[]},"issueType":{"name":"Epic"}},
+		{"number":2,"blockedBy":{"nodes":[{"number":1}]},"issueType":{"name":"Task"}}
+	]}}}}`
+
+	stub := &countingStub{
+		rules: []countingRule{
+			{contains: "api graphql", failUntil: 2, stdout: graphqlResponse, failErr: fmt.Errorf("GraphQL: Could not resolve")},
+		},
+	}
+
+	runner := &tickRunner{
+		cfg: TickConfig{
+			Repo:    "owner/repo",
+			Stderr:  io.Discard,
+			Stdout:  io.Discard,
+			ExecCommand: stub.exec,
+		},
+		issues: []issue{
+			{Number: 1, State: "OPEN"},
+			{Number: 2, State: "OPEN"},
+		},
+	}
+
+	runner.fetchDependencies(t.Context())
+
+	if runner.issues[0].IssueType != "epic" {
+		t.Errorf("issue 1: expected IssueType 'epic', got %q", runner.issues[0].IssueType)
+	}
+	if runner.issues[1].IssueType != "task" {
+		t.Errorf("issue 2: expected IssueType 'task', got %q", runner.issues[1].IssueType)
+	}
+	if len(runner.issues[1].BlockedBy) != 1 || runner.issues[1].BlockedBy[0] != 1 {
+		t.Errorf("issue 2: expected BlockedBy [1], got %v", runner.issues[1].BlockedBy)
+	}
+	// Should have retried 3 times (2 failures + 1 success)
+	graphqlCalls := 0
+	for _, c := range stub.calls {
+		if strings.Contains(c, "api graphql") {
+			graphqlCalls++
+		}
+	}
+	if graphqlCalls != 3 {
+		t.Errorf("expected 3 GraphQL calls (2 retries + success), got %d", graphqlCalls)
+	}
+}
+
+func TestFetchDependenciesFailsAfterRetries(t *testing.T) {
+	t.Parallel()
+
+	stub := &countingStub{
+		rules: []countingRule{
+			{contains: "api graphql", failUntil: 99, failErr: fmt.Errorf("GraphQL: Could not resolve")},
+		},
+	}
+
+	runner := &tickRunner{
+		cfg: TickConfig{
+			Repo:    "owner/repo",
+			Stderr:  io.Discard,
+			Stdout:  io.Discard,
+			ExecCommand: stub.exec,
+		},
+		issues: []issue{
+			{Number: 1, State: "OPEN"},
+		},
+	}
+
+	err := runner.fetchDependencies(t.Context())
+	if err == nil {
+		t.Fatal("expected error after all retries exhausted")
+	}
+	if !strings.Contains(err.Error(), "dependency fetch failed") {
+		t.Errorf("expected 'dependency fetch failed' error, got: %v", err)
+	}
 }
 
 func TestRunTickNoEpicsBootstraps(t *testing.T) {
