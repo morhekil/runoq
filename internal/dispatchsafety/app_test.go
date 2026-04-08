@@ -287,11 +287,11 @@ func TestReconcileResetsStaleInProgressWithoutPR(t *testing.T) {
 	stateDir := filepath.Join(localDir, ".runoq", "state")
 	env := dispatchTestEnv(repoRoot, configPath, localDir, stateDir, scenarioPath, logPath)
 
-	var stdout bytes.Buffer
-	app := New(nil, env, localDir, &stdout, &bytes.Buffer{})
+	var stdout, stderr bytes.Buffer
+	app := New(nil, env, localDir, &stdout, &stderr)
 	code := app.Reconcile(context.Background(), "owner/repo")
 	if code != 0 {
-		t.Fatalf("Reconcile returned %d, stdout=%q", code, stdout.String())
+		t.Fatalf("Reconcile returned %d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
 	}
 
 	var actions []reconcileAction

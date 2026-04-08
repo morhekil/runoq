@@ -192,19 +192,8 @@ func (a *App) Run(ctx context.Context) int {
 		}
 		return a.runScript(ctx, targetEnv, runoqRoot, "setup.sh", args)
 	case "plan":
-		targetEnv, code := a.prepareTargetContext(ctx, runoqRoot, env)
-		if code != 0 {
-			return code
-		}
-		fmt.Fprintln(a.stderr, "runoq plan is deprecated; prefer `runoq tick` for the iterative planning workflow.")
-		repo, _ := shell.EnvLookup(targetEnv, "REPO")
-		targetRoot, _ := shell.EnvLookup(targetEnv, "TARGET_ROOT")
-		planArgs, err := a.resolvePlanArgs(targetRoot, args)
-		if err != nil {
-			return shell.Fail(a.stderr, err.Error())
-		}
-		planArgs = append([]string{repo}, planArgs...)
-		return a.runScript(ctx, targetEnv, runoqRoot, "plan.sh", planArgs)
+		fmt.Fprintln(a.stderr, "runoq plan is removed; use `runoq tick` for the iterative planning workflow.")
+		return 1
 	case "tick":
 		targetEnv, code := a.prepareTargetContext(ctx, runoqRoot, env)
 		if code != 0 {
@@ -226,7 +215,11 @@ func (a *App) Run(ctx context.Context) int {
 		if code != 0 {
 			return code
 		}
-		return a.runScript(ctx, authEnv, runoqRoot, "run.sh", args)
+		repo, _ := shell.EnvLookup(authEnv, "REPO")
+		runApp := orchestrator.New(append([]string{"run", repo}, args...), authEnv, a.cwd, a.stdout, a.stderr)
+		runApp.SetCommandExecutor(a.execCommand)
+		runApp.SetConfig(a.orchestratorConfig())
+		return runApp.Run(ctx)
 	case "report":
 		targetEnv, code := a.prepareTargetContext(ctx, runoqRoot, env)
 		if code != 0 {
@@ -412,21 +405,6 @@ func parseRepoFromRemote(remote string) (string, error) {
 	}
 }
 
-func (a *App) resolvePlanArgs(targetRoot string, args []string) ([]string, error) {
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		return append([]string(nil), args...), nil
-	}
-
-	planFile, err := readProjectPlanFile(targetRoot)
-	if err != nil {
-		return nil, err
-	}
-
-	resolved := []string{planFile}
-	resolved = append(resolved, args...)
-	return resolved, nil
-}
-
 func readProjectPlanFile(targetRoot string) (string, error) {
 	if strings.TrimSpace(targetRoot) == "" {
 		return "", errors.New("plan file not configured: target repository root is unknown")
@@ -486,6 +464,51 @@ func (a *App) runMaintenance(ctx context.Context, env []string, runoqRoot string
 		return shell.ExitCodeFromError(err)
 	}
 	return 0
+}
+
+func (a *App) orchestratorConfig() orchestrator.OrchestratorConfig {
+	cfg := orchestrator.OrchestratorConfig{
+		ReadyLabel:       a.labels.Ready,
+		InProgressLabel:  a.labels.InProgress,
+		DoneLabel:        a.labels.Done,
+		NeedsReviewLabel: a.labels.NeedsReview,
+		BlockedLabel:     a.labels.Blocked,
+		BranchPrefix:     a.branchPrefix,
+		WorktreePrefix:   a.worktreePrefix,
+		AutoMergeEnabled: true,
+		Reviewers:        []string{},
+		IdentityHandle:   "runoq",
+		MaxRounds:        5,
+		MaxTokenBudget:   500000,
+	}
+	if a.configRaw != nil {
+		if v, ok := a.configRaw["maxRounds"]; ok {
+			_ = json.Unmarshal(v, &cfg.MaxRounds)
+		}
+		if v, ok := a.configRaw["maxTokenBudget"]; ok {
+			_ = json.Unmarshal(v, &cfg.MaxTokenBudget)
+		}
+		if v, ok := a.configRaw["reviewers"]; ok {
+			_ = json.Unmarshal(v, &cfg.Reviewers)
+		}
+		if v, ok := a.configRaw["autoMerge"]; ok {
+			var am struct {
+				Enabled bool `json:"enabled"`
+			}
+			if json.Unmarshal(v, &am) == nil {
+				cfg.AutoMergeEnabled = am.Enabled
+			}
+		}
+		if v, ok := a.configRaw["identity"]; ok {
+			var id struct {
+				Handle string `json:"handle"`
+			}
+			if json.Unmarshal(v, &id) == nil && id.Handle != "" {
+				cfg.IdentityHandle = id.Handle
+			}
+		}
+	}
+	return cfg
 }
 
 func (a *App) runTick(ctx context.Context, env []string, runoqRoot string) int {

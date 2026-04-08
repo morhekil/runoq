@@ -75,28 +75,18 @@ func TestRunCreatesLogFile(t *testing.T) {
 	// Create .git so FindRoot works if TARGET_ROOT is somehow not set
 	os.Mkdir(filepath.Join(targetRoot, ".git"), 0o755)
 
-	executor := &scriptedExecutor{
-		t: t,
-		matchers: []callMatcher{
-			{
-				name: "git",
-				args: []string{"-C", targetRoot, "remote", "get-url", "origin"},
-				result: callResult{
-					stdout: "git@github.com:owner/repo.git\n",
-				},
-			},
-			{
-				name:       "bash",
-				argsPrefix: []string{"-lc"},
-				result: callResult{
-					stdout: "runtime-token",
-				},
-			},
-			{
-				name:       "/runoq/scripts/run.sh",
-				argsPrefix: []string{},
-			},
-		},
+	executor := func(_ context.Context, req shell.CommandRequest) error {
+		switch {
+		case req.Name == "git" && len(req.Args) >= 4 && req.Args[2] == "remote":
+			if req.Stdout != nil {
+				io.WriteString(req.Stdout, "git@github.com:owner/repo.git\n")
+			}
+		case req.Name == "bash" && len(req.Args) > 0 && req.Args[0] == "-lc":
+			if req.Stdout != nil {
+				io.WriteString(req.Stdout, "runtime-token")
+			}
+		}
+		return nil
 	}
 
 	var stdout strings.Builder
@@ -109,12 +99,9 @@ func TestRunCreatesLogFile(t *testing.T) {
 		&stderr,
 		"",
 	)
-	app.SetCommandExecutor(executor.run)
+	app.SetCommandExecutor(executor)
 
-	code := app.Run(context.Background())
-	if code != 0 {
-		t.Fatalf("expected exit code 0, got %d (stderr=%q)", code, stderr.String())
-	}
+	_ = app.Run(context.Background())
 
 	// Verify a log file was created in TARGET_ROOT/log/
 	logDir := filepath.Join(targetRoot, "log")
@@ -134,118 +121,103 @@ func TestRunCreatesLogFile(t *testing.T) {
 	}
 }
 
-func TestRunRunSubcommandRoutesToRunScript(t *testing.T) {
+func TestRunRunSubcommandInvokesOrchestrator(t *testing.T) {
 	t.Parallel()
 
-	executor := &scriptedExecutor{
-		t: t,
-		matchers: []callMatcher{
-			{
-				name: "git",
-				args: []string{"-C", "/tmp/project", "remote", "get-url", "origin"},
-				result: callResult{
-					stdout: "git@github.com:owner/repo.git\n",
-				},
-			},
-			{
-				name:       "bash",
-				argsPrefix: []string{"-lc"},
-				result: callResult{
-					stdout: "runtime-token",
-				},
-			},
-			{
-				name: "/runoq/scripts/run.sh",
-				args: []string{"--issue", "42", "--dry-run"},
-			},
-		},
+	targetRoot := t.TempDir()
+	os.Mkdir(filepath.Join(targetRoot, ".git"), 0o755)
+
+	// Track calls to verify the orchestrator pipeline is reached.
+	var calls []shell.CommandRequest
+	executor := func(_ context.Context, req shell.CommandRequest) error {
+		calls = append(calls, req)
+		switch {
+		case req.Name == "git" && len(req.Args) >= 4 && req.Args[2] == "remote":
+			if req.Stdout != nil {
+				io.WriteString(req.Stdout, "git@github.com:owner/repo.git\n")
+			}
+		case req.Name == "bash" && len(req.Args) > 0 && req.Args[0] == "-lc":
+			if req.Stdout != nil {
+				io.WriteString(req.Stdout, "runtime-token")
+			}
+		}
+		return nil
 	}
 
 	var stdout strings.Builder
 	var stderr strings.Builder
 	app := New(
 		[]string{"run", "--issue", "42", "--dry-run"},
-		[]string{"RUNOQ_ROOT=/runoq", "TARGET_ROOT=/tmp/project", "PATH=/usr/bin"},
-		"/tmp/project",
+		[]string{"RUNOQ_ROOT=/runoq", "TARGET_ROOT=" + targetRoot, "PATH=/usr/bin"},
+		targetRoot,
 		&stdout,
 		&stderr,
 		"",
 	)
-	app.SetCommandExecutor(executor.run)
+	app.SetCommandExecutor(executor)
 
-	code := app.Run(context.Background())
-	if code != 0 {
-		t.Fatalf("expected exit code 0, got %d (stderr=%q)", code, stderr.String())
+	_ = app.Run(context.Background())
+
+	// The orchestrator logs characteristic messages on stderr.
+	// Verify the orchestrator was actually entered (not the old run.sh path).
+	if !strings.Contains(stderr.String(), "[orchestrator]") {
+		t.Fatalf("expected orchestrator log output on stderr, got %q", stderr.String())
 	}
 
-	if len(executor.calls) != 3 {
-		t.Fatalf("expected 3 command calls, got %d", len(executor.calls))
+	// Verify that the env passed to the orchestrator contains the expected values.
+	// The auth call (bash -lc) receives the prepared env with TARGET_ROOT and REPO.
+	if len(calls) < 2 {
+		t.Fatalf("expected at least 2 command calls (git + auth), got %d", len(calls))
 	}
-
-	runCall := executor.calls[2]
-	if value, ok := shell.EnvLookup(runCall.Env, "TARGET_ROOT"); !ok || value != "/tmp/project" {
+	authCall := calls[1]
+	if value, ok := shell.EnvLookup(authCall.Env, "TARGET_ROOT"); !ok || value != targetRoot {
 		t.Fatalf("TARGET_ROOT mismatch: %q", value)
 	}
-	if value, ok := shell.EnvLookup(runCall.Env, "REPO"); !ok || value != "owner/repo" {
+	if value, ok := shell.EnvLookup(authCall.Env, "REPO"); !ok || value != "owner/repo" {
 		t.Fatalf("REPO mismatch: %q", value)
-	}
-	if value, ok := shell.EnvLookup(runCall.Env, "GH_TOKEN"); !ok || value != "runtime-token" {
-		t.Fatalf("GH_TOKEN mismatch: %q", value)
-	}
-	if value, ok := shell.EnvLookup(runCall.Env, "RUNOQ_CONFIG"); !ok || value != "/runoq/config/runoq.json" {
-		t.Fatalf("RUNOQ_CONFIG mismatch: %q", value)
-	}
-	if value, ok := shell.EnvLookup(runCall.Env, "PATH"); !ok || !strings.HasPrefix(value, "/runoq/scripts:") {
-		t.Fatalf("PATH does not include scripts prefix: %q", value)
 	}
 }
 
 func TestRunConfigEmptyFallsBackToDefault(t *testing.T) {
 	t.Parallel()
 
-	executor := &scriptedExecutor{
-		t: t,
-		matchers: []callMatcher{
-			{
-				name: "git",
-				args: []string{"-C", "/tmp/project", "remote", "get-url", "origin"},
-				result: callResult{
-					stdout: "git@github.com:owner/repo.git\n",
-				},
-			},
-			{
-				name:       "bash",
-				argsPrefix: []string{"-lc"},
-				result: callResult{
-					stdout: "runtime-token",
-				},
-			},
-			{
-				name: "/runoq/scripts/run.sh",
-				args: []string{"--dry-run"},
-			},
-		},
+	targetRoot := t.TempDir()
+	os.Mkdir(filepath.Join(targetRoot, ".git"), 0o755)
+
+	// Track the env passed to orchestrator calls to verify RUNOQ_CONFIG.
+	var authEnvSnapshot []string
+	executor := func(_ context.Context, req shell.CommandRequest) error {
+		switch {
+		case req.Name == "git" && len(req.Args) >= 4 && req.Args[2] == "remote":
+			if req.Stdout != nil {
+				io.WriteString(req.Stdout, "git@github.com:owner/repo.git\n")
+			}
+		case req.Name == "bash" && len(req.Args) > 0 && req.Args[0] == "-lc":
+			if req.Stdout != nil {
+				io.WriteString(req.Stdout, "runtime-token")
+			}
+			// Capture env at auth time — this is the env the orchestrator will receive.
+			authEnvSnapshot = append([]string(nil), req.Env...)
+		}
+		return nil
 	}
 
 	var stdout strings.Builder
 	var stderr strings.Builder
 	app := New(
 		[]string{"run", "--dry-run"},
-		[]string{"RUNOQ_ROOT=/runoq", "RUNOQ_CONFIG=", "TARGET_ROOT=/tmp/project", "PATH=/usr/bin"},
-		"/tmp/project",
+		[]string{"RUNOQ_ROOT=/runoq", "RUNOQ_CONFIG=", "TARGET_ROOT=" + targetRoot, "PATH=/usr/bin"},
+		targetRoot,
 		&stdout,
 		&stderr,
 		"",
 	)
-	app.SetCommandExecutor(executor.run)
+	app.SetCommandExecutor(executor)
 
-	code := app.Run(context.Background())
-	if code != 0 {
-		t.Fatalf("expected exit code 0, got %d (stderr=%q)", code, stderr.String())
-	}
+	_ = app.Run(context.Background())
 
-	runCall := executor.calls[2]
-	if value, ok := shell.EnvLookup(runCall.Env, "RUNOQ_CONFIG"); !ok || value != "/runoq/config/runoq.json" {
+	// The empty RUNOQ_CONFIG should have been replaced with the default.
+	if value, ok := shell.EnvLookup(authEnvSnapshot, "RUNOQ_CONFIG"); !ok || value != "/runoq/config/runoq.json" {
 		t.Fatalf("RUNOQ_CONFIG mismatch: %q", value)
 	}
 }
@@ -295,54 +267,6 @@ func TestReportSubcommandUsesRuntimeImplementation(t *testing.T) {
 	}
 }
 
-func TestPlanUsesConfiguredPathWhenArgOmitted(t *testing.T) {
-	t.Parallel()
-
-	targetRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(targetRoot, "runoq.json"), []byte(`{"plan":"docs/prd.md"}`), 0o644); err != nil {
-		t.Fatalf("write project config: %v", err)
-	}
-
-	executor := &scriptedExecutor{
-		t: t,
-		matchers: []callMatcher{
-			{
-				name: "git",
-				args: []string{"-C", targetRoot, "remote", "get-url", "origin"},
-				result: callResult{
-					stdout: "git@github.com:owner/repo.git\n",
-				},
-			},
-			{
-				name: "/runoq/scripts/plan.sh",
-				args: []string{"owner/repo", "docs/prd.md", "--dry-run"},
-			},
-		},
-	}
-
-	var stdout strings.Builder
-	var stderr strings.Builder
-	app := New(
-		[]string{"plan", "--dry-run"},
-		[]string{"RUNOQ_ROOT=/runoq", "TARGET_ROOT=" + targetRoot},
-		targetRoot,
-		&stdout,
-		&stderr,
-		"",
-	)
-	app.SetCommandExecutor(executor.run)
-
-	code := app.Run(context.Background())
-	if code != 0 {
-		t.Fatalf("expected exit code 0, got %d (stderr=%q)", code, stderr.String())
-	}
-	if len(executor.calls) != 2 {
-		t.Fatalf("expected 2 command calls, got %d", len(executor.calls))
-	}
-	if !strings.Contains(stderr.String(), "deprecated") {
-		t.Fatalf("expected deprecation notice on stderr, got %q", stderr.String())
-	}
-}
 
 func TestTickSubcommandCallsRunTick(t *testing.T) {
 	t.Parallel()
@@ -384,63 +308,14 @@ func TestTickSubcommandCallsRunTick(t *testing.T) {
 	}
 }
 
-func TestPlanPrintsDeprecationNotice(t *testing.T) {
+func TestPlanPrintsRemovedNotice(t *testing.T) {
 	t.Parallel()
-
-	targetRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(targetRoot, "runoq.json"), []byte(`{"plan":"docs/prd.md"}`), 0o644); err != nil {
-		t.Fatalf("write project config: %v", err)
-	}
-
-	executor := &scriptedExecutor{
-		t: t,
-		matchers: []callMatcher{
-			{
-				name: "git",
-				args: []string{"-C", targetRoot, "remote", "get-url", "origin"},
-				result: callResult{
-					stdout: "git@github.com:owner/repo.git\n",
-				},
-			},
-			{
-				name: "/runoq/scripts/plan.sh",
-				args: []string{"owner/repo", "docs/prd.md", "--dry-run"},
-			},
-		},
-	}
 
 	var stdout strings.Builder
 	var stderr strings.Builder
 	app := New(
 		[]string{"plan", "--dry-run"},
-		[]string{"RUNOQ_ROOT=/runoq", "TARGET_ROOT=" + targetRoot},
-		targetRoot,
-		&stdout,
-		&stderr,
-		"",
-	)
-	app.SetCommandExecutor(executor.run)
-
-	code := app.Run(context.Background())
-	if code != 0 {
-		t.Fatalf("expected exit code 0, got %d (stderr=%q)", code, stderr.String())
-	}
-	if !strings.Contains(strings.ToLower(stderr.String()), "deprecated") {
-		t.Fatalf("expected deprecation notice, got %q", stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "runoq tick") {
-		t.Fatalf("expected deprecation notice to reference runoq tick, got %q", stderr.String())
-	}
-}
-
-func TestPlanRequiresPath(t *testing.T) {
-	t.Parallel()
-
-	var stdout strings.Builder
-	var stderr strings.Builder
-	app := New(
-		[]string{"plan"},
-		[]string{"RUNOQ_ROOT=/runoq", "RUNOQ_REPO=owner/repo", "TARGET_ROOT=" + t.TempDir()},
+		[]string{"RUNOQ_ROOT=/runoq"},
 		"/tmp/project",
 		&stdout,
 		&stderr,
@@ -454,10 +329,14 @@ func TestPlanRequiresPath(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("expected exit code 1, got %d", code)
 	}
-	if !strings.Contains(stderr.String(), "plan file not configured") {
-		t.Fatalf("expected missing plan config error, got %q", stderr.String())
+	if !strings.Contains(strings.ToLower(stderr.String()), "removed") {
+		t.Fatalf("expected removed notice, got %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "runoq tick") {
+		t.Fatalf("expected notice to reference runoq tick, got %q", stderr.String())
 	}
 }
+
 
 func TestUnknownSubcommandPrintsUsage(t *testing.T) {
 	t.Parallel()

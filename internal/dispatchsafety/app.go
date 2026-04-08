@@ -640,19 +640,52 @@ func (a *App) prComment(ctx context.Context, repo string, prNumber int, body str
 }
 
 func (a *App) setIssueStatus(ctx context.Context, repo string, issueNumber int, status string) error {
-	root, err := a.runoqRoot()
+	cfg, err := a.loadConfig()
 	if err != nil {
 		return err
 	}
 
-	return a.execCommand(ctx, shell.CommandRequest{
-		Name:   filepath.Join(root, "scripts", "gh-issue-queue.sh"),
-		Args:   []string{"set-status", repo, strconv.Itoa(issueNumber), status},
-		Dir:    a.cwd,
-		Env:    a.env,
-		Stdout: io.Discard,
-		Stderr: a.stderr,
-	})
+	issueStr := strconv.Itoa(issueNumber)
+
+	// Read current labels
+	labelsJSON, err := a.ghOutputQuiet(ctx, "issue", "view", issueStr, "--repo", repo, "--json", "labels")
+	if err != nil {
+		return err
+	}
+	var labelsData struct {
+		Labels []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
+	}
+	_ = json.Unmarshal([]byte(labelsJSON), &labelsData)
+
+	// Remove existing runoq state labels, add new one
+	editArgs := []string{"issue", "edit", issueStr, "--repo", repo}
+	for _, l := range labelsData.Labels {
+		switch l.Name {
+		case cfg.Labels.Ready, cfg.Labels.InProgress, cfg.Labels.Done, cfg.Labels.NeedsReview, cfg.Labels.Blocked:
+			editArgs = append(editArgs, "--remove-label", l.Name)
+		}
+	}
+
+	var newLabel string
+	switch status {
+	case "ready":
+		newLabel = cfg.Labels.Ready
+	case "in-progress":
+		newLabel = cfg.Labels.InProgress
+	case "done":
+		newLabel = cfg.Labels.Done
+	case "needs-review":
+		newLabel = cfg.Labels.NeedsReview
+	case "blocked":
+		newLabel = cfg.Labels.Blocked
+	}
+	if newLabel != "" {
+		editArgs = append(editArgs, "--add-label", newLabel)
+	}
+
+	return a.runGhWithStderr(ctx, io.Discard, a.stderr, editArgs...)
 }
 
 func (a *App) runGh(ctx context.Context, stdout io.Writer, args ...string) error {
