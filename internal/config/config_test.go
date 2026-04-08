@@ -1,8 +1,10 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -49,6 +51,75 @@ func TestResolvePathFromExplicit(t *testing.T) {
 	if got != "/explicit/runoq.json" {
 		t.Fatalf("expected explicit path, got %q", got)
 	}
+}
+
+func TestNoEnvLeakageInInternalPackages(t *testing.T) {
+	t.Parallel()
+
+	// Packages that are allowed to access env vars (entry points / config)
+	allowed := map[string]bool{
+		"internal/config": true,
+		"internal/cli":    true,
+	}
+
+	// Packages that run as script entry points and need their own config loading,
+	// or have justified env access (gh reads $HOME for path expansion)
+	scriptEntryPoints := map[string]bool{
+		"internal/worktree":    true,
+		"internal/verify":      true,
+		"internal/state":       true,
+		"internal/report":      true,
+		"internal/gh":          true,
+	}
+
+	root, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Walk up to repo root
+	for !fileExists(filepath.Join(root, "go.mod")) {
+		parent := filepath.Dir(root)
+		if parent == root {
+			t.Fatal("could not find repo root")
+		}
+		root = parent
+	}
+
+	internalDir := filepath.Join(root, "internal")
+	var violations []string
+
+	filepath.WalkDir(internalDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		rel, _ := filepath.Rel(root, path)
+		pkg := filepath.Dir(rel)
+		if allowed[pkg] || scriptEntryPoints[pkg] {
+			return nil
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		content := string(data)
+
+		for _, pattern := range []string{"os.Getenv", "os.LookupEnv", "os.Environ()"} {
+			if strings.Contains(content, pattern) {
+				violations = append(violations, fmt.Sprintf("%s: contains %s", rel, pattern))
+			}
+		}
+		return nil
+	})
+
+	if len(violations) > 0 {
+		t.Fatalf("env access found in internal packages:\n%s", strings.Join(violations, "\n"))
+	}
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func TestResolvePathFromRoot(t *testing.T) {
