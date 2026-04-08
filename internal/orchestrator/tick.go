@@ -39,12 +39,13 @@ type TickConfig struct {
 
 // issue represents a GitHub issue from the issue list.
 type issue struct {
-	Number int      `json:"number"`
-	Title  string   `json:"title"`
-	State  string   `json:"state"`
-	Body   string   `json:"body"`
-	URL    string   `json:"url"`
-	Labels []label  `json:"labels"`
+	Number    int      `json:"number"`
+	Title     string   `json:"title"`
+	State     string   `json:"state"`
+	Body      string   `json:"body"`
+	URL       string   `json:"url"`
+	Labels    []label  `json:"labels"`
+	BlockedBy []int    `json:"-"` // populated from GitHub's blockedBy API, not JSON
 }
 
 type label struct {
@@ -88,6 +89,9 @@ func (t *tickRunner) run(ctx context.Context) int {
 		return t.fail("parse issues: %v", err)
 	}
 	t.info(fmt.Sprintf("found %d issues", len(t.issues)))
+
+	// Populate dependency info from GitHub's native blockedBy API
+	t.fetchDependencies(ctx)
 
 	t.step("Finding current epic")
 	epic := t.firstOpenEpic()
@@ -322,14 +326,11 @@ func (t *tickRunner) handleApprovedPlanning(ctx context.Context, reviewView stri
 	} else {
 		t.info("creating task issues under epic #" + reviewParent)
 		keyToNumber := make(map[string]string)
+		keyToNodeID := make(map[string]string)
 		for _, item := range filtered.Items {
 			body := item.Body
 			complexity := cmp.Or(item.EstimatedComplexity, "medium")
 			createOpts := []string{"--type", "task", "--priority", "1", "--estimated-complexity", complexity, "--complexity-rationale", item.ComplexityRationale, "--parent-epic", reviewParent}
-
-			if deps := resolveDependsOn(item.DependsOnKeys, keyToNumber); deps != "" {
-				createOpts = append(createOpts, "--depends-on", deps)
-			}
 
 			issueNum, err := t.issueCreate(ctx, t.cfg.Repo, item.Title, body, createOpts...)
 			if err != nil {
@@ -338,7 +339,26 @@ func (t *tickRunner) handleApprovedPlanning(ctx context.Context, reviewView stri
 			}
 			if item.Key != "" {
 				keyToNumber[item.Key] = issueNum
+				// Get the node ID for GraphQL dependency linking
+				nodeID := t.issueNodeID(ctx, issueNum)
+				if nodeID != "" {
+					keyToNodeID[item.Key] = nodeID
+				}
 			}
+
+			// Set native GitHub dependencies via addBlockedBy
+			for _, depKey := range item.DependsOnKeys {
+				depNodeID, ok := keyToNodeID[depKey]
+				if !ok {
+					continue
+				}
+				taskNodeID := t.issueNodeID(ctx, issueNum)
+				if taskNodeID == "" {
+					continue
+				}
+				t.addBlockedBy(ctx, taskNodeID, depNodeID)
+			}
+
 			t.info(fmt.Sprintf("created task #%s: %s (%s)", issueNum, item.Title, complexity))
 		}
 		t.info(fmt.Sprintf("closing review #%d", reviewNumber))
@@ -701,6 +721,33 @@ func (t *tickRunner) countOpenChildren(epicNumber int) (int, bool) {
 		}
 	}
 	return count, hasTask
+}
+
+func (t *tickRunner) issueNodeID(ctx context.Context, issueNum string) string {
+	raw, err := t.ghOutput(ctx, "api", fmt.Sprintf("repos/%s/issues/%s", t.cfg.Repo, issueNum), "--jq", ".node_id")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(raw)
+}
+
+func (t *tickRunner) addBlockedBy(ctx context.Context, issueNodeID, blockingNodeID string) {
+	query := fmt.Sprintf(`mutation { addBlockedBy(input: { issueId: %q, blockingIssueId: %q }) { blockedIssue { number } } }`, issueNodeID, blockingNodeID)
+	_, _ = t.ghOutput(ctx, "api", "graphql", "-f", "query="+query)
+}
+
+func (t *tickRunner) fetchDependencies(ctx context.Context) {
+	owner, repo, ok := strings.Cut(t.cfg.Repo, "/")
+	if !ok {
+		return
+	}
+	query := fmt.Sprintf(`query { repository(owner: %q, name: %q) { issues(first: 200, states: [OPEN, CLOSED]) { nodes { number blockedBy(first: 20) { nodes { number } } } } } }`, owner, repo)
+	raw, err := t.ghOutput(ctx, "api", "graphql", "-f", "query="+query)
+	if err != nil {
+		t.info("dependency fetch failed (falling back to metadata)")
+		return
+	}
+	fetchBlockedBy(t.issues, raw)
 }
 
 func (t *tickRunner) titleForIssue(numberStr string) string {

@@ -111,8 +111,8 @@ func TestGraphPrioritySortAndDependencyFiltering(t *testing.T) {
 		{Number: 9, Title: "Epic", State: "OPEN", Body: "<!-- runoq:meta\ntype: epic\npriority: 1\n-->"},
 		// Task #11: priority 2, no deps
 		{Number: 11, Title: "Second task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 2\n-->"},
-		// Task #10: priority 1, depends on #12 which is OPEN — blocked
-		{Number: 10, Title: "First task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 1\ndepends_on: [12]\n-->"},
+		// Task #10: priority 1, blocked by #12 which is OPEN
+		{Number: 10, Title: "First task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 1\n-->", BlockedBy: []int{12}},
 		// Task #12: priority 3, no deps — should be selected (deeper chain: #10 depends on it)
 		{Number: 12, Title: "Third task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 3\n-->"},
 	}
@@ -154,8 +154,8 @@ func TestGraphAllBlockedCycle(t *testing.T) {
 
 	issues := []issue{
 		{Number: 9, Title: "Epic", State: "OPEN", Body: "<!-- runoq:meta\ntype: epic\npriority: 1\n-->"},
-		{Number: 10, Title: "Task A", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 1\ndepends_on: [11]\n-->"},
-		{Number: 11, Title: "Task B", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 2\ndepends_on: [10]\n-->"},
+		{Number: 10, Title: "Task A", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 1\n-->", BlockedBy: []int{11}},
+		{Number: 11, Title: "Task B", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 2\n-->", BlockedBy: []int{10}},
 	}
 	g := BuildDepGraph(issues, 9, "")
 	task := g.Next()
@@ -174,7 +174,7 @@ func TestGraphSkipsClosedAndNonTaskTypes(t *testing.T) {
 		{Number: 9, Title: "Epic", State: "OPEN", Body: "<!-- runoq:meta\ntype: epic\npriority: 1\n-->"},
 		{Number: 10, Title: "Done task", State: "CLOSED", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 1\n-->"},
 		{Number: 11, Title: "Planning", State: "OPEN", Body: "<!-- runoq:meta\ntype: planning\nparent_epic: 9\npriority: 1\n-->"},
-		{Number: 12, Title: "Ready task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 2\ndepends_on: [10]\n-->"},
+		{Number: 12, Title: "Ready task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 2\n-->", BlockedBy: []int{10}},
 	}
 	g := BuildDepGraph(issues, 9, "")
 	task := g.Next()

@@ -7,19 +7,14 @@ import (
 )
 
 func makeIssue(number int, priority int, state string, deps []int) issue {
-	body := "<!-- runoq:meta\ntype: task\nparent_epic: 1\npriority: " + itoa(priority) + "\n"
-	if len(deps) > 0 {
-		body += "depends_on: ["
-		for i, d := range deps {
-			if i > 0 {
-				body += ","
-			}
-			body += itoa(d)
-		}
-		body += "]\n"
+	body := "<!-- runoq:meta\ntype: task\nparent_epic: 1\npriority: " + itoa(priority) + "\n-->"
+	return issue{
+		Number:     number,
+		State:      state,
+		Body:       body,
+		Labels:     []label{{Name: "runoq:ready"}},
+		BlockedBy:  deps,
 	}
-	body += "-->"
-	return issue{Number: number, State: state, Body: body, Labels: []label{{Name: "runoq:ready"}}}
 }
 
 func itoa(n int) string {
@@ -228,6 +223,27 @@ func TestDepGraphPartiallyDone(t *testing.T) {
 	}
 	if next.Number != 11 {
 		t.Fatalf("expected #11 (unblocked after A done), got #%d", next.Number)
+	}
+}
+
+func TestFetchBlockedByPopulatesIssueField(t *testing.T) {
+	t.Parallel()
+
+	issues := []issue{
+		{Number: 10, State: "OPEN"},
+		{Number: 11, State: "OPEN"},
+	}
+
+	// Simulate GraphQL response: #11 is blocked by #10
+	ghResponse := `{"data":{"repository":{"issues":{"nodes":[{"number":10,"blockedBy":{"nodes":[]}},{"number":11,"blockedBy":{"nodes":[{"number":10}]}}]}}}}`
+
+	fetchBlockedBy(issues, ghResponse)
+
+	if len(issues[0].BlockedBy) != 0 {
+		t.Fatalf("expected #10 to have no blockers, got %v", issues[0].BlockedBy)
+	}
+	if len(issues[1].BlockedBy) != 1 || issues[1].BlockedBy[0] != 10 {
+		t.Fatalf("expected #11 blocked by [10], got %v", issues[1].BlockedBy)
 	}
 }
 

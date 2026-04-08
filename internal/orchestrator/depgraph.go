@@ -56,11 +56,7 @@ func BuildDepGraph(issues []issue, epicNumber int, readyLabel string) *DepGraph 
 			continue
 		}
 
-		var deps []int
-		depsRaw := planning.MetadataValue(iss.Body, "depends_on")
-		if depsRaw != "" {
-			_ = json.Unmarshal([]byte(depsRaw), &deps)
-		}
+		deps := iss.BlockedBy
 
 		var blockedBy []int
 		for _, dep := range deps {
@@ -367,6 +363,45 @@ func truncateTitle(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-1] + "…"
+}
+
+// fetchBlockedBy parses a GraphQL response containing blockedBy data
+// and populates the BlockedBy field on each issue.
+func fetchBlockedBy(issues []issue, graphqlResponse string) {
+	var resp struct {
+		Data struct {
+			Repository struct {
+				Issues struct {
+					Nodes []struct {
+						Number    int `json:"number"`
+						BlockedBy struct {
+							Nodes []struct {
+								Number int `json:"number"`
+							} `json:"nodes"`
+						} `json:"blockedBy"`
+					} `json:"nodes"`
+				} `json:"issues"`
+			} `json:"repository"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(graphqlResponse), &resp); err != nil {
+		return
+	}
+
+	byNumber := make(map[int][]int)
+	for _, node := range resp.Data.Repository.Issues.Nodes {
+		var deps []int
+		for _, dep := range node.BlockedBy.Nodes {
+			deps = append(deps, dep.Number)
+		}
+		byNumber[node.Number] = deps
+	}
+
+	for i := range issues {
+		if deps, ok := byNumber[issues[i].Number]; ok {
+			issues[i].BlockedBy = deps
+		}
+	}
 }
 
 func hasLabel(iss *issue, name string) bool {
