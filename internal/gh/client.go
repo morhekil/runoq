@@ -26,16 +26,19 @@ type Client struct {
 	httpClient *http.Client
 	env        []string
 	cwd        string
+	homeDir    string
 	tokenInit  bool
 }
 
 // NewClient creates a Client with the given executor, HTTP client, environment, and working directory.
-func NewClient(exec shell.CommandExecutor, httpClient *http.Client, env []string, cwd string) *Client {
+// homeDir is used for ~ expansion in identity key paths.
+func NewClient(exec shell.CommandExecutor, httpClient *http.Client, env []string, cwd string, homeDir string) *Client {
 	return &Client{
 		exec:       exec,
 		httpClient: httpClient,
 		env:        env,
 		cwd:        cwd,
+		homeDir:    homeDir,
 	}
 }
 
@@ -72,7 +75,7 @@ func (c *Client) EnsureToken(ctx context.Context) error {
 		return nil
 	}
 
-	keyPath := strings.Replace(identity.PrivateKeyPath, "~", os.Getenv("HOME"), 1)
+	keyPath := strings.Replace(identity.PrivateKeyPath, "~", c.homeDir, 1)
 	privateKey, err := LoadPrivateKey(keyPath)
 	if err != nil {
 		return nil

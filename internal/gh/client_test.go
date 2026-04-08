@@ -24,7 +24,7 @@ func TestNewClient(t *testing.T) {
 	env := []string{"PATH=/usr/bin"}
 	cwd := "/tmp"
 
-	c := gh.NewClient(exec, httpClient, env, cwd)
+	c := gh.NewClient(exec, httpClient, env, cwd, "")
 	if c == nil {
 		t.Fatal("expected non-nil client")
 	}
@@ -40,7 +40,7 @@ func TestEnsureToken_AlreadySet(t *testing.T) {
 		return nil
 	}
 	env := []string{"GH_TOKEN=existing-token"}
-	c := gh.NewClient(exec, http.DefaultClient, env, "/tmp")
+	c := gh.NewClient(exec, http.DefaultClient, env, "/tmp", "")
 
 	if err := c.EnsureToken(context.Background()); err != nil {
 		t.Fatalf("EnsureToken: %v", err)
@@ -57,7 +57,7 @@ func TestEnsureToken_NoAutoToken(t *testing.T) {
 		return nil
 	}
 	env := []string{"RUNOQ_NO_AUTO_TOKEN=1"}
-	c := gh.NewClient(exec, http.DefaultClient, env, "/tmp")
+	c := gh.NewClient(exec, http.DefaultClient, env, "/tmp", "")
 
 	if err := c.EnsureToken(context.Background()); err != nil {
 		t.Fatalf("EnsureToken: %v", err)
@@ -118,7 +118,7 @@ func TestEnsureToken_OnlyOnce(t *testing.T) {
 		}),
 	}
 
-	c := gh.NewClient(exec, httpClient, nil, tmpDir)
+	c := gh.NewClient(exec, httpClient, nil, tmpDir, "")
 
 	// Call twice.
 	if err := c.EnsureToken(context.Background()); err != nil {
@@ -148,7 +148,7 @@ func TestOutput_EnsuresToken(t *testing.T) {
 	}
 
 	// Use a dir without .git — EnsureToken skips token minting but Output still works.
-	c := gh.NewClient(exec, http.DefaultClient, nil, t.TempDir())
+	c := gh.NewClient(exec, http.DefaultClient, nil, t.TempDir(), "")
 	got, err := c.Output(context.Background(), "pr", "list")
 	if err != nil {
 		t.Fatalf("Output: %v", err)
@@ -167,7 +167,7 @@ func TestClientOutput_UsesGHBin(t *testing.T) {
 	}
 
 	env := []string{"GH_BIN=mycustomgh"}
-	c := gh.NewClient(exec, http.DefaultClient, env, t.TempDir())
+	c := gh.NewClient(exec, http.DefaultClient, env, t.TempDir(), "")
 	_, err := c.Output(context.Background(), "version")
 	if err != nil {
 		t.Fatalf("Output: %v", err)
@@ -185,7 +185,7 @@ func TestRun_PassesIO(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	c := gh.NewClient(exec, http.DefaultClient, nil, "/tmp")
+	c := gh.NewClient(exec, http.DefaultClient, nil, "/tmp", "")
 	err := c.Run(context.Background(), []string{"pr", "list"}, &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("Run: %v", err)

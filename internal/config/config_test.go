@@ -62,14 +62,15 @@ func TestNoEnvLeakageInInternalPackages(t *testing.T) {
 		"internal/cli":    true,
 	}
 
-	// Packages that run as script entry points and need their own config loading,
-	// or have justified env access (gh reads $HOME for path expansion)
+	// Packages that run as script entry points (invoked as subprocesses)
+	// and need their own config/env loading at their New() constructor.
 	scriptEntryPoints := map[string]bool{
-		"internal/worktree":    true,
-		"internal/verify":      true,
-		"internal/state":       true,
-		"internal/report":      true,
-		"internal/gh":          true,
+		"internal/worktree":      true,
+		"internal/verify":        true,
+		"internal/state":         true,
+		"internal/report":        true,
+		"internal/issuequeue":    true,
+		"internal/dispatchsafety": true,
 	}
 
 	root, err := os.Getwd()

@@ -32,6 +32,7 @@ type App struct {
 	args        []string
 	env         []string
 	cwd         string
+	homeDir     string
 	stdout      io.Writer
 	stderr      io.Writer
 	execCommand shell.CommandExecutor
@@ -154,27 +155,43 @@ type queueIssue struct {
 
 var issueURLPattern = regexp.MustCompile(`[0-9]+$`)
 
+// New creates an App for script entry points (self-contained, creates its own gh.Client).
 func New(args []string, env []string, cwd string, stdout io.Writer, stderr io.Writer) *App {
 	clonedEnv := slices.Clone(env)
+	homeDir, _ := os.UserHomeDir()
 	return &App{
 		args:        slices.Clone(args),
 		env:         clonedEnv,
 		cwd:         cwd,
+		homeDir:     homeDir,
 		stdout:      stdout,
 		stderr:      stderr,
 		execCommand: shell.RunCommand,
-		ghClient:    gh.NewClient(shell.RunCommand, http.DefaultClient, clonedEnv, cwd),
+		ghClient:    gh.NewClient(shell.RunCommand, http.DefaultClient, clonedEnv, cwd, homeDir),
+	}
+}
+
+// NewWithClient creates an App with an injected gh.Client (for direct Go calls from tick/CLI).
+func NewWithClient(args []string, env []string, cwd string, stdout io.Writer, stderr io.Writer, client *gh.Client) *App {
+	return &App{
+		args:        slices.Clone(args),
+		env:         slices.Clone(env),
+		cwd:         cwd,
+		stdout:      stdout,
+		stderr:      stderr,
+		execCommand: shell.RunCommand,
+		ghClient:    client,
 	}
 }
 
 func (a *App) SetCommandExecutor(execFn shell.CommandExecutor) {
 	if execFn == nil {
 		a.execCommand = shell.RunCommand
-		a.ghClient = gh.NewClient(shell.RunCommand, http.DefaultClient, a.env, a.cwd)
-		return
+		a.ghClient = gh.NewClient(shell.RunCommand, http.DefaultClient, a.env, a.cwd, a.homeDir)
+	} else {
+		a.execCommand = execFn
+		a.ghClient = gh.NewClient(execFn, http.DefaultClient, a.env, a.cwd, a.homeDir)
 	}
-	a.execCommand = execFn
-	a.ghClient = gh.NewClient(execFn, http.DefaultClient, a.env, a.cwd)
 }
 
 // SetLabels injects label config so the app skips reading from disk.
