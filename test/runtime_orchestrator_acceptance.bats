@@ -186,12 +186,6 @@ EOF
 
 happy_issue_body() {
   cat <<'EOF'
-<!-- runoq:meta
-depends_on: []
-priority: 1
-estimated_complexity: low
--->
-
 ## Acceptance Criteria
 
 - [ ] Adds the queue implementation file.
@@ -200,13 +194,6 @@ EOF
 
 epic_issue_body() {
   cat <<'EOF'
-<!-- runoq:meta
-depends_on: []
-priority: 1
-estimated_complexity: medium
-type: epic
--->
-
 ## Acceptance Criteria
 
 - [ ] Coordinate the runtime migration.

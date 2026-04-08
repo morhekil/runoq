@@ -22,7 +22,7 @@ The queue runner only selects from open issues labeled `runoq:ready`.
 Queue selection is deterministic:
 
 1. list open `runoq:ready` issues
-2. parse the `runoq:meta` block from each issue body
+2. derive metadata from labels and native GitHub APIs
 3. sort by `priority`, then issue number
 4. skip any issue whose `depends_on` items are not `runoq:done`
 5. skip any issue that fails dispatch eligibility

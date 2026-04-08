@@ -52,12 +52,6 @@ EOF
 
 happy_issue_body() {
   cat <<'EOF'
-<!-- runoq:meta
-depends_on: []
-priority: 1
-estimated_complexity: low
--->
-
 ## Acceptance Criteria
 
 - [ ] Adds the queue implementation file.
@@ -65,15 +59,7 @@ EOF
 }
 
 queue_issue_body() {
-  local depends_on="$1"
-  local priority="$2"
-  cat <<EOF
-<!-- runoq:meta
-depends_on: $depends_on
-priority: $priority
-estimated_complexity: low
--->
-
+  cat <<'EOF'
 ## Acceptance Criteria
 
 - [ ] Queue task succeeds.

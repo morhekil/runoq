@@ -27,7 +27,7 @@ Primary callers: `run.sh`, `maintenance.sh`, the `plan-to-issues` skill, tests.
 | `list` | `<repo> <ready-label>` | JSON array of issues with `number`, `title`, `body`, `url`, `labels`, `depends_on`, `priority`, `estimated_complexity`, `complexity_rationale`, `type`, `parent_epic`, `metadata_present`, `metadata_valid` | reads GitHub issues |
 | `next` | `<repo> <ready-label>` | JSON object `{ issue, skipped }`; `issue` is either the next actionable issue object or `null`, `skipped` contains blocked items with `blocked_reasons` | reads GitHub issues and dependency labels |
 | `set-status` | `<repo> <issue-number> <status>` where status is `ready`, `in-progress`, `done`, `needs-review`, or `blocked` | JSON object `{ issue, status, label }` | removes existing `runoq:*` labels and applies exactly one new state label |
-| `create` | `<repo> <title> <body> [--depends-on N,M] [--priority N] [--estimated-complexity value] [--type epic\|task] [--parent-epic N] [--complexity-rationale text]` | JSON object `{ title, url }` | creates a GitHub issue labeled `runoq:ready` with an `runoq:meta` block |
+| `create` | `<repo> <title> <body> [--depends-on N,M] [--priority N] [--estimated-complexity value] [--type epic\|task] [--parent-epic N] [--complexity-rationale text]` | JSON object `{ title, url }` | creates a GitHub issue labeled `runoq:ready` with native metadata (issueType, labels, blockedBy) |
 | `epic-status` | `<repo> <epic-number>` | JSON object `{ epic, children, all_done, pending }` where `children` lists child issue numbers with their labels, `all_done` is boolean, `pending` lists children not yet `runoq:done` | reads GitHub issue metadata and child labels |
 
 Notes:

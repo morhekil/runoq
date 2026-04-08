@@ -18,4 +18,4 @@ Use this skill when you need structured access to the GitHub issue queue.
 
 - Treat the script JSON as source of truth; do not reimplement dependency resolution or label logic in the prompt.
 - Surface `blocked_reasons` exactly as returned by the script.
-- Issue metadata lives in the `<!-- runoq:meta -->` block; the script parses it for you.
+- Issue metadata is derived from labels and native GitHub APIs (issueType, sub-issues, blockedBy).

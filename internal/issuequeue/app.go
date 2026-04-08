@@ -572,11 +572,11 @@ func (a *App) listIssues(ctx context.Context, repo string, readyLabel string) ([
 
 	issues := make([]listedIssue, 0, len(items))
 	for _, item := range items {
-		meta := parseMetadata(item.Body)
 		labels := make([]string, 0, len(item.Labels))
 		for _, label := range item.Labels {
 			labels = append(labels, label.Name)
 		}
+		meta := metadataFromLabels(labels)
 		issues = append(issues, listedIssue{
 			Number:              item.Number,
 			Title:               item.Title,
@@ -630,104 +630,34 @@ func (a *App) dependencyStatus(ctx context.Context, repo string, dependency int)
 	return dependencyCheck{Dependency: dependency, Done: false, Reason: &reason}, nil
 }
 
-func parseMetadata(body string) metadata {
+// metadataFromLabels derives issue metadata from labels (replaces body-based parsing).
+func metadataFromLabels(labels []string) metadata {
 	meta := metadata{
 		DependsOn:       []int{},
 		Type:            "task",
-		MetadataPresent: false,
-		MetadataValid:   false,
+		MetadataPresent: true,
+		MetadataValid:   true,
 	}
 
-	block, ok := metadataBlock(body)
-	if !ok {
-		return meta
-	}
-
-	meta.MetadataPresent = true
-	meta.MetadataValid = true
-
-	values := make(map[string]string)
-	for line := range strings.SplitSeq(block, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		for _, key := range []string{"depends_on:", "priority:", "estimated_complexity:", "complexity_rationale:", "type:", "parent_epic:"} {
-			if rest, found := strings.CutPrefix(line, key); found {
-				values[strings.TrimSuffix(key, ":")] = strings.TrimSpace(rest)
-				break
-			}
-			if rest, found := strings.CutPrefix(line, "milestone_type:"); found {
-				values["milestone_type"] = strings.TrimSpace(rest)
-				break
-			}
-		}
-	}
-
-	if raw := values["depends_on"]; raw != "" {
-		if err := json.Unmarshal([]byte(raw), &meta.DependsOn); err != nil {
-			meta.DependsOn = []int{}
-			meta.MetadataValid = false
-		}
-	} else {
-		meta.MetadataValid = false
-	}
-
-	if raw := values["priority"]; raw != "" {
-		if value, err := strconv.Atoi(raw); err == nil {
-			meta.Priority = &value
-		} else {
-			meta.MetadataValid = false
-		}
-	} else {
-		meta.MetadataValid = false
-	}
-
-	if raw := values["estimated_complexity"]; raw != "" {
-		value := raw
-		meta.EstimatedComplexity = &value
-	} else {
-		meta.MetadataValid = false
-	}
-
-	if raw := values["complexity_rationale"]; raw != "" && raw != "null" {
-		value := raw
-		meta.ComplexityRationale = &value
-	}
-
-	if raw := values["type"]; isAllowedIssueType(raw) {
-		meta.Type = raw
-	}
-
-	if raw := values["milestone_type"]; raw != "" {
-		value := raw
-		meta.MilestoneType = &value
-	}
-
-	if raw := values["parent_epic"]; raw != "" {
-		if value, err := strconv.Atoi(raw); err == nil {
-			meta.ParentEpic = &value
+	for _, label := range labels {
+		switch label {
+		case "runoq:planning":
+			meta.Type = "planning"
+		case "runoq:adjustment":
+			meta.Type = "adjustment"
+		case "runoq:priority":
+			p := 0
+			meta.Priority = &p
+		case "runoq:discovery":
+			v := "discovery"
+			meta.MilestoneType = &v
+		case "runoq:implementation":
+			v := "implementation"
+			meta.MilestoneType = &v
 		}
 	}
 
 	return meta
-}
-
-func metadataBlock(body string) (string, bool) {
-	lines := strings.Split(body, "\n")
-	inBlock := false
-	var block []string
-	for _, line := range lines {
-		switch {
-		case strings.Contains(line, "<!-- runoq:meta"):
-			inBlock = true
-		case inBlock && strings.Contains(line, "-->"):
-			return strings.Join(block, "\n"), true
-		case inBlock:
-			block = append(block, line)
-		}
-	}
-	return "", false
 }
 
 func parseCreateOptions(args []string) (createOptions, error) {

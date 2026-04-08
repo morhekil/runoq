@@ -30,14 +30,7 @@ EOF
 }
 
 issue_body_with_meta() {
-  local depends_on="${1:-[]}"
-  cat <<EOF
-<!-- runoq:meta
-depends_on: $depends_on
-priority: 2
-estimated_complexity: low
--->
-
+  cat <<'EOF'
 ## Acceptance Criteria
 
 - [ ] Works.
@@ -264,24 +257,14 @@ EOF
   local_dir="$TEST_TMPDIR/local"
   prepare_dispatch_repo "$remote_dir" "$local_dir"
   export TARGET_ROOT="$local_dir"
-  body="$(cat <<'EOF'
-<!-- runoq:meta
-depends_on: []
-priority: 1
-estimated_complexity: low
-type: planning
--->
-
-Plan body.
-EOF
-)"
+  body="Plan body."
 
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<EOF
 [
   {
     "contains": ["issue", "view", "99", "--repo", "owner/repo", "--json", "number,title,body,labels,url"],
-    "stdout": $(jq -Rn --arg body "$body" '{"number":99,"title":"Plan milestone 1","body":$body,"labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/99"}')
+    "stdout": $(jq -Rn --arg body "$body" '{"number":99,"title":"Plan milestone 1","body":$body,"labels":[{"name":"runoq:ready"},{"name":"runoq:planning"}],"url":"https://example.test/issues/99"}')
   }
 ]
 EOF

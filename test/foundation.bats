@@ -23,10 +23,7 @@ load test_helper
   [ "$status" -eq 0 ]
 }
 
-@test "issue template includes metadata block and acceptance criteria section" {
-  run grep -n "runoq:meta" "$RUNOQ_ROOT/templates/issue-template.md"
-  [ "$status" -eq 0 ]
-
+@test "issue template includes acceptance criteria section" {
   run grep -n "## Acceptance Criteria" "$RUNOQ_ROOT/templates/issue-template.md"
   [ "$status" -eq 0 ]
 }

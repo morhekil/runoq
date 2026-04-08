@@ -110,36 +110,22 @@ planning_preflight_json() {
 # Tick-planning helpers
 ###############################################################################
 
-metadata_value() {
-  local body="$1"
-  local key="$2"
-  printf '%s\n' "$body" | awk -v key="$key" '
-    /<!-- runoq:meta/ {in_meta=1; next}
-    in_meta && /-->/ {exit}
-    in_meta && index($0, key ":") == 1 {
-      sub("^" key ":[[:space:]]*", "", $0)
-      print $0
-      exit
-    }
-  '
+issue_type_from_labels() {
+  local issue_json="$1"
+  local labels
+  labels="$(printf '%s' "$issue_json" | jq '.labels // []')"
+  if printf '%s' "$labels" | jq -e 'map(.name) | index("runoq:planning")' >/dev/null 2>&1; then
+    printf '%s\n' "planning"
+  elif printf '%s' "$labels" | jq -e 'map(.name) | index("runoq:adjustment")' >/dev/null 2>&1; then
+    printf '%s\n' "adjustment"
+  else
+    printf '%s\n' "task"
+  fi
 }
 
-issue_type() {
-  local body="$1"
-  local value
-  value="$(metadata_value "$body" "type")"
-  printf '%s\n' "${value:-task}"
-}
-
-issue_priority() {
-  local body="$1"
-  local value
-  value="$(metadata_value "$body" "priority")"
-  printf '%s\n' "${value:-999999}"
-}
-
-issue_parent_epic() {
-  metadata_value "$1" "parent_epic"
+issue_has_priority_label() {
+  local issue_json="$1"
+  printf '%s' "$issue_json" | jq -e '(.labels // []) | map(.name) | index("runoq:priority")' >/dev/null 2>&1
 }
 
 list_issues_json() {
@@ -174,37 +160,40 @@ find_issue_by_title() {
 }
 
 find_open_child_by_type() {
-  local issues_json="$1"
+  local repo="$1"
   local parent_epic="$2"
   local wanted_type="$3"
+  local sub_issues
+  sub_issues="$(runoq::gh api "repos/${repo}/issues/${parent_epic}/sub_issues" --paginate 2>/dev/null || printf '[]')"
   while IFS= read -r issue; do
     [[ -n "$issue" ]] || continue
-    local body parent type state
-    body="$(printf '%s' "$issue" | jq -r '.body // ""')"
-    parent="$(issue_parent_epic "$body")"
-    type="$(issue_type "$body")"
+    local type state
+    type="$(issue_type_from_labels "$issue")"
     state="$(printf '%s' "$issue" | jq -r '.state')"
-    if [[ "$parent" == "$parent_epic" && "$type" == "$wanted_type" && "$state" == "OPEN" ]]; then
+    if [[ "$type" == "$wanted_type" && "$state" == "open" ]]; then
       printf '%s\n' "$issue"
       return 0
     fi
-  done < <(printf '%s' "$issues_json" | jq -c '.[]')
+  done < <(printf '%s' "$sub_issues" | jq -c '.[]')
   return 1
 }
 
 first_open_epic() {
   local issues_json="$1"
-  local best="" best_priority=999999
+  local best=""
   while IFS= read -r issue; do
     [[ -n "$issue" ]] || continue
-    local body state type priority
-    body="$(printf '%s' "$issue" | jq -r '.body // ""')"
+    local state type has_priority
     state="$(printf '%s' "$issue" | jq -r '.state')"
-    type="$(issue_type "$body")"
-    [[ "$state" == "OPEN" && "$type" == "epic" ]] || continue
-    priority="$(issue_priority "$body")"
-    if (( priority < best_priority )); then
-      best_priority="$priority"
+    type="$(issue_type_from_labels "$issue")"
+    [[ "$state" == "OPEN" && "$type" == "task" ]] || continue
+    # No planning/adjustment label means it's a regular issue (epic-like by convention)
+    # Prefer issues with runoq:priority label
+    if issue_has_priority_label "$issue"; then
+      best="$issue"
+      break
+    fi
+    if [[ -z "$best" ]]; then
       best="$issue"
     fi
   done < <(printf '%s' "$issues_json" | jq -c '.[]')

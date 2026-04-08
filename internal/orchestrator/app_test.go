@@ -1300,7 +1300,7 @@ func buildMockExecutor(t *testing.T, mc mockConfig) shell.CommandExecutor {
 				_, _ = io.WriteString(req.Stdout, `{"title":"`+mc.issueTitle+`"}`)
 				return nil
 			case strings.Contains(ghArgs, "issue view "+issueStr) && strings.Contains(ghArgs, "number,title,body,labels,url"):
-				_, _ = io.WriteString(req.Stdout, `{"number":`+issueStr+`,"title":"`+mc.issueTitle+`","body":"<!-- runoq:meta\nestimated_complexity: low\ntype: task\n-->\n\n## Acceptance Criteria\n\n- [ ] Works.","labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/`+issueStr+`"}`)
+				_, _ = io.WriteString(req.Stdout, `{"number":`+issueStr+`,"title":"`+mc.issueTitle+`","body":"## Acceptance Criteria\n\n- [ ] Works.","labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/`+issueStr+`"}`)
 				return nil
 			case strings.Contains(ghArgs, "issue view "+issueStr) && strings.Contains(ghArgs, "labels"):
 				_, _ = io.WriteString(req.Stdout, `{"labels":[{"name":"runoq:ready"}]}`)

@@ -870,36 +870,26 @@ seed_lifecycle_issues() {
       runoq::die "Lifecycle issue template ${key} referenced an unresolved dependency."
     fi
 
-    # Build the issue body with runoq metadata block
-    local meta_block=""
-    meta_block+="<!-- runoq:meta"$'\n'
-    meta_block+="type: ${type_field}"$'\n'
-    meta_block+="priority: ${priority}"$'\n'
-    meta_block+="estimated_complexity: ${complexity}"$'\n'
-    if [[ -n "$complexity_rationale" ]]; then
-      meta_block+="complexity_rationale: ${complexity_rationale}"$'\n'
-    fi
-    if [[ "$(printf '%s' "$depends_json" | jq 'length')" -gt 0 ]]; then
-      meta_block+="depends_on: $(printf '%s' "$depends_json" | jq -r 'join(",")')"$'\n'
-    fi
     if [[ -n "$parent_epic_key" ]]; then
       epic_number="$(printf '%s' "$issue_map" | jq -r --arg k "$parent_epic_key" '.[$k] // empty')"
       if [[ -z "$epic_number" ]]; then
         runoq::die "Lifecycle issue template ${key} referenced unresolved parent epic ${parent_epic_key}."
       fi
-      meta_block+="parent_epic: ${epic_number}"$'\n'
     fi
-    meta_block+="-->"
-    local full_body="${body}"$'\n\n'"${meta_block}"
 
     local _seed_attempt _label_args=""
     if [[ "$type_field" == "task" ]]; then
       _label_args="--label $(runoq::config_get '.labels.ready')"
     fi
+    # Add workflow labels
+    case "$type_field" in
+      planning)  _label_args+=" --label runoq:planning" ;;
+      adjustment) _label_args+=" --label runoq:adjustment" ;;
+    esac
 
     create_output=""
     for _seed_attempt in 1 2 3; do
-      if create_output="$(runoq::gh issue create --repo "$repo" --title "$title" --body "$full_body" $_label_args 2>/dev/null)"; then
+      if create_output="$(runoq::gh issue create --repo "$repo" --title "$title" --body "$body" $_label_args 2>/dev/null)"; then
         # gh issue create returns a URL; build the JSON that callers expect
         local _issue_url="$create_output"
         local _issue_num

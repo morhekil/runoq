@@ -11,7 +11,7 @@ A target repository is compatible with `runoq` when all of the following are tru
 - `origin` resolves to `github.com` using SSH or HTTPS remote syntax
 - the operator can run `runoq` from inside that repository checkout
 - the repo can tolerate sibling worktrees created next to the main checkout
-- queued issues use the `runoq:meta` block and include acceptance criteria
+- queued issues use native GitHub metadata (issueType, labels, sub-issues, blockedBy) and include acceptance criteria
 - verification commands configured in `config/runoq.json` can run successfully in the repo
 
 ## Git And Remote Assumptions
@@ -55,31 +55,16 @@ Downstream implications:
 
 ## Queue Issue Body Contract
 
-### Required metadata block
+### Native metadata
 
-Queue issues are expected to start with the metadata block used by [`templates/issue-template.md`](../../templates/issue-template.md):
+Queue issues use native GitHub APIs instead of body metadata blocks:
 
-```md
-<!-- runoq:meta
-type: task
-parent_epic: null
-depends_on: []
-priority: 3
-estimated_complexity: medium
-complexity_rationale: Touches multiple modules with test coverage gaps
--->
-```
+- **issueType**: set via GraphQL `updateIssueIssueType` mutation (Epic or Task)
+- **Workflow labels**: `runoq:planning`, `runoq:adjustment`, `runoq:discovery`, `runoq:implementation`, `runoq:priority`
+- **Dependencies**: set via GraphQL `addBlockedBy` mutation
+- **Parent-child**: linked via the sub-issues REST API
 
-Field requirements:
-
-- `type`: `epic` or `task` (defaults to `task` when absent)
-- `parent_epic`: issue number of the parent epic, or `null`
-- `depends_on`: JSON array of issue numbers
-- `priority`: integer, lower means earlier queue selection
-- `estimated_complexity`: string such as `low`, `medium`, or `high`
-- `complexity_rationale`: optional free-text explanation of the complexity estimate
-
-Epic issues use `type: epic`. Child tasks are tracked via GitHub's native sub-issues API rather than metadata. Task issues within an epic use `type: task` and reference their parent via `parent_epic`. The queue runner skips epics during normal dispatch; epics are completed via the INTEGRATE phase after all children reach `runoq:done`.
+Epic issues use issueType=Epic. Child tasks are tracked via GitHub's native sub-issues API. The queue runner skips epics during normal dispatch; epics are completed via the INTEGRATE phase after all children reach `runoq:done`.
 
 ### Required acceptance criteria section
 

@@ -30,14 +30,7 @@ EOF
 }
 
 issue_body_with_meta() {
-  local depends_on="${1:-[]}"
-  cat <<EOF
-<!-- runoq:meta
-depends_on: $depends_on
-priority: 2
-estimated_complexity: low
--->
-
+  cat <<'EOF'
 ## Acceptance Criteria
 
 - [ ] Works.

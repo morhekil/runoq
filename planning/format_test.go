@@ -355,15 +355,11 @@ func TestMergeChecklists(t *testing.T) {
 func TestReplaceProposalInBody(t *testing.T) {
 	t.Parallel()
 
-	existingBody := "<!-- runoq:meta\ntype: planning\n-->\n\n## Acceptance Criteria\n- [ ] Done.\n\n<!-- runoq:proposal-start -->\n## Review scores\nold content"
+	existingBody := "## Acceptance Criteria\n- [ ] Done.\n\n<!-- runoq:proposal-start -->\n## Review scores\nold content"
 	newProposal := "## Review scores\nnew content"
 
 	got := ReplaceProposalInBody(existingBody, newProposal)
 
-	// Metadata preserved
-	if !containsString(got, "<!-- runoq:meta") {
-		t.Error("metadata block lost")
-	}
 	if !containsString(got, "## Acceptance Criteria") {
 		t.Error("acceptance criteria lost")
 	}
@@ -384,7 +380,7 @@ func TestReplaceProposalInBody(t *testing.T) {
 func TestReplaceProposalInBodyNoExistingMarker(t *testing.T) {
 	t.Parallel()
 
-	existingBody := "<!-- runoq:meta\ntype: planning\n-->\n\n## Acceptance Criteria\n- [ ] Done."
+	existingBody := "## Acceptance Criteria\n- [ ] Done."
 	newProposal := "## Review scores\nnew content"
 
 	got := ReplaceProposalInBody(existingBody, newProposal)

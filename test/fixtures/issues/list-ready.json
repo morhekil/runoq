@@ -2,7 +2,7 @@
   {
     "number": 42,
     "title": "Implement queue orchestration",
-    "body": "<!-- runoq:meta\ndepends_on: [12]\npriority: 1\nestimated_complexity: low\n-->\n\n## Acceptance Criteria\n\n- [ ] Happy path works.",
+    "body": "## Acceptance Criteria\n\n- [ ] Happy path works.",
     "labels": [
       { "name": "runoq:ready" }
     ],

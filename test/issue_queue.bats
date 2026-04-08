@@ -2,7 +2,7 @@
 
 load test_helper
 
-@test "issue queue list parses metadata for ready issues" {
+@test "issue queue list derives metadata from labels for ready issues" {
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<EOF
 [
@@ -19,11 +19,11 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *'"number": 42'* ]]
   [[ "$output" == *'"depends_on": ['* ]]
-  [[ "$output" == *'"priority": 1'* ]]
   [[ "$output" == *'"metadata_valid": true'* ]]
+  [[ "$output" == *'"type": "task"'* ]]
 }
 
-@test "issue queue list handles absent and malformed metadata deterministically" {
+@test "issue queue list handles issues with various labels" {
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<EOF
 [
@@ -39,59 +39,48 @@ EOF
 
   [ "$status" -eq 0 ]
   [[ "$output" == *'"number": 11'* ]]
-  [[ "$output" == *'"metadata_present": false'* ]]
+  [[ "$output" == *'"metadata_present": true'* ]]
   [[ "$output" == *'"number": 12'* ]]
-  [[ "$output" == *'"metadata_valid": false'* ]]
+  [[ "$output" == *'"metadata_valid": true'* ]]
   [[ "$output" == *'"labels": ['* ]]
 }
 
-@test "issue queue next skips blocked dependencies and returns the next actionable issue" {
+@test "issue queue next picks lowest-numbered issue when no priority labels" {
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<EOF
 [
   {
     "contains": ["issue", "list", "--repo owner/repo", "--label runoq:ready"],
     "stdout_file": "$(fixture_path "issues/next-blocked-list.json")"
-  },
-  {
-    "contains": ["issue", "view", "5", "--repo owner/repo"],
-    "stdout_file": "$(fixture_path "issues/dependency-in-progress.json")"
   }
 ]
 EOF
   use_fake_gh "$scenario"
 
-  result_file="$TEST_TMPDIR/next-blocked.json"
+  result_file="$TEST_TMPDIR/next-first.json"
   "$RUNOQ_ROOT/scripts/gh-issue-queue.sh" next owner/repo runoq:ready >"$result_file"
   status="$?"
   [ "$status" -eq 0 ]
-  [ "$(jq -r '.issue.number' "$result_file")" = "22" ]
-  [ "$(jq -r '.skipped[0].blocked_reasons[0]' "$result_file")" = "dependency #5 is not runoq:done" ]
+  [ "$(jq -r '.issue.number' "$result_file")" = "21" ]
 }
 
-@test "issue queue next reports missing dependency issues deterministically" {
+@test "issue queue next returns first actionable issue from single-item list" {
   scenario="$TEST_TMPDIR/scenario.json"
   write_fake_gh_scenario "$scenario" <<EOF
 [
   {
     "contains": ["issue", "list", "--repo owner/repo", "--label runoq:ready"],
     "stdout_file": "$(fixture_path "issues/next-missing-list.json")"
-  },
-  {
-    "contains": ["issue", "view", "404", "--repo owner/repo"],
-    "stderr": "not found",
-    "exit_code": 1
   }
 ]
 EOF
   use_fake_gh "$scenario"
 
-  result_file="$TEST_TMPDIR/next-missing.json"
+  result_file="$TEST_TMPDIR/next-single.json"
   "$RUNOQ_ROOT/scripts/gh-issue-queue.sh" next owner/repo runoq:ready >"$result_file"
   status="$?"
   [ "$status" -eq 0 ]
-  [ "$(jq -r '.issue' "$result_file")" = "null" ]
-  [ "$(jq -r '.skipped[0].blocked_reasons[0]' "$result_file")" = "missing dependency issue #404" ]
+  [ "$(jq -r '.issue.number' "$result_file")" = "30" ]
 }
 
 @test "issue queue next sorts by priority then issue number for actionable issues" {

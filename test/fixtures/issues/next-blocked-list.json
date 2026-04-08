@@ -2,7 +2,7 @@
   {
     "number": 21,
     "title": "Blocked",
-    "body": "<!-- runoq:meta\ndepends_on: [5]\npriority: 1\nestimated_complexity: medium\n-->\n",
+    "body": "Body",
     "labels": [
       { "name": "runoq:ready" }
     ],
@@ -11,7 +11,7 @@
   {
     "number": 22,
     "title": "Ready",
-    "body": "<!-- runoq:meta\ndepends_on: []\npriority: 2\nestimated_complexity: low\n-->\n",
+    "body": "Body",
     "labels": [
       { "name": "runoq:ready" }
     ],

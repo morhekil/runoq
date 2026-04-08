@@ -13,20 +13,7 @@ tick_issue_json() {
 }
 
 meta_body() {
-  local type="$1"
-  local priority="${2:-1}"
-  local parent="${3:-}"
-  local milestone_type="${4:-}"
-  cat <<EOF
-<!-- runoq:meta
-depends_on: []
-priority: $priority
-estimated_complexity: low
-type: $type
-$( [[ -n "$milestone_type" ]] && printf 'milestone_type: %s\n' "$milestone_type" )
-$( [[ -n "$parent" ]] && printf 'parent_epic: %s\n' "$parent" )
--->
-
+  cat <<'EOF'
 ## Acceptance Criteria
 
 - [ ] Works.
@@ -108,22 +95,15 @@ case "$cmd" in
     count=$((count + 1))
     printf '%s\n' "$count" >"$state_file"
     {
-      printf '<!-- runoq:meta\n'
-      printf 'depends_on: []\n'
-      printf 'priority: %s\n' "$priority"
-      printf 'estimated_complexity: %s\n' "$estimated_complexity"
-      if [[ -n "$complexity_rationale" ]]; then
-        printf 'complexity_rationale: %s\n' "$complexity_rationale"
-      fi
       printf 'type: %s\n' "$issue_type"
+      printf 'priority: %s\n' "$priority"
       if [[ -n "$milestone_type" ]]; then
         printf 'milestone_type: %s\n' "$milestone_type"
       fi
       if [[ -n "$parent_epic" ]]; then
         printf 'parent_epic: %s\n' "$parent_epic"
       fi
-      printf '%s\n\n' '-->'
-      printf '%s\n' "$body"
+      printf '\n%s\n' "$body"
     } >"$capture_dir/$count.body"
     jq -cn --arg title "$title" --arg url "https://example.test/issues/$count" '{title:$title,url:$url}'
     ;;
@@ -603,18 +583,10 @@ EOF
   export TICK_ISSUE_QUEUE_STATE_FILE="$TEST_TMPDIR/issue-queue.state"
   export TICK_ISSUE_QUEUE_CAPTURE_DIR="$TEST_TMPDIR/issue-queue-capture"
 
-  epic1_body="$(meta_body epic 1 '' implementation)"
-  epic2_body="$(meta_body epic 2 '' discovery)"
-  adjustment_labels='[{"name":"runoq:plan-approved"}]'
+  epic1_body="$(meta_body)"
+  epic2_body="$(meta_body)"
+  adjustment_labels='[{"name":"runoq:plan-approved"},{"name":"runoq:adjustment"}]'
   adjustment_body="$(cat <<'EOF'
-<!-- runoq:meta
-depends_on: []
-priority: 1
-estimated_complexity: low
-type: adjustment
-parent_epic: 10
--->
-
 ## Acceptance Criteria
 
 - [ ] Review proposed adjustments.

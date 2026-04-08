@@ -202,16 +202,7 @@ func TestPlanningEligibilityAllowsMissingAcceptanceCriteria(t *testing.T) {
 	_, localDir := newRemoteBackedRepo(t)
 	stateDir := filepath.Join(localDir, ".runoq", "state")
 	scenarioPath := filepath.Join(t.TempDir(), "scenario.json")
-	body := strings.Join([]string{
-		"<!-- runoq:meta",
-		"depends_on: []",
-		"priority: 1",
-		"estimated_complexity: low",
-		"type: planning",
-		"-->",
-		"",
-		"Plan body.",
-	}, "\n")
+	body := "Plan body."
 	issueJSON, err := json.Marshal(map[string]any{
 		"number": 99,
 		"title":  "Plan milestone 1",
@@ -458,14 +449,8 @@ func writeIssueStateFile(t *testing.T, path string, issue int, phase string, rou
 	}
 }
 
-func issueBodyWithMeta(dependsOn string) string {
+func issueBodyWithMeta(_ string) string {
 	return strings.Join([]string{
-		"<!-- runoq:meta",
-		"depends_on: " + dependsOn,
-		"priority: 2",
-		"estimated_complexity: low",
-		"-->",
-		"",
 		"## Acceptance Criteria",
 		"",
 		"- [ ] Works.",

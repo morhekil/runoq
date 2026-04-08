@@ -26,8 +26,8 @@ func TestListParsesMetadataVariants(t *testing.T) {
   {
     "number": 42,
     "title": "Implement queue",
-    "body": "<!-- runoq:meta\ndepends_on: [12,14]\npriority: 1\nestimated_complexity: low\ncomplexity_rationale: touches queue scheduling\ntype: task\nparent_epic: 7\n-->\n\nBody",
-    "labels": [{"name":"runoq:ready"}],
+    "body": "Body",
+    "labels": [{"name":"runoq:ready"},{"name":"runoq:priority"}],
     "url": "https://example.test/issues/42"
   },
   {
@@ -39,8 +39,8 @@ func TestListParsesMetadataVariants(t *testing.T) {
   },
   {
     "number": 12,
-    "title": "Malformed metadata",
-    "body": "<!-- runoq:meta\ndepends_on: nope\npriority: x\nestimated_complexity:\n-->\n\nBody",
+    "title": "Has labels",
+    "body": "Body",
     "labels": [{"name":"runoq:ready"}],
     "url": "https://example.test/issues/12"
   }
@@ -60,14 +60,14 @@ func TestListParsesMetadataVariants(t *testing.T) {
 	if len(issues) != 3 {
 		t.Fatalf("expected 3 issues, got %d", len(issues))
 	}
-	if issues[0].Priority == nil || *issues[0].Priority != 1 {
-		t.Fatalf("unexpected priority: %+v", issues[0].Priority)
+	if issues[0].Priority == nil || *issues[0].Priority != 0 {
+		t.Fatalf("expected priority 0 (from runoq:priority label), got: %+v", issues[0].Priority)
 	}
-	if !issues[0].MetadataValid || issues[1].MetadataPresent || issues[2].MetadataValid {
-		t.Fatalf("unexpected metadata flags: %+v %+v %+v", issues[0], issues[1], issues[2])
+	if !issues[0].MetadataPresent || !issues[0].MetadataValid {
+		t.Fatalf("unexpected metadata flags for issue with labels: %+v", issues[0])
 	}
-	if issues[0].ParentEpic == nil || *issues[0].ParentEpic != 7 {
-		t.Fatalf("unexpected parent epic: %+v", issues[0].ParentEpic)
+	if issues[0].Type != "task" {
+		t.Fatalf("expected type task, got: %s", issues[0].Type)
 	}
 }
 
@@ -84,15 +84,15 @@ func TestListParsesPlanningAndAdjustmentTypes(t *testing.T) {
   {
     "number": 99,
     "title": "Plan milestone 1",
-    "body": "<!-- runoq:meta\ndepends_on: []\npriority: 1\nestimated_complexity: low\ntype: planning\n-->\n\nBody",
-    "labels": [{"name":"runoq:ready"}],
+    "body": "Body",
+    "labels": [{"name":"runoq:ready"},{"name":"runoq:planning"}],
     "url": "https://example.test/issues/99"
   },
   {
     "number": 100,
     "title": "Adjust milestones",
-    "body": "<!-- runoq:meta\ndepends_on: []\npriority: 1\nestimated_complexity: low\ntype: adjustment\n-->\n\nBody",
-    "labels": [{"name":"runoq:ready"}],
+    "body": "Body",
+    "labels": [{"name":"runoq:ready"},{"name":"runoq:adjustment"}],
     "url": "https://example.test/issues/100"
   }
 ]`))
@@ -116,7 +116,7 @@ func TestListParsesPlanningAndAdjustmentTypes(t *testing.T) {
 	}
 }
 
-func TestNextSkipsBlockedDependencies(t *testing.T) {
+func TestNextPicksLowestNumberedIssue(t *testing.T) {
 	t.Parallel()
 
 	app := newTestApp(t, []string{"next", "owner/repo", "runoq:ready"})
@@ -126,12 +126,9 @@ func TestNextSkipsBlockedDependencies(t *testing.T) {
 		switch {
 		case strings.Contains(command, "issue list --repo owner/repo --label runoq:ready"):
 			_, _ = req.Stdout.Write([]byte(`[
-  {"number": 21, "title": "Blocked", "body": "<!-- runoq:meta\ndepends_on: [5]\npriority: 1\nestimated_complexity: low\ntype: task\n-->", "labels": [{"name":"runoq:ready"}], "url": "https://example.test/issues/21"},
-  {"number": 22, "title": "Ready", "body": "<!-- runoq:meta\ndepends_on: []\npriority: 2\nestimated_complexity: low\ntype: task\n-->", "labels": [{"name":"runoq:ready"}], "url": "https://example.test/issues/22"}
+  {"number": 22, "title": "Second", "body": "Body", "labels": [{"name":"runoq:ready"}], "url": "https://example.test/issues/22"},
+  {"number": 21, "title": "First", "body": "Body", "labels": [{"name":"runoq:ready"}], "url": "https://example.test/issues/21"}
 ]`))
-			return nil
-		case strings.Contains(command, "issue view 5 --repo owner/repo --json number,labels"):
-			_, _ = req.Stdout.Write([]byte(`{"labels":[{"name":"runoq:in-progress"}]}`))
 			return nil
 		default:
 			t.Fatalf("unexpected command: %s", command)
@@ -148,11 +145,8 @@ func TestNextSkipsBlockedDependencies(t *testing.T) {
 	if err := json.Unmarshal(app.stdout.(*bytes.Buffer).Bytes(), &result); err != nil {
 		t.Fatalf("unmarshal output: %v", err)
 	}
-	if result.Issue == nil || result.Issue.Number != 22 {
-		t.Fatalf("unexpected selected issue: %+v", result.Issue)
-	}
-	if len(result.Skipped) != 1 || len(result.Skipped[0].BlockedReasons) != 1 || result.Skipped[0].BlockedReasons[0] != "dependency #5 is not runoq:done" {
-		t.Fatalf("unexpected skipped output: %+v", result.Skipped)
+	if result.Issue == nil || result.Issue.Number != 21 {
+		t.Fatalf("expected issue #21 as next, got: %+v", result.Issue)
 	}
 }
 

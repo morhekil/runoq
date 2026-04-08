@@ -105,9 +105,9 @@ sequenceDiagram
   Plan-->>Operator: proposal with hierarchy, complexity, rationale, warnings
   alt operator confirms (or --auto-confirm)
     Plan->>Queue: create epic issues first
-    Queue->>GH: create ready epic issues with runoq:meta blocks
+    Queue->>GH: create ready epic issues with native metadata
     Plan->>Queue: create task issues with --parent-epic and --depends-on
-    Queue->>GH: create ready task issues with runoq:meta blocks
+    Queue->>GH: create ready task issues with native metadata
     Queue->>GH: link tasks as sub-issues of parent epics via sub-issues API
     Plan-->>Operator: created queue summary with issue map
   else operator declines

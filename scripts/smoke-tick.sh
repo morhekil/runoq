@@ -113,10 +113,10 @@ tick_preflight_json() {
   '
 }
 
-metadata_value() { runoq::metadata_value "$@"; }
-issue_type() { runoq::issue_type "$@"; }
-issue_parent_epic() { runoq::issue_parent_epic "$@"; }
-issue_milestone_type() { runoq::issue_milestone_type "$@"; }
+issue_type_from_labels() {
+  local issue_json="$1"
+  runoq::issue_type "$(printf '%s' "$issue_json" | jq '.labels // []')"
+}
 
 list_issues_json() {
   local repo="$1"
@@ -130,55 +130,37 @@ find_issue_by_title() {
 }
 
 find_open_child_by_type() {
-  local issues_json="$1"
+  local repo="$1"
   local parent_epic="$2"
   local wanted_type="$3"
+  local sub_issues
+  sub_issues="$(runoq::gh api "repos/${repo}/issues/${parent_epic}/sub_issues" --paginate 2>/dev/null || printf '[]')"
   while IFS= read -r issue; do
     [[ -n "$issue" ]] || continue
-    local body parent type state
-    body="$(printf '%s' "$issue" | jq -r '.body // ""')"
-    parent="$(issue_parent_epic "$body")"
-    type="$(issue_type "$body")"
+    local type state
+    type="$(issue_type_from_labels "$issue")"
     state="$(printf '%s' "$issue" | jq -r '.state')"
-    if [[ "$parent" == "$parent_epic" && "$type" == "$wanted_type" && "$state" == "OPEN" ]]; then
+    if [[ "$type" == "$wanted_type" && "$state" == "open" ]]; then
       printf '%s\n' "$issue"
       return 0
     fi
-  done < <(printf '%s' "$issues_json" | jq -c '.[]')
+  done < <(printf '%s' "$sub_issues" | jq -c '.[]')
   return 1
 }
 
 find_open_epic_by_title() {
   local issues_json="$1"
   local title="$2"
-  while IFS= read -r issue; do
-    [[ -n "$issue" ]] || continue
-    local body type state issue_title
-    body="$(printf '%s' "$issue" | jq -r '.body // ""')"
-    type="$(issue_type "$body")"
-    state="$(printf '%s' "$issue" | jq -r '.state')"
-    issue_title="$(printf '%s' "$issue" | jq -r '.title')"
-    if [[ "$type" == "epic" && "$state" == "OPEN" && "$issue_title" == "$title" ]]; then
-      printf '%s\n' "$issue"
-      return 0
-    fi
-  done < <(printf '%s' "$issues_json" | jq -c '.[]')
-  return 1
+  printf '%s' "$issues_json" | jq -c --arg title "$title" '
+    .[] | select(.state == "OPEN" and .title == $title and (.labels // [] | map(.name) | (index("runoq:planning") | not) and (index("runoq:adjustment") | not)))
+  ' | head -n1
 }
 
 count_open_epics_excluding_project_planning() {
   local issues_json="$1"
-  while IFS= read -r issue; do
-    [[ -n "$issue" ]] || continue
-    local body type state title
-    body="$(printf '%s' "$issue" | jq -r '.body // ""')"
-    type="$(issue_type "$body")"
-    state="$(printf '%s' "$issue" | jq -r '.state')"
-    title="$(printf '%s' "$issue" | jq -r '.title')"
-    if [[ "$type" == "epic" && "$state" == "OPEN" && "$title" != "Project Planning" ]]; then
-      printf '%s\n' "$issue"
-    fi
-  done < <(printf '%s' "$issues_json" | jq -c '.[]')
+  printf '%s' "$issues_json" | jq -c '
+    .[] | select(.state == "OPEN" and .title != "Project Planning" and (.labels // [] | map(.name) | (index("runoq:planning") | not) and (index("runoq:adjustment") | not)))
+  '
 }
 
 issue_view_json() {

@@ -2,7 +2,7 @@
   {
     "number": 32,
     "title": "Second",
-    "body": "<!-- runoq:meta\ndepends_on: []\npriority: 2\nestimated_complexity: low\n-->\n",
+    "body": "Body",
     "labels": [
       { "name": "runoq:ready" }
     ],
@@ -11,7 +11,7 @@
   {
     "number": 31,
     "title": "First",
-    "body": "<!-- runoq:meta\ndepends_on: []\npriority: 2\nestimated_complexity: low\n-->\n",
+    "body": "Body",
     "labels": [
       { "name": "runoq:ready" }
     ],

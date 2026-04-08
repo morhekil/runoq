@@ -124,7 +124,7 @@ bats test/foundation.bats  # must include runoq.json structure test
 
 ### A1. Add `planning` and `adjustment` issue types
 
-The metadata block (`<!-- runoq:meta -->`) already supports `type: task | epic`. Extend to support `type: planning | adjustment`.
+The system already supports `type: task | epic` via labels and native APIs. Extend to support `type: planning | adjustment` via `runoq:planning` and `runoq:adjustment` labels.
 
 These types use the same metadata structure but signal different dispatch behavior to the tick script:
 
@@ -157,8 +157,8 @@ run "$RUNOQ_ROOT/scripts/gh-issue-queue.sh" create owner/repo "Adjust milestones
 [ "$status" -eq 0 ]
 grep 'type: adjustment' "$FAKE_GH_CAPTURE_DIR/0.body"
 
-# AC-A1-3: Metadata parser round-trips planning type
-# Given an issue body with "type: planning" in runoq:meta block,
+# AC-A1-3: Label-based type detection returns planning type
+# Given an issue with "runoq:planning" label,
 # gh-issue-queue.sh list must return the issue with type="planning"
 printf '%s' "$list_output" | jq -e '.[] | select(.number == 99) | .type == "planning"'
 

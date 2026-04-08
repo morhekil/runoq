@@ -2,7 +2,7 @@
   {
     "number": 30,
     "title": "Missing dep",
-    "body": "<!-- runoq:meta\ndepends_on: [404]\npriority: 1\nestimated_complexity: low\n-->\n",
+    "body": "Body",
     "labels": [
       { "name": "runoq:ready" }
     ],

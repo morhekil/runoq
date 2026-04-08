@@ -10,8 +10,8 @@
   },
   {
     "number": 12,
-    "title": "Malformed metadata block",
-    "body": "<!-- runoq:meta\ndepends_on: nope\npriority: urgent\nestimated_complexity:\n-->\n\n## Acceptance Criteria\n\n- [ ] Fix metadata parsing.",
+    "title": "Has extra labels",
+    "body": "## Acceptance Criteria\n\n- [ ] Fix metadata parsing.",
     "labels": [
       { "name": "runoq:ready" },
       { "name": "bug" }
