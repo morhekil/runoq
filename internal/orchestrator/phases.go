@@ -17,16 +17,12 @@ import (
 )
 
 func (a *App) phaseIntegrate(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, title string) (string, error) {
+	a.ensureSubApps()
 	a.logInfo("INTEGRATE: checking epic #%d", issueNumber)
 
-	epicStatusOut, err := a.scriptOutput(ctx, root, env, "gh-issue-queue.sh", []string{"epic-status", repo, strconv.Itoa(issueNumber)}, nil)
+	epicStatus, err := a.issueQueueApp.EpicStatusDirect(ctx, repo, issueNumber)
 	if err != nil {
-		return "", err
-	}
-
-	var epicStatus epicStatusResult
-	if err := json.Unmarshal([]byte(epicStatusOut), &epicStatus); err != nil {
-		return "", fmt.Errorf("failed to parse epic-status payload: %v", err)
+		return "", fmt.Errorf("epic-status check failed: %v", err)
 	}
 	if !epicStatus.AllDone {
 		a.logInfo("INTEGRATE: not all children done for epic #%d", issueNumber)
@@ -58,27 +54,20 @@ func (a *App) phaseIntegrate(ctx context.Context, root string, env []string, rep
 	if integrateTitle == "" {
 		integrateTitle = "untitled"
 	}
-	worktreeOut, _, worktreeErr := a.scriptOutputWithStderr(ctx, root, env, "worktree.sh", []string{"create", strconv.Itoa(issueNumber), integrateTitle + "-integrate"}, nil)
 	integrateWorktree := ""
+	wtResult, worktreeErr := a.worktreeApp.CreateWorktree(ctx, issueNumber, integrateTitle+"-integrate")
 	if worktreeErr == nil {
-		var worktreeInfo worktreeCreateResult
-		if err := json.Unmarshal([]byte(worktreeOut), &worktreeInfo); err == nil {
-			integrateWorktree = strings.TrimSpace(worktreeInfo.Worktree)
-		}
+		integrateWorktree = strings.TrimSpace(wtResult.Worktree)
 	}
 	if integrateWorktree == "" {
 		integrateWorktree = strings.TrimSpace(state.Worktree)
 	}
 
 	if strings.TrimSpace(state.CriteriaCommit) != "" {
-		verifyOut, verifyErr := a.scriptOutput(ctx, root, env, "verify.sh", []string{"integrate", integrateWorktree, strings.TrimSpace(state.CriteriaCommit)}, nil)
-		verifyResult := verifyIntegrateResult{OK: false}
-		if verifyErr == nil && strings.TrimSpace(verifyOut) != "" {
-			_ = json.Unmarshal([]byte(verifyOut), &verifyResult)
-		}
+		verifyResult, _ := a.verifyApp.IntegrateVerify(ctx, integrateWorktree, strings.TrimSpace(state.CriteriaCommit))
 
 		if verifyResult.OK {
-			_ = a.runScript(ctx, root, env, "gh-issue-queue.sh", []string{"set-status", repo, strconv.Itoa(issueNumber), "done"}, nil, io.Discard, io.Discard)
+			_ = a.issueQueueApp.SetStatus(ctx, repo, strconv.Itoa(issueNumber), "done")
 			integrateState, err := updateStateJSON(stateJSON, func(state map[string]any) {
 				state["phase"] = "INTEGRATE"
 			})
@@ -96,7 +85,7 @@ func (a *App) phaseIntegrate(ctx context.Context, root string, env []string, rep
 
 		failures := strings.Join(verifyResult.Failures, ", ")
 		a.logError("INTEGRATE: verification failed for epic #%d: %s", issueNumber, failures)
-		_ = a.runScript(ctx, root, env, "gh-issue-queue.sh", []string{"set-status", repo, strconv.Itoa(issueNumber), "needs-review"}, nil, io.Discard, io.Discard)
+		_ = a.issueQueueApp.SetStatus(ctx, repo, strconv.Itoa(issueNumber), "needs-review")
 		integrateState, err := updateStateJSON(stateJSON, func(state map[string]any) {
 			state["phase"] = "INTEGRATE"
 			state["integrate_failures"] = failures
@@ -113,7 +102,7 @@ func (a *App) phaseIntegrate(ctx context.Context, root string, env []string, rep
 		return failedState, nil
 	}
 
-	_ = a.runScript(ctx, root, env, "gh-issue-queue.sh", []string{"set-status", repo, strconv.Itoa(issueNumber), "done"}, nil, io.Discard, io.Discard)
+	_ = a.issueQueueApp.SetStatus(ctx, repo, strconv.Itoa(issueNumber), "done")
 	integrateState, err := updateStateJSON(stateJSON, func(state map[string]any) {
 		state["phase"] = "INTEGRATE"
 	})
@@ -130,18 +119,12 @@ func (a *App) phaseIntegrate(ctx context.Context, root string, env []string, rep
 }
 
 func (a *App) phaseInit(ctx context.Context, root string, env []string, repo string, issueNumber int, dryRun bool, title string) (string, error) {
+	a.ensureSubApps()
 	a.logInfo("INIT: issue #%d", issueNumber)
 
-	dispatchEnv := append([]string(nil), env...)
-	dispatchEnv = shell.EnvSet(dispatchEnv, "RUNOQ_NO_AUTO_TOKEN", "1")
-	eligibilityOut, eligibilityStderr, eligibilityErr := a.scriptOutputWithStderr(ctx, root, dispatchEnv, "dispatch-safety.sh", []string{"eligibility", repo, strconv.Itoa(issueNumber)}, nil)
+	eligibility, eligibilityErr := a.dispatchSafetyApp.CheckEligibility(ctx, repo, issueNumber)
 	if eligibilityErr != nil {
-		return "", fmt.Errorf("eligibility check failed: %s", stderrOrUnknown(eligibilityStderr))
-	}
-
-	var eligibility eligibilityResult
-	if err := json.Unmarshal([]byte(eligibilityOut), &eligibility); err != nil {
-		return "", fmt.Errorf("failed to parse eligibility result: %v", err)
+		return "", fmt.Errorf("eligibility check failed: %v", eligibilityErr)
 	}
 
 	branch := eligibility.Branch
@@ -159,17 +142,15 @@ func (a *App) phaseInit(ctx context.Context, root string, env []string, repo str
 		return stateJSON, nil
 	}
 
-	if err := a.runScript(ctx, root, env, "gh-issue-queue.sh", []string{"set-status", repo, strconv.Itoa(issueNumber), "in-progress"}, nil, io.Discard, io.Discard); err != nil {
+	if code := a.issueQueueApp.SetStatus(ctx, repo, strconv.Itoa(issueNumber), "in-progress"); code != 0 {
 		return "", a.handleInitFailure(ctx, root, env, repo, issueNumber, "failed to set issue status to in-progress", branch, "", nil)
 	}
 
-	worktreeOut, worktreeStderr, worktreeErr := a.scriptOutputWithStderr(ctx, root, env, "worktree.sh", []string{"create", strconv.Itoa(issueNumber), title}, nil)
+	worktreeInfo, worktreeErr := a.worktreeApp.CreateWorktree(ctx, issueNumber, title)
 	if worktreeErr != nil {
-		return "", a.handleInitFailure(ctx, root, env, repo, issueNumber, fmt.Sprintf("worktree creation failed: %s", stderrOrUnknown(worktreeStderr)), branch, "", nil)
+		return "", a.handleInitFailure(ctx, root, env, repo, issueNumber, fmt.Sprintf("worktree creation failed: %v", worktreeErr), branch, "", nil)
 	}
-
-	var worktreeInfo worktreeCreateResult
-	if err := json.Unmarshal([]byte(worktreeOut), &worktreeInfo); err != nil || strings.TrimSpace(worktreeInfo.Branch) == "" || strings.TrimSpace(worktreeInfo.Worktree) == "" {
+	if strings.TrimSpace(worktreeInfo.Branch) == "" || strings.TrimSpace(worktreeInfo.Worktree) == "" {
 		return "", a.handleInitFailure(ctx, root, env, repo, issueNumber, "worktree creation returned an invalid payload", branch, "", nil)
 	}
 
@@ -241,6 +222,7 @@ func (a *App) phaseCriteria(ctx context.Context, root string, env []string, repo
 }
 
 func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string) (string, issueRunnerResult, error) {
+	a.ensureSubApps()
 	a.logInfo("DEVELOP: issue #%d", issueNumber)
 
 	cfg := a.cfg
@@ -338,16 +320,26 @@ func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo 
 		return "", issueRunnerResult{}, err
 	}
 
-	var runnerStdout bytes.Buffer
-	err = a.runScript(ctx, root, env, "issue-runner.sh", []string{"run", payloadFile.Name()}, nil, &runnerStdout, a.stderr)
-	runnerOut := strings.TrimSpace(runnerStdout.String())
+	runnerResult, err := a.issueRunnerApp.RunDevelop(ctx, payloadFile.Name())
 	if err != nil {
 		return "", issueRunnerResult{}, err
 	}
 
-	var result issueRunnerResult
-	if err := json.Unmarshal([]byte(runnerOut), &result); err != nil {
-		return "", issueRunnerResult{}, fmt.Errorf("issue-runner returned invalid JSON: %v", err)
+	result := issueRunnerResult{
+		Status:               runnerResult.Status,
+		LogDir:               runnerResult.LogDir,
+		BaselineHash:         runnerResult.BaselineHash,
+		HeadHash:             runnerResult.HeadHash,
+		CommitRange:          runnerResult.CommitRange,
+		ReviewLogPath:        runnerResult.ReviewLogPath,
+		SpecRequirements:     runnerResult.SpecRequirements,
+		ChangedFiles:         runnerResult.ChangedFiles,
+		RelatedFiles:         runnerResult.RelatedFiles,
+		CumulativeTokens:     runnerResult.CumulativeTokens,
+		VerificationPassed:   runnerResult.VerificationPassed,
+		VerificationFailures: runnerResult.VerificationFailures,
+		Caveats:              runnerResult.Caveats,
+		Summary:              runnerResult.Summary,
 	}
 
 	nextState, err := updateStateJSON(stateJSON, func(state map[string]any) {
@@ -566,6 +558,7 @@ func (a *App) phaseDecide(ctx context.Context, root string, env []string, issueN
 }
 
 func (a *App) phaseFinalize(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
+	a.ensureSubApps()
 	var state struct {
 		PRNumber int      `json:"pr_number"`
 		Worktree string   `json:"worktree"`
@@ -609,7 +602,7 @@ func (a *App) phaseFinalize(ctx context.Context, root string, env []string, repo
 	}
 
 	a.logInfo("FINALIZE: setting issue #%d status to %s", issueNumber, issueStatus)
-	if err := a.runScript(ctx, root, env, "gh-issue-queue.sh", []string{"set-status", repo, strconv.Itoa(issueNumber), issueStatus}, nil, io.Discard, io.Discard); err == nil {
+	if code := a.issueQueueApp.SetStatus(ctx, repo, strconv.Itoa(issueNumber), issueStatus); code == 0 {
 		a.logInfo("FINALIZE: set-status succeeded for issue #%d", issueNumber)
 	} else {
 		a.logInfo("FINALIZE: set-status failed for issue #%d", issueNumber)
@@ -617,7 +610,7 @@ func (a *App) phaseFinalize(ctx context.Context, root string, env []string, repo
 
 	if finalizeVerdict == "auto-merge" {
 		a.logInfo("FINALIZE: removing worktree for issue #%d (auto-merged)", issueNumber)
-		if err := a.runScript(ctx, root, env, "worktree.sh", []string{"remove", strconv.Itoa(issueNumber)}, nil, io.Discard, io.Discard); err == nil {
+		if err := a.worktreeApp.RemoveWorktree(ctx, issueNumber); err == nil {
 			a.logInfo("FINALIZE: worktree removed successfully")
 		} else {
 			a.logInfo("FINALIZE: worktree removal failed")
@@ -667,6 +660,7 @@ func (a *App) phaseFinalize(ctx context.Context, root string, env []string, repo
 }
 
 func (a *App) phaseDevelopNeedsReview(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string) (string, error) {
+	a.ensureSubApps()
 	a.logInfo("DEVELOP: issue #%d requires deterministic needs-review handoff", issueNumber)
 
 	var state struct {
@@ -704,8 +698,8 @@ func (a *App) phaseDevelopNeedsReview(ctx context.Context, root string, env []st
 	if err := a.runScript(ctx, root, env, "gh-pr-lifecycle.sh", finalizeArgs, nil, io.Discard, io.Discard); err != nil {
 		return "", err
 	}
-	if err := a.runScript(ctx, root, env, "gh-issue-queue.sh", []string{"set-status", repo, strconv.Itoa(issueNumber), "needs-review"}, nil, io.Discard, io.Discard); err != nil {
-		return "", err
+	if code := a.issueQueueApp.SetStatus(ctx, repo, strconv.Itoa(issueNumber), "needs-review"); code != 0 {
+		return "", fmt.Errorf("failed to set issue #%d status to needs-review", issueNumber)
 	}
 
 	finalizeState, err := updateStateJSON(decideState, func(state map[string]any) {
@@ -727,12 +721,13 @@ func (a *App) phaseDevelopNeedsReview(ctx context.Context, root string, env []st
 }
 
 func (a *App) handleInitFailure(ctx context.Context, root string, env []string, repo string, issueNumber int, reason string, branch string, worktree string, prNumber *int) error {
+	a.ensureSubApps()
 	a.logError("INIT: %s", reason)
 
 	if prNumber == nil {
-		_ = a.runScript(ctx, root, env, "gh-issue-queue.sh", []string{"set-status", repo, strconv.Itoa(issueNumber), "ready"}, nil, io.Discard, io.Discard)
+		_ = a.issueQueueApp.SetStatus(ctx, repo, strconv.Itoa(issueNumber), "ready")
 		if strings.TrimSpace(worktree) != "" {
-			_ = a.runScript(ctx, root, env, "worktree.sh", []string{"remove", strconv.Itoa(issueNumber)}, nil, io.Discard, io.Discard)
+			_ = a.worktreeApp.RemoveWorktree(ctx, issueNumber)
 		}
 	}
 

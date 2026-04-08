@@ -961,6 +961,81 @@ func toQueueIssue(issue listedIssue, actionable bool, blocked []string) queueIss
 	}
 }
 
+// EpicStatusResult holds the result of an epic status check (exported for direct calls).
+type EpicStatusResult = epicStatusResult
+
+// EpicStatusDirect checks the epic status directly, returning a Go struct.
+func (a *App) EpicStatusDirect(ctx context.Context, repo string, issueNumber int) (EpicStatusResult, error) {
+	cfg, err := a.loadConfig()
+	if err != nil {
+		return EpicStatusResult{}, fmt.Errorf("failed to read config: %v", err)
+	}
+
+	raw, err := a.ghClient.Output(ctx, "api", fmt.Sprintf("repos/%s/issues/%d/sub_issues", repo, issueNumber), "--paginate")
+	if err != nil {
+		return EpicStatusResult{}, err
+	}
+
+	var children []epicChild
+	if strings.TrimSpace(raw) == "" {
+		children = []epicChild{}
+	} else if err := json.Unmarshal([]byte(raw), &children); err != nil {
+		return EpicStatusResult{}, fmt.Errorf("sub_issues returned invalid JSON: %v", err)
+	}
+
+	result := EpicStatusResult{
+		AllDone:  true,
+		Children: make([]int, 0, len(children)),
+		Pending:  []int{},
+	}
+	for _, child := range children {
+		result.Children = append(result.Children, child.Number)
+		done := false
+		for _, label := range child.Labels {
+			if label.Name == cfg.Labels.Done {
+				done = true
+				break
+			}
+		}
+		if !done {
+			result.AllDone = false
+			result.Pending = append(result.Pending, child.Number)
+		}
+	}
+
+	return result, nil
+}
+
+// ListIssuesDirect lists issues with the given label, returning JSON string matching script output.
+func (a *App) ListIssuesDirect(ctx context.Context, repo string, readyLabel string) (string, error) {
+	issues, err := a.listIssues(ctx, repo, readyLabel)
+	if err != nil {
+		return "", err
+	}
+	data, err := json.Marshal(issues)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// NewDirect creates an App for direct Go calls (not subprocess).
+func NewDirect(env []string, cwd string, logWriter io.Writer, client *gh.Client) *App {
+	stderr := io.Writer(io.Discard)
+	if logWriter != nil {
+		stderr = logWriter
+	}
+	clonedEnv := slices.Clone(env)
+	return &App{
+		env:         clonedEnv,
+		cwd:         cwd,
+		stdout:      io.Discard,
+		stderr:      stderr,
+		execCommand: shell.RunCommand,
+		ghClient:    client,
+	}
+}
+
 func (a *App) printUsage(w io.Writer) {
 	_, _ = io.WriteString(w, usageText)
 }

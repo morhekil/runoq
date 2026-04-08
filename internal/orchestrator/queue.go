@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"strconv"
 	"strings"
 
@@ -89,9 +88,7 @@ func (a *App) runCommandEntry(ctx context.Context, root string, env []string, ar
 	}
 
 	a.logInfo("Running reconciliation")
-	reconcileEnv := append([]string(nil), env...)
-	reconcileEnv = shell.EnvSet(reconcileEnv, "RUNOQ_NO_AUTO_TOKEN", "1")
-	_ = a.runScript(ctx, root, reconcileEnv, "dispatch-safety.sh", []string{"reconcile", repo}, nil, io.Discard, io.Discard)
+	_ = a.dispatchSafetyApp.Reconcile(ctx, repo)
 
 	if issueNumber == "" {
 		return shell.Fail(a.stderr, "--issue is required. Use 'runoq tick' for queue processing.")
@@ -151,6 +148,7 @@ func (a *App) Setup(ctx context.Context, repo string) []string {
 // RunIssue runs a single issue through the phase machine (INIT→CRITERIA→DEVELOP→REVIEW→DECIDE→FINALIZE).
 // The caller provides metadata so no additional API call is needed for issue details.
 func (a *App) RunIssue(ctx context.Context, repo string, issueNumber int, dryRun bool, title string, metadata IssueMetadata) (string, error) {
+	a.ensureSubApps()
 	root := a.runoqRoot()
 	if root == "" {
 		return "", fmt.Errorf("unable to resolve RUNOQ_ROOT")
@@ -349,7 +347,7 @@ func (a *App) getIssueMetadata(ctx context.Context, root string, env []string, r
 
 	cfg := a.cfg
 
-	queueOut, err := a.scriptOutput(ctx, root, env, "gh-issue-queue.sh", []string{"list", repo, cfg.ReadyLabel}, nil)
+	queueOut, err := a.issueQueueApp.ListIssuesDirect(ctx, repo, cfg.ReadyLabel)
 	if err != nil {
 		queueOut = "[]"
 	}

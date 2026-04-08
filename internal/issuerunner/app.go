@@ -666,6 +666,81 @@ func (a *App) emitResult(status string, input *inputPayload, state *roundState, 
 	}
 }
 
+// NewDirect creates an App for direct Go calls (not subprocess).
+func NewDirect(env []string, cwd string, logWriter io.Writer) *App {
+	stderr := io.Writer(io.Discard)
+	if logWriter != nil {
+		stderr = logWriter
+	}
+	return &App{
+		env:         append([]string(nil), env...),
+		cwd:         cwd,
+		stdout:      io.Discard,
+		stderr:      stderr,
+		execCommand: shell.RunCommand,
+	}
+}
+
+// RunDevelop runs the development loop directly (no subprocess).
+// The caller passes the payload file path, same as the "run" subcommand.
+func (a *App) RunDevelop(ctx context.Context, payloadPath string) (*outputPayload, error) {
+	data, err := os.ReadFile(payloadPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read payload: %v", err)
+	}
+
+	var input inputPayload
+	if err := json.Unmarshal(data, &input); err != nil {
+		return nil, fmt.Errorf("failed to parse payload: %v", err)
+	}
+
+	if input.MaxRounds <= 0 {
+		input.MaxRounds = 3
+	}
+	if input.Round <= 0 {
+		input.Round = 1
+	}
+	if input.PreviousChecklist == "" {
+		input.PreviousChecklist = "None — first round"
+	}
+
+	specRequirements := ""
+	if input.SpecPath != "" {
+		if specData, err := os.ReadFile(input.SpecPath); err == nil {
+			specRequirements = strings.TrimSpace(string(specData))
+		}
+	}
+
+	logDir := input.LogDir
+	if logDir == "" {
+		logDir = filepath.Join(a.cwd, "log", fmt.Sprintf("issue-%d-%d", input.IssueNumber, os.Getpid()))
+		if err := os.MkdirAll(logDir, 0o755); err != nil {
+			return nil, fmt.Errorf("failed to create log dir: %v", err)
+		}
+	}
+
+	repo := gitops.OpenCLI(ctx, input.Worktree, a.execCommand)
+	baseline, err := repo.ResolveHEAD()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get baseline: %v", err)
+	}
+
+	state := &roundState{
+		round:             input.Round,
+		logDir:            logDir,
+		baseline:          baseline,
+		headHash:          baseline,
+		cumulativeTokens:  input.CumulativeTokens,
+		previousChecklist: input.PreviousChecklist,
+	}
+
+	result := a.developmentLoop(ctx, &input, state, specRequirements, repo)
+	return result, nil
+}
+
+// OutputPayload returns the exported type alias for outputPayload.
+type OutputPayload = outputPayload
+
 func (a *App) printUsage() {
 	io.WriteString(a.stderr, usageText)
 }

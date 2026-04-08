@@ -64,7 +64,8 @@ type reconcileAction struct {
 	Round    *int    `json:"round,omitempty"`
 }
 
-type eligibilityResult struct {
+// EligibilityResult holds the result of an eligibility check.
+type EligibilityResult struct {
 	Allowed bool     `json:"allowed"`
 	Issue   int      `json:"issue"`
 	Branch  string   `json:"branch"`
@@ -301,7 +302,7 @@ func (a *App) runEligibility(ctx context.Context, repo string, issueArg string) 
 		}
 	}
 
-	result := eligibilityResult{
+	result := EligibilityResult{
 		Allowed: len(reasons) == 0,
 		Issue:   issue.Number,
 		Branch:  branch,
@@ -868,6 +869,99 @@ func (a *App) stateJSONFiles() ([]string, error) {
 	}
 	sort.Strings(files)
 	return files, nil
+}
+
+// NewDirect creates an App for direct Go calls (not subprocess).
+func NewDirect(env []string, cwd string, logWriter io.Writer) *App {
+	stderr := io.Writer(io.Discard)
+	if logWriter != nil {
+		stderr = logWriter
+	}
+	return &App{
+		env:         append([]string(nil), env...),
+		cwd:         cwd,
+		stdout:      io.Discard,
+		stderr:      stderr,
+		execCommand: shell.RunCommand,
+	}
+}
+
+// CheckEligibility runs the eligibility check directly (no subprocess).
+// Returns the result and an error. A non-nil error means the check itself failed.
+// If result.Allowed is false, the reasons explain why.
+func (a *App) CheckEligibility(ctx context.Context, repo string, issueNumber int) (EligibilityResult, error) {
+	issueArg := strconv.Itoa(issueNumber)
+	issueOutput, err := a.ghOutput(ctx, "issue", "view", issueArg, "--repo", repo, "--json", "number,title,body,labels,url")
+	if err != nil {
+		return EligibilityResult{}, fmt.Errorf("eligibility: failed to view issue: %w", err)
+	}
+
+	var issue struct {
+		Number int    `json:"number"`
+		Title  string `json:"title"`
+		Body   string `json:"body"`
+	}
+	if err := json.Unmarshal([]byte(issueOutput), &issue); err != nil {
+		return EligibilityResult{}, fmt.Errorf("eligibility: failed to parse issue metadata: %w", err)
+	}
+
+	cfg, err := a.loadConfig()
+	if err != nil {
+		return EligibilityResult{}, fmt.Errorf("eligibility: %w", err)
+	}
+
+	metadata := parseIssueMetadata(issue.Body)
+	branch := ""
+	if !isPlanningType(metadata.Type) {
+		branch = branchName(cfg.BranchPrefix, issue.Number, issue.Title)
+	}
+
+	reasons := make([]string, 0, 4)
+	if strings.TrimSpace(issue.Title) == "" || (!isPlanningType(metadata.Type) && !hasAcceptanceCriteria(issue.Body)) {
+		reasons = append(reasons, "missing acceptance criteria")
+	}
+
+	for _, dependency := range metadata.DependsOn {
+		reason, blocked, err := a.dependencyReason(ctx, repo, dependency, cfg.Labels.Done)
+		if err != nil {
+			return EligibilityResult{}, fmt.Errorf("eligibility: dependency check: %w", err)
+		}
+		if blocked {
+			reasons = append(reasons, reason)
+		}
+	}
+
+	if !isPlanningType(metadata.Type) {
+		openPRReason, err := a.openPRReason(ctx, repo, branch)
+		if err != nil {
+			return EligibilityResult{}, fmt.Errorf("eligibility: open PR check: %w", err)
+		}
+		if openPRReason != "" {
+			reasons = append(reasons, openPRReason)
+		}
+
+		hasConflicts, err := a.branchHasConflicts(ctx, branch)
+		if err != nil {
+			return EligibilityResult{}, fmt.Errorf("eligibility: conflict check: %w", err)
+		}
+		if hasConflicts {
+			reasons = append(reasons, "branch "+branch+" has unresolved conflicts with origin/main")
+		}
+	}
+
+	result := EligibilityResult{
+		Allowed: len(reasons) == 0,
+		Issue:   issue.Number,
+		Branch:  branch,
+		Reasons: reasons,
+	}
+
+	if len(reasons) > 0 {
+		message := "Skipped: " + strings.Join(reasons, "; ") + "."
+		_ = a.issueComment(ctx, repo, issue.Number, message)
+	}
+
+	return result, nil
 }
 
 func (a *App) printUsage() {

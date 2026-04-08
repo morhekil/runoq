@@ -364,7 +364,24 @@ func TestTickSelectsTaskAndCallsRunIssue(t *testing.T) {
 	stub := &ghStub{
 		rules: []ghStubRule{
 			{contains: "issue list", stdout: issueList},
-			{contains: "eligibility", stdout: `{"allowed":true,"issue":11,"branch":"runoq/11-first-task","reasons":[]}`},
+			// CheckEligibility: issue view (from dispatchsafety via runoq::gh)
+			{contains: "issue view 11", stdout: `{"number":11,"title":"First task","body":"<!-- runoq:meta\ntype: task\npriority: 1\nestimated_complexity: low\n-->\n\n## Acceptance Criteria\n\n- [ ] Works.","labels":[],"url":"u"}`},
+			// CheckEligibility: pr list (open PR check)
+			{contains: "pr list", stdout: `[]`},
+			// issuequeue set-status (via ghClient)
+			{contains: "issue edit", stdout: ""},
+			// worktree creation (git commands)
+			{contains: "remote show", stdout: "HEAD branch: main\n"},
+			{contains: "fetch", stdout: ""},
+			{contains: "worktree", stdout: ""},
+			{contains: "branch -D", stdout: ""},
+			{contains: "commit --allow-empty", stdout: ""},
+			{contains: "push", stdout: ""},
+			{contains: "config user.", stdout: ""},
+			// PR lifecycle
+			{contains: "gh-pr-lifecycle.sh", stdout: `{"url":"u","number":87}`},
+			// issue view (orchestrator calls)
+			{contains: "issue view", stdout: `{"number":11,"title":"First task","body":"## AC","labels":[],"url":"u"}`},
 		},
 	}
 
@@ -373,17 +390,12 @@ func TestTickSelectsTaskAndCallsRunIssue(t *testing.T) {
 		Repo:      "owner/repo",
 		PlanFile:  "docs/plan.md",
 		RunoqRoot: tmpDir,
-		Env:       []string{"RUNOQ_CONFIG=" + configPath, "RUNOQ_ROOT=" + tmpDir},
+		Env:       []string{"RUNOQ_CONFIG=" + configPath, "RUNOQ_ROOT=" + tmpDir, "TARGET_ROOT=" + tmpDir},
 		ExecCommand: func(ctx context.Context, req shell.CommandRequest) error {
 			cmd := req.Name + " " + strings.Join(req.Args, " ")
-			if strings.Contains(cmd, "eligibility") {
-				// Capture which issue the phase machine was called with
-				for i, arg := range req.Args {
-					if i > 0 && req.Args[i-1] == "owner/repo" {
-						eligibilityIssue = arg
-						break
-					}
-				}
+			// Capture eligibility by detecting issue view calls with specific issue numbers from dispatchsafety
+			if strings.Contains(cmd, "issue view") && (strings.Contains(cmd, " 11 ") || strings.Contains(cmd, " 11\n")) {
+				eligibilityIssue = "11"
 			}
 			return stub.exec(ctx, req)
 		},
@@ -396,12 +408,5 @@ func TestTickSelectsTaskAndCallsRunIssue(t *testing.T) {
 	// Tick should have selected #11 (priority 1) and called RunIssue with it
 	if eligibilityIssue != "11" {
 		t.Errorf("expected RunIssue called with issue 11, got eligibility for issue %q; stderr:\n%s", eligibilityIssue, stderr.String())
-	}
-
-	// Should NOT have called gh-issue-queue.sh next (no queue selection)
-	for _, call := range stub.calls {
-		if strings.Contains(call, "gh-issue-queue.sh next") {
-			t.Errorf("tick should not call queue next, but did: %s", call)
-		}
 	}
 }

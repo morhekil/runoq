@@ -50,6 +50,25 @@ type integrateResult struct {
 	Failures []string `json:"failures"`
 }
 
+// NewDirect creates an App for direct Go calls (not subprocess).
+func NewDirect(env []string, cwd string, logWriter io.Writer) *App {
+	stderr := io.Writer(io.Discard)
+	if logWriter != nil {
+		stderr = logWriter
+	}
+	a := &App{
+		env:         append([]string(nil), env...),
+		cwd:         cwd,
+		stdout:      io.Discard,
+		stderr:      stderr,
+		execCommand: shell.RunCommand,
+	}
+	a.openRepo = func(ctx context.Context, root string) gitops.Repo {
+		return gitops.OpenCLI(ctx, root, a.execCommand)
+	}
+	return a
+}
+
 func New(args []string, env []string, cwd string, stdout io.Writer, stderr io.Writer) *App {
 	a := &App{
 		args:        append([]string(nil), args...),
@@ -430,6 +449,47 @@ func shellQuote(input string) string {
 		return "''"
 	}
 	return "'" + strings.ReplaceAll(input, "'", `'"'"'`) + "'"
+}
+
+// IntegrateResult holds the result of an integration verification.
+type IntegrateResult struct {
+	OK       bool
+	Failures []string
+}
+
+// IntegrateVerify runs the integrate verification directly (no subprocess).
+func (a *App) IntegrateVerify(ctx context.Context, worktreePath string, criteriaCommit string) (IntegrateResult, error) {
+	failures := make([]string, 0, 4)
+	criteriaFiles := a.criteriaFiles(ctx, worktreePath, criteriaCommit)
+	if len(criteriaFiles) == 0 {
+		failures = append(failures, "no criteria files found in criteria commit")
+	} else {
+		for _, cfile := range criteriaFiles {
+			if cfile == "" {
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(worktreePath, cfile)); err != nil {
+				failures = append(failures, "criteria file missing: "+cfile)
+				continue
+			}
+			if a.isCriteriaTampered(ctx, worktreePath, criteriaCommit, cfile) {
+				failures = append(failures, "criteria tampered: "+cfile)
+			}
+		}
+	}
+
+	testCommand, _, err := a.verificationCommands()
+	if err != nil {
+		return IntegrateResult{OK: false, Failures: []string{err.Error()}}, err
+	}
+	if _, err := a.runCheckCommand(ctx, worktreePath, testCommand); err != nil {
+		failures = append(failures, "test command failed")
+	}
+
+	return IntegrateResult{
+		OK:       len(failures) == 0,
+		Failures: failures,
+	}, nil
 }
 
 func (a *App) printUsage() {
