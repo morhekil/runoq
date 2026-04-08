@@ -435,30 +435,19 @@ func TestReplaceMarkerContentNoMarkers(t *testing.T) {
 	}
 }
 
-func TestMetadataFromIssueViewFallsBackToBodyBlock(t *testing.T) {
+func TestMetadataFromIssueViewDefaultsComplexityAndType(t *testing.T) {
 	meta := metadataFromIssueView(issueView{
 		Number: 42,
 		Title:  "Implement queue",
-		Body: `<!-- runoq:meta
-estimated_complexity: high
-complexity_rationale: touches queue scheduling
-type: epic
--->
-
-## Acceptance Criteria
-
-- [ ] Works.`,
-		URL: "https://example.test/issues/42",
+		Body:   "## Acceptance Criteria\n\n- [ ] Works.",
+		URL:    "https://example.test/issues/42",
 	})
 
-	if meta.EstimatedComplexity != "high" {
-		t.Fatalf("expected fallback complexity, got %q", meta.EstimatedComplexity)
+	if meta.EstimatedComplexity != "medium" {
+		t.Fatalf("expected default complexity 'medium', got %q", meta.EstimatedComplexity)
 	}
-	if meta.ComplexityRationale == nil || *meta.ComplexityRationale != "touches queue scheduling" {
-		t.Fatalf("expected fallback rationale, got %#v", meta.ComplexityRationale)
-	}
-	if meta.Type != "epic" {
-		t.Fatalf("expected fallback type, got %q", meta.Type)
+	if meta.Type != "task" {
+		t.Fatalf("expected default type 'task', got %q", meta.Type)
 	}
 }
 

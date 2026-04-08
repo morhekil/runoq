@@ -177,7 +177,12 @@ func (t *tickRunner) run(ctx context.Context) int {
 	// Scan children of current epic
 	epicNumber := epic.Number
 	epicTitle := epic.Title
-	epicType := planning.MetadataValue(epic.Body, "milestone_type")
+	epicType := ""
+	if t.issueHasLabel(epic, "runoq:discovery") {
+		epicType = "discovery"
+	} else if t.issueHasLabel(epic, "runoq:implementation") {
+		epicType = "implementation"
+	}
 
 	t.step(fmt.Sprintf("Scanning children of epic #%d", epicNumber))
 
@@ -645,11 +650,8 @@ func (t *tickRunner) dispatchTask(ctx context.Context, task *issue) int {
 		Title:               task.Title,
 		Body:                task.Body,
 		URL:                 task.URL,
-		EstimatedComplexity: planning.MetadataValue(task.Body, "estimated_complexity"),
+		EstimatedComplexity: "medium",
 		Type:                issueTypeOf(*task),
-	}
-	if rationale := planning.MetadataValue(task.Body, "complexity_rationale"); rationale != "" {
-		metadata.ComplexityRationale = &rationale
 	}
 
 	runApp := New(nil, t.cfg.Env, "", t.cfg.Stdout, t.cfg.Stderr)
@@ -744,7 +746,7 @@ func (t *tickRunner) firstOpenEpic() *issue {
 		if issueTypeOf(*iss) != "epic" {
 			continue
 		}
-		p := planning.MetadataPriority(iss.Body)
+		p := issuePriority(iss)
 		if p < bestPriority || (p == bestPriority && (best == nil || iss.Number < best.Number)) {
 			bestPriority = p
 			best = iss

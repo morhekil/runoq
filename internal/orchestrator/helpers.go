@@ -21,24 +21,13 @@ import (
 )
 
 func metadataFromIssueView(issue issueView) IssueMetadata {
-	meta := parseMetadataBlock(issue.Body)
-	complexity := meta.EstimatedComplexity
-	if complexity == "" {
-		complexity = "medium"
-	}
-	issueType := meta.Type
-	if issueType == "" {
-		issueType = "task"
-	}
-
 	return IssueMetadata{
 		Number:              issue.Number,
 		Title:               issue.Title,
 		Body:                issue.Body,
 		URL:                 issue.URL,
-		EstimatedComplexity: complexity,
-		ComplexityRationale: nullableString(meta.ComplexityRationale),
-		Type:                issueType,
+		EstimatedComplexity: "medium",
+		Type:                "task",
 	}
 }
 
@@ -81,63 +70,6 @@ func IssueMetadataFromQueue(raw string, issueNumber int) (IssueMetadata, bool) {
 	return IssueMetadata{}, false
 }
 
-type metadataBlock struct {
-	EstimatedComplexity string
-	ComplexityRationale string
-	Type                string
-}
-
-func parseMetadataBlock(body string) metadataBlock {
-	block := extractMetaBlock(body)
-	if block == "" {
-		return metadataBlock{}
-	}
-
-	meta := metadataBlock{}
-	for line := range strings.SplitSeq(block, "\n") {
-		key, value, ok := strings.Cut(line, ":")
-		if !ok {
-			continue
-		}
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		switch key {
-		case "estimated_complexity":
-			meta.EstimatedComplexity = value
-		case "complexity_rationale":
-			meta.ComplexityRationale = value
-		case "type":
-			meta.Type = value
-		}
-	}
-	return meta
-}
-
-func extractMetaBlock(body string) string {
-	lines := strings.Split(body, "\n")
-	start := -1
-	for i, line := range lines {
-		if strings.Contains(line, "<!-- runoq:meta") {
-			start = i + 1
-			break
-		}
-	}
-	if start < 0 {
-		return ""
-	}
-
-	var block strings.Builder
-	for _, line := range lines[start:] {
-		if strings.Contains(line, "-->") {
-			break
-		}
-		if block.Len() > 0 {
-			block.WriteByte('\n')
-		}
-		block.WriteString(line)
-	}
-	return block.String()
-}
 
 type reviewVerdictResult struct {
 	ReviewType string
