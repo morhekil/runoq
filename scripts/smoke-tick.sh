@@ -76,8 +76,8 @@ tick_preflight_json() {
   if [[ ! -f "$plan_fixture" ]]; then
     missing="$(append_missing "$missing" "Tick plan fixture is missing: ${plan_fixture}")"
   fi
-  if [[ ! -x "$(runoq::root)/scripts/tick.sh" ]]; then
-    missing="$(append_missing "$missing" "tick.sh is missing or not executable.")"
+  if [[ ! -x "$(runoq::root)/bin/runoq" ]]; then
+    missing="$(append_missing "$missing" "bin/runoq is missing or not executable.")"
   fi
 
   if command_exists "$gh_bin" && operator_auth_ready; then
@@ -216,7 +216,7 @@ tick_once() {
   local status=0
   (
     cd "$TARGET_ROOT"
-    "$root/scripts/tick.sh" "$@"
+    "$root/bin/runoq" tick "$@"
   ) || status=$?
   # Exit 2 = waiting (no work), not an error
   if [[ "$status" -ne 0 && "$status" -ne 2 ]]; then
@@ -325,7 +325,7 @@ run_tick_smoke() {
 
   (
     cd "$target_dir"
-    "$root/scripts/setup.sh" --plan "$rel_plan_path"
+    "$root/bin/runoq" init --plan "$rel_plan_path"
   ) >"$artifacts_dir/init.log" 2>&1
   CHECKS_JSON="$(append_check "$CHECKS_JSON" "repo_bootstrapped")"
 
@@ -441,7 +441,8 @@ run_tick_smoke() {
 
   while IFS= read -r task_number; do
     [[ -n "$task_number" ]] || continue
-    "$root/scripts/gh-issue-queue.sh" set-status "$repo" "$task_number" done >/dev/null
+    runoq::gh issue edit "$task_number" --repo "$repo" --remove-label "runoq:in-progress" --add-label "runoq:done" >/dev/null
+    runoq::gh issue close "$task_number" --repo "$repo" >/dev/null
   done < <(printf '%s' "$milestone1_tasks" | jq -r '.[].number')
 
   rewrite_tick_adjustment_fixture "$fixture_dir" "$milestone2_number"
@@ -500,7 +501,8 @@ run_tick_smoke() {
   )"
   while IFS= read -r task_number; do
     [[ -n "$task_number" ]] || continue
-    "$root/scripts/gh-issue-queue.sh" set-status "$repo" "$task_number" done >/dev/null
+    runoq::gh issue edit "$task_number" --repo "$repo" --remove-label "runoq:in-progress" --add-label "runoq:done" >/dev/null
+    runoq::gh issue close "$task_number" --repo "$repo" >/dev/null
   done < <(printf '%s' "$milestone2_tasks" | jq -r '.[].number')
 
   output="$(tick_once "$root")"

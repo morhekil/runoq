@@ -354,7 +354,7 @@ run_planning() {
   local init_exit=0
   (
     cd "$target_dir"
-    "$root/scripts/setup.sh" --plan "$rel_plan_path"
+    "$root/bin/runoq" init --plan "$rel_plan_path"
   ) >"$artifacts_dir/init.log" 2>&1 || init_exit=$?
 
   if [[ "$init_exit" -ne 0 ]]; then
@@ -375,7 +375,7 @@ run_planning() {
     smoke_log "running tick bootstrap"
     output="$(
       cd "$target_dir"
-      "$root/scripts/tick.sh"
+      "$root/bin/runoq" tick
     )"
     printf '%s\n' "$output" >"$artifacts_dir/tick-bootstrap.log"
 
@@ -407,7 +407,7 @@ run_planning() {
     comment_interactions=$((comment_interactions + 1))
     output="$(
       cd "$target_dir"
-      "$root/scripts/tick.sh"
+      "$root/bin/runoq" tick
     )"
     printf '%s\n' "$output" >"$artifacts_dir/tick-comment.log"
     planning_view="$(issue_view_json "$repo" "$planning_number")"
@@ -422,7 +422,7 @@ run_planning() {
     runoq::gh issue edit "$planning_number" --repo "$repo" --add-label "$(runoq::config_get '.labels.planApproved')" >/dev/null
     output="$(
       cd "$target_dir"
-      "$root/scripts/tick.sh"
+      "$root/bin/runoq" tick
     )"
     printf '%s\n' "$output" >"$artifacts_dir/tick-approve-milestones.log"
     issues_json="$(list_issues_json_retry "$repo")"
@@ -448,7 +448,7 @@ run_planning() {
     else
       output="$(
         cd "$target_dir"
-        "$root/scripts/tick.sh"
+        "$root/bin/runoq" tick
       )"
       printf '%s\n' "$output" >"$artifacts_dir/tick-task-proposal.log"
       milestone1_plan_view="$(issue_view_json "$repo" "$milestone1_plan_number")"
@@ -470,7 +470,7 @@ run_planning() {
     runoq::gh issue edit "$milestone1_plan_number" --repo "$repo" --add-label "$(runoq::config_get '.labels.planApproved')" >/dev/null
     output="$(
       cd "$target_dir"
-      "$root/scripts/tick.sh"
+      "$root/bin/runoq" tick
     )"
     printf '%s\n' "$output" >"$artifacts_dir/tick-approve-tasks.log"
     issues_json="$(list_issues_json_retry "$repo")"

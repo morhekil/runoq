@@ -866,37 +866,37 @@ seed_lifecycle_issues() {
       runoq::die "Lifecycle issue template ${key} referenced an unresolved dependency."
     fi
 
-    args=(
-      "$root/scripts/gh-issue-queue.sh"
-      create
-      "$repo"
-      "$title"
-      "$body"
-      --priority "$priority"
-      --estimated-complexity "$complexity"
-      --type "$type_field"
-    )
-
+    # Build the issue body with runoq metadata block
+    local meta_block=""
+    meta_block+="<!-- runoq:meta"$'\n'
+    meta_block+="type: ${type_field}"$'\n'
+    meta_block+="priority: ${priority}"$'\n'
+    meta_block+="estimated_complexity: ${complexity}"$'\n'
     if [[ -n "$complexity_rationale" ]]; then
-      args+=(--complexity-rationale "$complexity_rationale")
+      meta_block+="complexity_rationale: ${complexity_rationale}"$'\n'
     fi
-
     if [[ "$(printf '%s' "$depends_json" | jq 'length')" -gt 0 ]]; then
-      args+=(--depends-on "$(printf '%s' "$depends_json" | jq -r 'join(",")')")
+      meta_block+="depends_on: $(printf '%s' "$depends_json" | jq -r 'join(",")')"$'\n'
     fi
-
     if [[ -n "$parent_epic_key" ]]; then
       epic_number="$(printf '%s' "$issue_map" | jq -r --arg k "$parent_epic_key" '.[$k] // empty')"
       if [[ -z "$epic_number" ]]; then
         runoq::die "Lifecycle issue template ${key} referenced unresolved parent epic ${parent_epic_key}."
       fi
-      args+=(--parent-epic "$epic_number")
+      meta_block+="parent_epic: ${epic_number}"$'\n'
     fi
+    meta_block+="-->"
+    local full_body="${body}"$'\n\n'"${meta_block}"
 
     local _seed_attempt
     create_output=""
     for _seed_attempt in 1 2 3; do
-      if create_output="$("${args[@]}" 2>/dev/null)"; then
+      if create_output="$(runoq::gh issue create --repo "$repo" --title "$title" --body "$full_body" 2>/dev/null)"; then
+        # gh issue create returns a URL; build the JSON that callers expect
+        local _issue_url="$create_output"
+        local _issue_num
+        _issue_num="$(printf '%s' "$_issue_url" | sed -n 's#.*/issues/\([0-9]*\).*#\1#p')"
+        create_output="$(jq -n --arg url "$_issue_url" --argjson number "${_issue_num:-null}" '{url:$url, number:$number}')"
         break
       fi
       smoke_log "issue creation attempt ${_seed_attempt}/3 failed for ${key}, retrying in 5s"
@@ -1213,7 +1213,8 @@ run_smoke() {
   RUNOQ_APP_KEY="$(smoke_key_path)"
   export RUNOQ_FORCE_REFRESH_TOKEN=1
   smoke_log "minting a GitHub App installation token"
-  eval "$("$root/scripts/gh-auth.sh" export-token)"
+  export TARGET_ROOT="$auth_root"
+  runoq::_mint_bot_token
   smoke_log "cloning ${repo} into ${clone_dir}"
   run_quiet_command "Failed to clone sandbox repo ${repo} into ${clone_dir}" \
     git clone "https://x-access-token:${GH_TOKEN}@github.com/${repo}.git" "$clone_dir"
@@ -1226,8 +1227,8 @@ run_smoke() {
   write_identity_file "$clone_dir"
 
   export RUNOQ_SYMLINK_DIR="$tmpdir/bin"
-  smoke_log "running scripts/setup.sh to bootstrap labels and local helpers"
-  "$root/scripts/setup.sh"
+  smoke_log "running runoq init to bootstrap labels and local helpers"
+  "$root/bin/runoq" init
 
   labels_json="$(label_check_json "$repo")"
   if [[ "$(printf '%s' "$labels_json" | jq -r '.missing | length')" -ne 0 ]]; then
@@ -1241,8 +1242,8 @@ run_smoke() {
   issue_title="runoq live smoke ${run_id}"
   issue_body="Live smoke validation issue for ${run_id}."
   smoke_log "creating sandbox issue '${issue_title}'"
-  issue_json="$("$root/scripts/gh-issue-queue.sh" create "$repo" "$issue_title" "$issue_body" --priority 3 --estimated-complexity low)"
-  issue_url="$(printf '%s' "$issue_json" | jq -r '.url')"
+  issue_url="$(runoq::gh issue create --repo "$repo" --title "$issue_title" --body "$issue_body")"
+  issue_json="$(jq -n --arg url "$issue_url" '{url: $url}')"
   issue_number="$(issue_number_from_url "$issue_url")"
   RUNOQ_SMOKE_CLEANUP_ISSUE_NUMBER="$issue_number"
   [[ -n "$issue_number" ]] || runoq::die "Failed to parse smoke issue number."
@@ -1256,7 +1257,7 @@ run_smoke() {
   smoke_log "verified issue comment attribution as $(bot_login)"
 
   smoke_log "checking ${RUNOQ_SMOKE_PERMISSION_USER} has ${RUNOQ_SMOKE_PERMISSION_LEVEL:-write} access to ${repo}"
-  permission_json="$("$root/scripts/gh-pr-lifecycle.sh" check-permission "$repo" "$RUNOQ_SMOKE_PERMISSION_USER" "${RUNOQ_SMOKE_PERMISSION_LEVEL:-write}")"
+  permission_json="$(runoq::gh api "repos/${repo}/collaborators/${RUNOQ_SMOKE_PERMISSION_USER}/permission")"
   branch="runoq-smoke-${run_id}"
   RUNOQ_SMOKE_CLEANUP_BRANCH="$branch"
 
@@ -1275,8 +1276,9 @@ run_smoke() {
 
   pr_title="runoq live smoke ${run_id}"
   smoke_log "opening PR '${pr_title}' for issue #${issue_number}"
-  pr_json="$("$root/scripts/gh-pr-lifecycle.sh" create "$repo" "$branch" "$issue_number" "$pr_title")"
-  pr_url="$(printf '%s' "$pr_json" | jq -r '.url')"
+  pr_url="$(runoq::gh pr create --repo "$repo" --draft --title "$pr_title" --head "$branch" --body "Closes #${issue_number}")"
+  pr_number="$(printf '%s' "$pr_url" | sed -n 's#.*/pull/\([0-9]*\).*#\1#p')"
+  pr_json="$(jq -n --arg url "$pr_url" --argjson number "${pr_number:-null}" '{url:$url, number:$number}')"
   pr_number="$(pr_number_from_url "$pr_url")"
   RUNOQ_SMOKE_CLEANUP_PR_NUMBER="$pr_number"
   [[ -n "$pr_number" ]] || runoq::die "Failed to parse smoke PR number."
@@ -1286,7 +1288,7 @@ run_smoke() {
   pr_comment_body="runoq live smoke pr comment ${run_id}"
   printf '%s\n' "$pr_comment_body" >"$pr_comment_file"
   smoke_log "posting attribution check comment on PR #${pr_number}"
-  "$root/scripts/gh-pr-lifecycle.sh" comment "$repo" "$pr_number" "$pr_comment_file" >/dev/null
+  runoq::gh pr comment "$pr_number" --repo "$repo" --body-file "$pr_comment_file" >/dev/null
   pr_comment_author="$(find_comment_author "$repo" "$pr_number" "$pr_comment_body")"
   [[ "$pr_comment_author" == "$(bot_login)" ]] || runoq::die "PR comment author was ${pr_comment_author}, expected $(bot_login)."
   smoke_log "verified PR comment attribution as $(bot_login)"
@@ -1486,7 +1488,7 @@ run_lifecycle() {
       (
         cd "$target_dir"
         export RUNOQ_FORCE_REFRESH_TOKEN=1
-        "$root/scripts/orchestrator.sh" mention-triage "$repo" "$first_pr"
+        "$(smoke_runtime_bin)" __orchestrator mention-triage "$repo" "$first_pr"
       ) >>"$run_log" 2>&1
       local triage_exit="$?"
       set -e
@@ -1517,7 +1519,7 @@ run_lifecycle() {
     report_summary_json="$(
       TARGET_ROOT="$target_dir" \
       RUNOQ_STATE_DIR="$artifacts_dir/state" \
-      "$root/scripts/report.sh" summary
+      "$root/bin/runoq" report summary
     )"
   else
     report_summary_json='{"issues":0,"pass":0,"fail":0,"caveats":0,"tokens":{"input":0,"cached_input":0,"output":0,"total":0},"average_rounds":0}'
