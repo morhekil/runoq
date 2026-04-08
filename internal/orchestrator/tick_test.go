@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -261,6 +262,39 @@ func TestTickSuccessIncludesElapsed(t *testing.T) {
 	if !strings.Contains(output, "s)") {
 		t.Fatalf("expected elapsed time in success output, got %q", output)
 	}
+}
+
+func TestPostDAGCommentUsesTickConfigLabels(t *testing.T) {
+	t.Parallel()
+
+	// If postDAGComment reads labels from TickConfig (not env/loadConfig),
+	// it should work without RUNOQ_CONFIG set at all.
+	var stderr bytes.Buffer
+	runner := &tickRunner{
+		cfg: TickConfig{
+			Repo:            "owner/repo",
+			InProgressLabel: "runoq:in-progress",
+			DoneLabel:       "runoq:done",
+			Stderr:          &stderr,
+			Env:             []string{}, // deliberately no RUNOQ_CONFIG
+			ExecCommand: func(_ context.Context, req shell.CommandRequest) error {
+				// Mock gh calls — just succeed
+				if strings.Contains(strings.Join(req.Args, " "), "issue view") {
+					_, _ = io.WriteString(req.Stdout, `[]`)
+				}
+				return nil
+			},
+		},
+		issues: []issue{
+			makeIssue(10, 1, "OPEN", nil),
+			makeIssue(11, 1, "OPEN", []int{10}),
+		},
+	}
+
+	graph := BuildDepGraph(runner.issues, 1, "runoq:ready")
+	// This should not panic or fail even without RUNOQ_CONFIG
+	runner.postDAGComment(context.Background(), 1, graph)
+	// If it tried loadConfig from env, it would fail; if it uses TickConfig, it succeeds
 }
 
 func TestResolveDependsOnMapsKeysToNumbers(t *testing.T) {

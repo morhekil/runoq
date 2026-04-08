@@ -469,6 +469,7 @@ func (a *App) runTick(ctx context.Context, env []string, runoqRoot string) int {
 	planApprovedLabel := readConfigLabel(configPath, "planApproved")
 	readyLabel := readConfigLabel(configPath, "ready")
 	inProgressLabel := readConfigLabel(configPath, "inProgress")
+	doneLabel := readConfigLabel(configPath, "done")
 
 	return orchestrator.RunTick(ctx, orchestrator.TickConfig{
 		Repo:              repo,
@@ -477,6 +478,7 @@ func (a *App) runTick(ctx context.Context, env []string, runoqRoot string) int {
 		PlanApprovedLabel: planApprovedLabel,
 		ReadyLabel:        readyLabel,
 		InProgressLabel:   inProgressLabel,
+		DoneLabel:         doneLabel,
 		Env:               env,
 		ExecCommand:       a.execCommand,
 		Stdout:            a.stdout,
@@ -497,6 +499,7 @@ func (a *App) runTickWithCapture(ctx context.Context, env []string, runoqRoot st
 	planApprovedLabel := readConfigLabel(configPath, "planApproved")
 	readyLabel := readConfigLabel(configPath, "ready")
 	inProgressLabel := readConfigLabel(configPath, "inProgress")
+	doneLabel := readConfigLabel(configPath, "done")
 
 	var buf bytes.Buffer
 	teeStdout := io.MultiWriter(a.stdout, &buf)
@@ -508,6 +511,7 @@ func (a *App) runTickWithCapture(ctx context.Context, env []string, runoqRoot st
 		PlanApprovedLabel:   planApprovedLabel,
 		ReadyLabel:          readyLabel,
 		InProgressLabel:     inProgressLabel,
+		DoneLabel:           doneLabel,
 		LastCompletedIssue:  lastCompleted,
 		Env:                 env,
 		ExecCommand:         a.execCommand,

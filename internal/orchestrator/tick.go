@@ -28,9 +28,10 @@ type TickConfig struct {
 	RunoqRoot         string
 	PlanApprovedLabel string
 	ReadyLabel        string
-	InProgressLabel   string
+	InProgressLabel    string
+	DoneLabel          string
 	LastCompletedIssue int
-	Env               []string
+	Env                []string
 	ExecCommand       shell.CommandExecutor
 	Stdout            io.Writer
 	Stderr            io.Writer
@@ -731,15 +732,7 @@ func (t *tickRunner) ghEditBody(ctx context.Context, issueNumber string, newBody
 const dagMarker = "<!-- runoq:dag -->"
 
 func (t *tickRunner) postDAGComment(ctx context.Context, epicNumber int, graph *DepGraph) {
-	cfg, _ := t.loadConfig()
-	inProgressLabel := ""
-	doneLabel := ""
-	if cfg != nil {
-		inProgressLabel = cfg.Labels.InProgress
-		doneLabel = cfg.Labels.Done
-	}
-
-	mermaid := graph.RenderMermaid(inProgressLabel, doneLabel)
+	mermaid := graph.RenderMermaid(t.cfg.InProgressLabel, t.cfg.DoneLabel)
 	body := dagMarker + "\n\n" + mermaid + "\n"
 
 	epicStr := fmt.Sprintf("%d", epicNumber)
@@ -770,32 +763,6 @@ func (t *tickRunner) postDAGComment(ctx context.Context, epicNumber int, graph *
 	tmpFile.Close()
 	defer os.Remove(tmpFile.Name())
 	t.ghOutput(ctx, "issue", "comment", epicStr, "--repo", t.cfg.Repo, "--body-file", tmpFile.Name())
-}
-
-func (t *tickRunner) loadConfig() (*struct {
-	Labels struct {
-		InProgress string `json:"inProgress"`
-		Done       string `json:"done"`
-	} `json:"labels"`
-}, error) {
-	configPath, ok := shell.EnvLookup(t.cfg.Env, "RUNOQ_CONFIG")
-	if !ok || configPath == "" {
-		return nil, fmt.Errorf("no config")
-	}
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil, err
-	}
-	var cfg struct {
-		Labels struct {
-			InProgress string `json:"inProgress"`
-			Done       string `json:"done"`
-		} `json:"labels"`
-	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, err
-	}
-	return &cfg, nil
 }
 
 func sliceContains(s []int, v int) bool {
