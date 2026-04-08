@@ -216,7 +216,7 @@ func TestPlanningEligibilityAllowsMissingAcceptanceCriteria(t *testing.T) {
 		"number": 99,
 		"title":  "Plan milestone 1",
 		"body":   body,
-		"labels": []map[string]string{{"name": "runoq:ready"}},
+		"labels": []map[string]string{{"name": "runoq:ready"}, {"name": "runoq:planning"}},
 		"url":    "https://example.test/issues/99",
 	})
 	if err != nil {

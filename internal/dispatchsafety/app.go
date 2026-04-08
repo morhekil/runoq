@@ -244,6 +244,7 @@ func (a *App) runEligibility(ctx context.Context, repo string, issueArg string) 
 		Number int    `json:"number"`
 		Title  string `json:"title"`
 		Body   string `json:"body"`
+		Labels []labelEntry `json:"labels"`
 	}
 	if err := json.Unmarshal([]byte(issueOutput), &issue); err != nil {
 		return shell.Failf(a.stderr, "failed to parse issue metadata: %v", err)
@@ -254,19 +255,20 @@ func (a *App) runEligibility(ctx context.Context, repo string, issueArg string) 
 		return shell.Failf(a.stderr, "%v", err)
 	}
 
-	metadata := parseIssueMetadata(issue.Body)
+	planning := hasLabelNamed(issue.Labels, "runoq:planning") || hasLabelNamed(issue.Labels, "runoq:adjustment")
 	branch := ""
-	if !isPlanningType(metadata.Type) {
+	if !planning {
 		branch = branchName(cfg.BranchPrefix, issue.Number, issue.Title)
 	}
 
 	reasons := make([]string, 0, 4)
-	if strings.TrimSpace(issue.Title) == "" || (!isPlanningType(metadata.Type) && !hasAcceptanceCriteria(issue.Body)) {
+	if strings.TrimSpace(issue.Title) == "" || (!planning && !hasAcceptanceCriteria(issue.Body)) {
 		reasons = append(reasons, "missing acceptance criteria")
 	}
 
-	for _, dependency := range metadata.DependsOn {
-		reason, blocked, err := a.dependencyReason(ctx, repo, dependency, cfg.Labels.Done)
+	blockedByList := a.fetchBlockedBy(ctx, repo, issue.Number)
+	for _, dep := range blockedByList {
+		reason, blocked, err := a.dependencyReason(ctx, repo, strconv.Itoa(dep), cfg.Labels.Done)
 		if err != nil {
 			if isExitError(err) {
 				return 1
@@ -278,7 +280,7 @@ func (a *App) runEligibility(ctx context.Context, repo string, issueArg string) 
 		}
 	}
 
-	if !isPlanningType(metadata.Type) {
+	if !planning {
 		openPRReason, err := a.openPRReason(ctx, repo, branch)
 		if err != nil {
 			if isExitError(err) {
@@ -544,9 +546,7 @@ func (a *App) dependencyReason(ctx context.Context, repo string, dependency stri
 	}
 
 	var issue struct {
-		Labels []struct {
-			Name string `json:"name"`
-		} `json:"labels"`
+		Labels []labelEntry `json:"labels"`
 	}
 	if err := json.Unmarshal([]byte(output), &issue); err != nil {
 		return "", false, fmt.Errorf("failed to parse dependency labels: %v", err)
@@ -653,9 +653,7 @@ func (a *App) setIssueStatus(ctx context.Context, repo string, issueNumber int, 
 		return err
 	}
 	var labelsData struct {
-		Labels []struct {
-			Name string `json:"name"`
-		} `json:"labels"`
+		Labels []labelEntry `json:"labels"`
 	}
 	_ = json.Unmarshal([]byte(labelsJSON), &labelsData)
 
@@ -930,6 +928,7 @@ func (a *App) CheckEligibility(ctx context.Context, repo string, issueNumber int
 		Number int    `json:"number"`
 		Title  string `json:"title"`
 		Body   string `json:"body"`
+		Labels []labelEntry `json:"labels"`
 	}
 	if err := json.Unmarshal([]byte(issueOutput), &issue); err != nil {
 		return EligibilityResult{}, fmt.Errorf("eligibility: failed to parse issue metadata: %w", err)
@@ -940,19 +939,21 @@ func (a *App) CheckEligibility(ctx context.Context, repo string, issueNumber int
 		return EligibilityResult{}, fmt.Errorf("eligibility: %w", err)
 	}
 
-	metadata := parseIssueMetadata(issue.Body)
+	planning := hasLabelNamed(issue.Labels, "runoq:planning") || hasLabelNamed(issue.Labels, "runoq:adjustment")
 	branch := ""
-	if !isPlanningType(metadata.Type) {
+	if !planning {
 		branch = branchName(cfg.BranchPrefix, issue.Number, issue.Title)
 	}
 
 	reasons := make([]string, 0, 4)
-	if strings.TrimSpace(issue.Title) == "" || (!isPlanningType(metadata.Type) && !hasAcceptanceCriteria(issue.Body)) {
+	if strings.TrimSpace(issue.Title) == "" || (!planning && !hasAcceptanceCriteria(issue.Body)) {
 		reasons = append(reasons, "missing acceptance criteria")
 	}
 
-	for _, dependency := range metadata.DependsOn {
-		reason, blocked, err := a.dependencyReason(ctx, repo, dependency, cfg.Labels.Done)
+	// Query blockedBy dependencies via GraphQL
+	blockedBy := a.fetchBlockedBy(ctx, repo, issueNumber)
+	for _, dep := range blockedBy {
+		reason, blocked, err := a.dependencyReason(ctx, repo, strconv.Itoa(dep), cfg.Labels.Done)
 		if err != nil {
 			return EligibilityResult{}, fmt.Errorf("eligibility: dependency check: %w", err)
 		}
@@ -961,7 +962,7 @@ func (a *App) CheckEligibility(ctx context.Context, repo string, issueNumber int
 		}
 	}
 
-	if !isPlanningType(metadata.Type) {
+	if !planning {
 		openPRReason, err := a.openPRReason(ctx, repo, branch)
 		if err != nil {
 			return EligibilityResult{}, fmt.Errorf("eligibility: open PR check: %w", err)
@@ -1001,6 +1002,52 @@ func (a *App) printUsage() {
 type issueMetadata struct {
 	DependsOn []string
 	Type      string
+}
+
+type labelEntry struct {
+	Name string `json:"name"`
+}
+
+func hasLabelNamed(labels []labelEntry, name string) bool {
+	for _, l := range labels {
+		if l.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *App) fetchBlockedBy(ctx context.Context, repo string, issueNumber int) []int {
+	owner, repoName, ok := strings.Cut(repo, "/")
+	if !ok {
+		return nil
+	}
+	query := fmt.Sprintf(`query { repository(owner: %q, name: %q) { issue(number: %d) { blockedBy(first: 20) { nodes { number } } } } }`, owner, repoName, issueNumber)
+	raw, err := a.ghOutputQuiet(ctx, "api", "graphql", "-f", "query="+query)
+	if err != nil {
+		return nil
+	}
+	var resp struct {
+		Data struct {
+			Repository struct {
+				Issue struct {
+					BlockedBy struct {
+						Nodes []struct {
+							Number int `json:"number"`
+						} `json:"nodes"`
+					} `json:"blockedBy"`
+				} `json:"issue"`
+			} `json:"repository"`
+		} `json:"data"`
+	}
+	if json.Unmarshal([]byte(raw), &resp) != nil {
+		return nil
+	}
+	var result []int
+	for _, n := range resp.Data.Repository.Issue.BlockedBy.Nodes {
+		result = append(result, n.Number)
+	}
+	return result
 }
 
 func parseIssueMetadata(body string) issueMetadata {

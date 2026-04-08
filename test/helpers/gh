@@ -32,7 +32,15 @@ if [[ -n "$capture_dir" ]]; then
 fi
 
 rule="$(jq -cer --argjson index "$index" '.[$index]' "$scenario" 2>/dev/null || true)"
-[[ -n "$rule" ]] || { echo "fake-gh: no rule for call index $index: $full_cmd" >&2; exit 1; }
+if [[ -z "$rule" ]]; then
+  # GraphQL calls from fetchBlockedBy are optional — return empty on no rule
+  if [[ "$full_cmd" == *"api graphql"* ]]; then
+    printf '%s' '{"data":{}}'
+    exit 0
+  fi
+  echo "fake-gh: no rule for call index $index: $full_cmd" >&2
+  exit 1
+fi
 
 while IFS= read -r expected; do
   [[ -z "$expected" ]] && continue

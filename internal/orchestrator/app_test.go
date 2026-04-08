@@ -1354,6 +1354,9 @@ func buildMockExecutor(t *testing.T, mc mockConfig) shell.CommandExecutor {
 			case strings.Contains(ghArgs, "api") && strings.Contains(ghArgs, "issues?state=open"):
 				_, _ = io.WriteString(req.Stdout, `[]`)
 				return nil
+			case strings.Contains(ghArgs, "api graphql"):
+				_, _ = io.WriteString(req.Stdout, `{"data":{}}`)
+				return nil
 			default:
 				t.Fatalf("unexpected gh call: %s (from %s)", ghArgs, commandLine(req))
 				return nil
