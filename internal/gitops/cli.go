@@ -55,13 +55,18 @@ func (r *cliRepo) git(args ...string) (string, error) {
 }
 
 func (r *cliRepo) gitQuiet(args ...string) error {
-	return r.exec(r.ctx, shell.CommandRequest{
+	var stderr bytes.Buffer
+	err := r.exec(r.ctx, shell.CommandRequest{
 		Name:   "git",
 		Args:   append([]string{"-C", r.root}, args...),
 		Dir:    r.root,
 		Stdout: io.Discard,
-		Stderr: io.Discard,
+		Stderr: &stderr,
 	})
+	if err != nil {
+		return fmt.Errorf("git %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
 }
 
 func (r *cliRepo) gitDir(dir string, args ...string) error {
