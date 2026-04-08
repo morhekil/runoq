@@ -279,8 +279,9 @@ func (a *App) prepareTargetContext(ctx context.Context, runoqRoot string, env []
 		}
 	}
 
-	// Create persistent log file
+	// Create persistent log file and clean up old logs
 	logDir := filepath.Join(targetRoot, "log")
+	_ = runlog.Cleanup(logDir, 20)
 	logWriter, logErr := runlog.NewWriter(a.stderr, logDir)
 	if logErr == nil {
 		a.stderr = logWriter

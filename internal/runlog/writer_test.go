@@ -3,6 +3,7 @@ package runlog
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -107,6 +108,68 @@ func TestLogEventWritesJSON(t *testing.T) {
 	}
 	if _, ok := parsed["timestamp"]; !ok {
 		t.Fatal("expected timestamp field")
+	}
+}
+
+func TestCleanupKeepsNewestLogs(t *testing.T) {
+	t.Parallel()
+
+	logDir := t.TempDir()
+	// Create 25 fake log files with sequential timestamps
+	for i := range 25 {
+		name := fmt.Sprintf("runoq-20260401-%06d.log", i)
+		os.WriteFile(filepath.Join(logDir, name), []byte("log"), 0o644)
+	}
+	// Also create a non-log file that should be untouched
+	os.WriteFile(filepath.Join(logDir, "other.txt"), []byte("keep"), 0o644)
+
+	err := Cleanup(logDir, 20)
+	if err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+
+	entries, _ := os.ReadDir(logDir)
+	logCount := 0
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "runoq-") && strings.HasSuffix(e.Name(), ".log") {
+			logCount++
+		}
+	}
+	if logCount != 20 {
+		t.Fatalf("expected 20 logs after cleanup, got %d", logCount)
+	}
+
+	// The oldest 5 should be gone
+	for i := range 5 {
+		name := fmt.Sprintf("runoq-20260401-%06d.log", i)
+		if _, err := os.Stat(filepath.Join(logDir, name)); !os.IsNotExist(err) {
+			t.Fatalf("expected %s to be deleted", name)
+		}
+	}
+
+	// Non-log file should survive
+	if _, err := os.Stat(filepath.Join(logDir, "other.txt")); err != nil {
+		t.Fatalf("expected other.txt to survive cleanup: %v", err)
+	}
+}
+
+func TestCleanupNoopWhenUnderLimit(t *testing.T) {
+	t.Parallel()
+
+	logDir := t.TempDir()
+	for i := range 5 {
+		name := fmt.Sprintf("runoq-20260401-%06d.log", i)
+		os.WriteFile(filepath.Join(logDir, name), []byte("log"), 0o644)
+	}
+
+	err := Cleanup(logDir, 20)
+	if err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+
+	entries, _ := os.ReadDir(logDir)
+	if len(entries) != 5 {
+		t.Fatalf("expected 5 files unchanged, got %d", len(entries))
 	}
 }
 

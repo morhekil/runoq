@@ -77,3 +77,33 @@ func (w *Writer) LogEvent(event string, data map[string]any) {
 func (w *Writer) Close() error {
 	return w.file.Close()
 }
+
+// Cleanup removes old log files in logDir, keeping the newest `keep` files.
+// Only files matching the runoq-*.log pattern are considered.
+func Cleanup(logDir string, keep int) error {
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	var logs []string
+	for _, e := range entries {
+		if !e.IsDir() && len(e.Name()) > 6 &&
+			e.Name()[:6] == "runoq-" && filepath.Ext(e.Name()) == ".log" {
+			logs = append(logs, e.Name())
+		}
+	}
+
+	if len(logs) <= keep {
+		return nil
+	}
+
+	// ReadDir returns entries sorted by name — oldest timestamps first
+	for _, name := range logs[:len(logs)-keep] {
+		_ = os.Remove(filepath.Join(logDir, name))
+	}
+	return nil
+}
