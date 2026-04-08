@@ -999,10 +999,6 @@ func (a *App) printUsage() {
 	_, _ = io.WriteString(a.stderr, usageText)
 }
 
-type issueMetadata struct {
-	DependsOn []string
-	Type      string
-}
 
 type labelEntry struct {
 	Name string `json:"name"`
@@ -1049,65 +1045,6 @@ func (a *App) fetchBlockedBy(ctx context.Context, repo string, issueNumber int) 
 	}
 	return result
 }
-
-func parseIssueMetadata(body string) issueMetadata {
-	block := extractMetadataBlock(body)
-	if block == "" {
-		return issueMetadata{DependsOn: []string{}, Type: "task"}
-	}
-
-	dependsLine := ""
-	issueType := "task"
-	for line := range strings.SplitSeq(block, "\n") {
-		if rest, ok := strings.CutPrefix(line, "depends_on:"); ok {
-			dependsLine = strings.TrimSpace(rest)
-			continue
-		}
-		if rest, ok := strings.CutPrefix(line, "type:"); ok {
-			value := strings.TrimSpace(rest)
-			if isPlanningType(value) || value == "task" || value == "epic" {
-				issueType = value
-			}
-		}
-	}
-	if dependsLine == "" || !json.Valid([]byte(dependsLine)) {
-		return issueMetadata{DependsOn: []string{}, Type: issueType}
-	}
-
-	var raw []any
-	if err := json.Unmarshal([]byte(dependsLine), &raw); err != nil {
-		return issueMetadata{DependsOn: []string{}, Type: issueType}
-	}
-
-	dependencies := make([]string, 0, len(raw))
-	for _, item := range raw {
-		value := strings.TrimSpace(rawStringOr(item, ""))
-		if value != "" {
-			dependencies = append(dependencies, value)
-		}
-	}
-	return issueMetadata{DependsOn: dependencies, Type: issueType}
-}
-
-func extractMetadataBlock(body string) string {
-	lines := strings.Split(body, "\n")
-	inBlock := false
-	block := make([]string, 0, len(lines))
-	for _, line := range lines {
-		if !inBlock {
-			if strings.Contains(line, "<!-- runoq:meta") {
-				inBlock = true
-			}
-			continue
-		}
-		if strings.Contains(line, "-->") {
-			break
-		}
-		block = append(block, line)
-	}
-	return strings.Join(block, "\n")
-}
-
 func hasAcceptanceCriteria(body string) bool {
 	for line := range strings.SplitSeq(body, "\n") {
 		if strings.HasPrefix(line, "## Acceptance Criteria") {
@@ -1115,10 +1052,6 @@ func hasAcceptanceCriteria(body string) bool {
 		}
 	}
 	return false
-}
-
-func isPlanningType(issueType string) bool {
-	return issueType == "planning" || issueType == "adjustment"
 }
 
 func branchName(prefix string, issue int, title string) string {
