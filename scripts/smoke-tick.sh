@@ -312,6 +312,8 @@ run_tick_smoke() {
   export RUNOQ_STATE_DIR="$target_dir/.runoq/state"
   mkdir -p "$RUNOQ_STATE_DIR"
   write_identity_file "$target_dir"
+  export RUNOQ_APP_KEY="$(smoke_key_path)"
+  runoq::_mint_bot_token || smoke_log "WARNING: bot token mint failed, using ambient credentials"
 
   local run_bin dispatch_bin
   run_bin="$tmpdir/fake-run"

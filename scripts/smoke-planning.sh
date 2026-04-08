@@ -339,6 +339,8 @@ run_planning() {
   export RUNOQ_SYMLINK_DIR="$tmpdir/bin"
   export TARGET_ROOT="$target_dir"
   write_identity_file "$target_dir"
+  export RUNOQ_APP_KEY="$(smoke_key_path)"
+  runoq::_mint_bot_token || smoke_log "WARNING: bot token mint failed, using ambient credentials"
 
   # Claude capture wrapper
   claude_capture_dir="$artifacts_dir/claude"
