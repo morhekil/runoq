@@ -68,7 +68,7 @@ func BuildDepGraph(issues []issue, epicNumber int, readyLabel string) *DepGraph 
 
 		g.nodes[iss.Number] = &depNode{
 			issue:     iss,
-			priority:  planning.MetadataPriority(iss.Body),
+			priority:  issuePriority(iss),
 			dependsOn: deps,
 			blockedBy: blockedBy,
 		}
@@ -451,6 +451,20 @@ func issueParentEpic(iss *issue) int {
 	}
 	n, _ := strconv.Atoi(raw)
 	return n
+}
+
+// issuePriority returns 0 if the issue has the runoq:priority label (human-bumped),
+// 1 otherwise (default). Falls back to metadata priority for backward compat.
+func issuePriority(iss *issue) int {
+	if hasLabel(iss, "runoq:priority") {
+		return 0
+	}
+	// Fallback to metadata for old issues
+	p := planning.MetadataPriority(iss.Body)
+	if p != 999999 && p != 1 {
+		return p // non-default metadata priority
+	}
+	return 1
 }
 
 func issueTypeOf(iss issue) string {

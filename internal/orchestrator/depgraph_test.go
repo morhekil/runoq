@@ -226,6 +226,25 @@ func TestDepGraphPartiallyDone(t *testing.T) {
 	}
 }
 
+func TestDepGraphPriorityFromLabel(t *testing.T) {
+	t.Parallel()
+
+	issues := []issue{
+		{Number: 10, State: "OPEN", Body: "## AC", IssueType: "task", ParentEpic: 1, Labels: []label{{Name: "runoq:ready"}}},
+		// #11 has runoq:priority label — should be picked first even though #10 has deeper chain
+		{Number: 11, State: "OPEN", Body: "## AC", IssueType: "task", ParentEpic: 1, Labels: []label{{Name: "runoq:ready"}, {Name: "runoq:priority"}}},
+		{Number: 12, State: "OPEN", Body: "## AC", IssueType: "task", ParentEpic: 1, Labels: []label{{Name: "runoq:ready"}}, BlockedBy: []int{10}},
+	}
+	g := BuildDepGraph(issues, 1, "runoq:ready")
+	task := g.Next()
+	if task == nil {
+		t.Fatal("Next() returned nil")
+	}
+	if task.Number != 11 {
+		t.Fatalf("expected #11 (has priority label), got #%d", task.Number)
+	}
+}
+
 func TestFetchBlockedByPopulatesIssueField(t *testing.T) {
 	t.Parallel()
 
