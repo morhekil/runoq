@@ -206,6 +206,72 @@ func TestEnsureLabels_SkipsExisting(t *testing.T) {
 	}
 }
 
+func TestEnsureIssueTypes_WritesMapping(t *testing.T) {
+	t.Parallel()
+	targetRoot := t.TempDir()
+	initBareRepo(t, targetRoot)
+
+	exec := func(_ context.Context, req shell.CommandRequest) error {
+		cmd := strings.Join(req.Args, " ")
+		if strings.Contains(cmd, "api graphql") {
+			fmt.Fprint(req.Stdout, `{"data":{"organization":{"issueTypes":{"nodes":[
+				{"name":"Task","id":"IT_task123"},
+				{"name":"Bug","id":"IT_bug456"},
+				{"name":"Epic","id":"IT_epic789"}
+			]}}}}`)
+			return nil
+		}
+		return nil
+	}
+
+	ghClient := newTestGHClient(exec, targetRoot)
+	err := ensureIssueTypes(context.Background(), "DropBearLabs/test-repo", targetRoot, ghClient)
+	if err != nil {
+		t.Fatalf("ensureIssueTypes: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(targetRoot, ".runoq", "issue-types.json"))
+	if err != nil {
+		t.Fatalf("read issue-types.json: %v", err)
+	}
+	var mapping map[string]string
+	if err := json.Unmarshal(data, &mapping); err != nil {
+		t.Fatalf("parse issue-types.json: %v", err)
+	}
+	if mapping["task"] != "IT_task123" {
+		t.Errorf("expected task=IT_task123, got %q", mapping["task"])
+	}
+	if mapping["epic"] != "IT_epic789" {
+		t.Errorf("expected epic=IT_epic789, got %q", mapping["epic"])
+	}
+}
+
+func TestEnsureIssueTypes_FailsWithoutRequiredTypes(t *testing.T) {
+	t.Parallel()
+	targetRoot := t.TempDir()
+	initBareRepo(t, targetRoot)
+
+	exec := func(_ context.Context, req shell.CommandRequest) error {
+		cmd := strings.Join(req.Args, " ")
+		if strings.Contains(cmd, "api graphql") {
+			fmt.Fprint(req.Stdout, `{"data":{"organization":{"issueTypes":{"nodes":[
+				{"name":"Bug","id":"IT_bug456"}
+			]}}}}`)
+			return nil
+		}
+		return nil
+	}
+
+	ghClient := newTestGHClient(exec, targetRoot)
+	err := ensureIssueTypes(context.Background(), "DropBearLabs/test-repo", targetRoot, ghClient)
+	if err == nil {
+		t.Fatal("expected error when Task/Epic types are missing")
+	}
+	if !strings.Contains(err.Error(), "Task") || !strings.Contains(err.Error(), "Epic") {
+		t.Errorf("expected error mentioning missing Task and Epic types, got: %v", err)
+	}
+}
+
 func TestEnsureIdentity_WritesCorrectly(t *testing.T) {
 	targetRoot := t.TempDir()
 	initBareRepo(t, targetRoot)
@@ -624,6 +690,11 @@ func TestFullRun(t *testing.T) {
 	exec := func(_ context.Context, req shell.CommandRequest) error {
 		if len(req.Args) > 1 && req.Args[0] == "label" && req.Args[1] == "list" {
 			fmt.Fprint(req.Stdout, `[{"name":"runoq:ready"},{"name":"runoq:in-progress"},{"name":"runoq:done"}]`)
+			return nil
+		}
+		cmd := strings.Join(req.Args, " ")
+		if strings.Contains(cmd, "api graphql") {
+			fmt.Fprint(req.Stdout, `{"data":{"organization":{"issueTypes":{"nodes":[{"name":"Task","id":"IT_t"},{"name":"Epic","id":"IT_e"}]}}}}`)
 			return nil
 		}
 		return nil

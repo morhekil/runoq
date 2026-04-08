@@ -6,7 +6,11 @@
     "needsReview": "runoq:needs-human-review",
     "blocked": "runoq:blocked",
     "planApproved": "runoq:plan-approved",
-    "maintenanceReview": "runoq:maintenance-review"
+    "maintenanceReview": "runoq:maintenance-review",
+    "planning": "runoq:planning",
+    "adjustment": "runoq:adjustment",
+    "discovery": "runoq:discovery",
+    "implementation": "runoq:implementation"
   },
   "identity": {
     "appSlug": "runoq",

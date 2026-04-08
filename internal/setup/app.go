@@ -73,6 +73,10 @@ func Run(ctx context.Context, cfg Config, httpClient *http.Client, exec shell.Co
 		return fmt.Errorf("ensure labels: %w", err)
 	}
 
+	if err := ensureIssueTypes(ctx, cfg.Repo, cfg.TargetRoot, ghClient); err != nil {
+		return fmt.Errorf("ensure issue types: %w", err)
+	}
+
 	if err := ensurePackageJSON(cfg); err != nil {
 		return fmt.Errorf("ensure package.json: %w", err)
 	}
@@ -307,6 +311,60 @@ func ensureLabels(ctx context.Context, repo string, ghClient *gh.Client, labels 
 		}
 	}
 	return nil
+}
+
+func ensureIssueTypes(ctx context.Context, repo string, targetRoot string, ghClient *gh.Client) error {
+	org, _, ok := strings.Cut(repo, "/")
+	if !ok {
+		return fmt.Errorf("invalid repo format %q", repo)
+	}
+
+	query := fmt.Sprintf(`query { organization(login: %q) { issueTypes(first: 20) { nodes { name id } } } }`, org)
+	raw, err := ghClient.Output(ctx, "api", "graphql", "-f", "query="+query)
+	if err != nil {
+		return fmt.Errorf("query org issue types: %w", err)
+	}
+
+	var resp struct {
+		Data struct {
+			Organization struct {
+				IssueTypes struct {
+					Nodes []struct {
+						Name string `json:"name"`
+						ID   string `json:"id"`
+					} `json:"nodes"`
+				} `json:"issueTypes"`
+			} `json:"organization"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		return fmt.Errorf("parse issue types response: %w", err)
+	}
+
+	mapping := make(map[string]string)
+	for _, it := range resp.Data.Organization.IssueTypes.Nodes {
+		mapping[strings.ToLower(it.Name)] = it.ID
+	}
+
+	var missing []string
+	for _, required := range []string{"task", "epic"} {
+		if _, ok := mapping[required]; !ok {
+			missing = append(missing, strings.ToUpper(required[:1])+required[1:])
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("org %s is missing required issue types: %s. Enable them in org settings", org, strings.Join(missing, ", "))
+	}
+
+	data, err := json.MarshalIndent(mapping, "", "  ")
+	if err != nil {
+		return err
+	}
+	issueTypesPath := filepath.Join(targetRoot, ".runoq", "issue-types.json")
+	if err := os.MkdirAll(filepath.Dir(issueTypesPath), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(issueTypesPath, append(data, '\n'), 0o644)
 }
 
 func ensurePackageJSON(cfg Config) error {
