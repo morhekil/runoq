@@ -45,7 +45,8 @@ type issue struct {
 	Body      string   `json:"body"`
 	URL       string   `json:"url"`
 	Labels    []label  `json:"labels"`
-	BlockedBy []int    `json:"-"` // populated from GitHub's blockedBy API, not JSON
+	BlockedBy []int    `json:"-"` // populated from GitHub's blockedBy API
+	IssueType string   `json:"-"` // populated from GitHub's issueType API
 }
 
 type label struct {
@@ -124,7 +125,7 @@ func (t *tickRunner) run(ctx context.Context) int {
 	// Check for approved review
 	t.step("Checking for approved review")
 	if approved := t.findReviewIssue("approved", planApprovedLabel); approved != nil {
-		reviewType := planning.MetadataValue(approved.Body, "type")
+		reviewType := issueTypeOf(*approved)
 		reviewParent := planning.MetadataValue(approved.Body, "parent_epic")
 		t.info(fmt.Sprintf("found approved %s review #%d (parent #%s)", reviewType, approved.Number, reviewParent))
 
@@ -237,7 +238,7 @@ func (t *tickRunner) handlePendingReview(ctx context.Context, pending *issue) in
 		return t.fail("load review: %v", err)
 	}
 
-	issueType := planning.MetadataValue(pending.Body, "type")
+	issueType := issueTypeOf(*pending)
 	if issueType == "planning" && !strings.Contains(issueView, "runoq:payload:plan-proposal") {
 		t.info(fmt.Sprintf("planning issue #%d has no proposal yet — needs dispatch", pending.Number))
 		return 1
@@ -530,7 +531,7 @@ func (t *tickRunner) dispatchTask(ctx context.Context, task *issue) int {
 		Body:                task.Body,
 		URL:                 task.URL,
 		EstimatedComplexity: planning.MetadataValue(task.Body, "estimated_complexity"),
-		Type:                planning.MetadataValue(task.Body, "type"),
+		Type:                issueTypeOf(*task),
 	}
 	if rationale := planning.MetadataValue(task.Body, "complexity_rationale"); rationale != "" {
 		metadata.ComplexityRationale = &rationale
@@ -598,7 +599,7 @@ func (t *tickRunner) firstOpenEpic() *issue {
 		if iss.State != "OPEN" {
 			continue
 		}
-		if planning.MetadataValue(iss.Body, "type") != "epic" {
+		if issueTypeOf(*iss) != "epic" {
 			continue
 		}
 		p := planning.MetadataPriority(iss.Body)
@@ -612,7 +613,7 @@ func (t *tickRunner) firstOpenEpic() *issue {
 
 func (t *tickRunner) anyEpicExists() bool {
 	for _, iss := range t.issues {
-		if planning.MetadataValue(iss.Body, "type") == "epic" {
+		if issueTypeOf(iss) == "epic" {
 			return true
 		}
 	}
@@ -625,7 +626,7 @@ func (t *tickRunner) findReviewIssue(mode string, planApprovedLabel string) *iss
 		if iss.State != "OPEN" {
 			continue
 		}
-		issType := planning.MetadataValue(iss.Body, "type")
+		issType := issueTypeOf(*iss)
 		if issType != "planning" && issType != "adjustment" {
 			continue
 		}
@@ -660,7 +661,7 @@ func (t *tickRunner) findPlanningChild(epicNumber int) *issue {
 		if planning.MetadataValue(iss.Body, "parent_epic") != epicStr {
 			continue
 		}
-		if planning.MetadataValue(iss.Body, "type") == "planning" {
+		if issueTypeOf(*iss) == "planning" {
 			return iss
 		}
 	}
@@ -692,7 +693,7 @@ func (t *tickRunner) findInProgressTask(epicNumber int) *issue {
 		if planning.MetadataValue(iss.Body, "parent_epic") != epicStr {
 			continue
 		}
-		if planning.MetadataValue(iss.Body, "type") != "task" {
+		if issueTypeOf(*iss) != "task" {
 			continue
 		}
 		if t.issueHasLabel(iss, t.cfg.InProgressLabel) {
@@ -716,7 +717,7 @@ func (t *tickRunner) countOpenChildren(epicNumber int) (int, bool) {
 			continue
 		}
 		count++
-		if planning.MetadataValue(iss.Body, "type") == "task" {
+		if issueTypeOf(iss) == "task" {
 			hasTask = true
 		}
 	}
@@ -741,13 +742,14 @@ func (t *tickRunner) fetchDependencies(ctx context.Context) {
 	if !ok {
 		return
 	}
-	query := fmt.Sprintf(`query { repository(owner: %q, name: %q) { issues(first: 200, states: [OPEN, CLOSED]) { nodes { number blockedBy(first: 20) { nodes { number } } } } } }`, owner, repo)
+	query := fmt.Sprintf(`query { repository(owner: %q, name: %q) { issues(first: 200, states: [OPEN, CLOSED]) { nodes { number blockedBy(first: 20) { nodes { number } } issueType { name } } } } }`, owner, repo)
 	raw, err := t.ghOutput(ctx, "api", "graphql", "-f", "query="+query)
 	if err != nil {
-		t.info("dependency fetch failed (falling back to metadata)")
+		t.info("dependency/type fetch failed (falling back to metadata)")
 		return
 	}
 	fetchBlockedBy(t.issues, raw)
+	fetchIssueTypes(t.issues, raw)
 }
 
 func (t *tickRunner) titleForIssue(numberStr string) string {

@@ -264,6 +264,24 @@ func TestTickSuccessIncludesElapsed(t *testing.T) {
 	}
 }
 
+func TestDepGraphUsesIssueTypeField(t *testing.T) {
+	t.Parallel()
+
+	// Issues with IssueType field set — type in body is NOT set, but parent_epic still needed until M3
+	issues := []issue{
+		{Number: 9, Title: "Epic", State: "OPEN", Body: "<!-- runoq:meta\nparent_epic: null\n-->", IssueType: "epic"},
+		{Number: 10, Title: "Task", State: "OPEN", Body: "<!-- runoq:meta\nparent_epic: 9\n-->", IssueType: "task", Labels: []label{{Name: "runoq:ready"}}},
+	}
+	g := BuildDepGraph(issues, 9, "runoq:ready")
+	task := g.Next()
+	if task == nil {
+		t.Fatal("expected task #10")
+	}
+	if task.Number != 10 {
+		t.Fatalf("expected #10, got #%d", task.Number)
+	}
+}
+
 func TestPostDAGCommentUsesTickConfigLabels(t *testing.T) {
 	t.Parallel()
 

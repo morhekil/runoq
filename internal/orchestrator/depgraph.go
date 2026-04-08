@@ -49,7 +49,7 @@ func BuildDepGraph(issues []issue, epicNumber int, readyLabel string) *DepGraph 
 		if planning.MetadataValue(iss.Body, "parent_epic") != epicStr {
 			continue
 		}
-		if planning.MetadataValue(iss.Body, "type") != "task" {
+		if issueTypeOf(*iss) != "task" {
 			continue
 		}
 		if readyLabel != "" && !hasLabel(iss, readyLabel) {
@@ -402,6 +402,48 @@ func fetchBlockedBy(issues []issue, graphqlResponse string) {
 			issues[i].BlockedBy = deps
 		}
 	}
+}
+
+// fetchIssueTypes parses a GraphQL response and populates the IssueType field
+// on each issue from the issueType { name } data.
+func fetchIssueTypes(issues []issue, graphqlResponse string) {
+	var resp struct {
+		Data struct {
+			Repository struct {
+				Issues struct {
+					Nodes []struct {
+						Number    int `json:"number"`
+						IssueType *struct {
+							Name string `json:"name"`
+						} `json:"issueType"`
+					} `json:"nodes"`
+				} `json:"issues"`
+			} `json:"repository"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(graphqlResponse), &resp); err != nil {
+		return
+	}
+	byNumber := make(map[int]string)
+	for _, node := range resp.Data.Repository.Issues.Nodes {
+		if node.IssueType != nil {
+			byNumber[node.Number] = strings.ToLower(node.IssueType.Name)
+		}
+	}
+	for i := range issues {
+		if t, ok := byNumber[issues[i].Number]; ok {
+			issues[i].IssueType = t
+		}
+	}
+}
+
+// issueType returns the issue's type, preferring the native GitHub IssueType field
+// and falling back to the metadata block for backward compatibility.
+func issueTypeOf(iss issue) string {
+	if iss.IssueType != "" {
+		return iss.IssueType
+	}
+	return planning.MetadataValue(iss.Body, "type")
 }
 
 func hasLabel(iss *issue, name string) bool {
