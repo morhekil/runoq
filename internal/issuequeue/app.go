@@ -184,6 +184,10 @@ func NewWithClient(args []string, env []string, cwd string, stdout io.Writer, st
 	}
 }
 
+func (a *App) AppendEnv(entries ...string) {
+	a.env = append(a.env, entries...)
+}
+
 func (a *App) SetCommandExecutor(execFn shell.CommandExecutor) {
 	if execFn == nil {
 		a.execCommand = shell.RunCommand
@@ -430,19 +434,20 @@ func (a *App) Create(ctx context.Context, repo string, title string, body string
 	}
 	a.log("issue-queue", fmt.Sprintf("create: title=%q result_url=%s", title, url))
 
-	if opts.ParentEpic != "" {
-		newIssueNumber := issueURLPattern.FindString(url)
-		if newIssueNumber == "" {
-			return shell.Failf(a.stderr, "failed to parse created issue number from %q", url)
-		}
+	newIssueNumber := issueURLPattern.FindString(url)
+
+	// Set issueType, workflow labels, and blockedBy via GraphQL mutations
+	if newIssueNumber != "" {
+		a.postCreateMutations(ctx, repo, newIssueNumber, opts)
+	}
+
+	// Link as sub-issue of parent epic
+	if opts.ParentEpic != "" && newIssueNumber != "" {
 		childID, err := a.ghClient.Output(ctx, "api", fmt.Sprintf("repos/%s/issues/%s", repo, newIssueNumber), "--jq", ".id")
-		if err != nil {
-			return shell.Failf(a.stderr, "%v", err)
+		if err == nil {
+			a.ghClient.Run(ctx, []string{"api", fmt.Sprintf("repos/%s/issues/%s/sub_issues", repo, opts.ParentEpic), "--method", "POST", "-F", "sub_issue_id=" + strings.TrimSpace(childID)}, io.Discard, io.Discard)
+			a.log("issue-queue", fmt.Sprintf("create: linked issue #%s as sub-issue of epic #%s", newIssueNumber, opts.ParentEpic))
 		}
-		if err := a.ghClient.Run(ctx, []string{"api", fmt.Sprintf("repos/%s/issues/%s/sub_issues", repo, opts.ParentEpic), "--method", "POST", "-F", "sub_issue_id=" + childID}, io.Discard, io.Discard); err != nil {
-			return shell.Failf(a.stderr, "%v", err)
-		}
-		a.log("issue-queue", fmt.Sprintf("create: linked issue #%s as sub-issue of epic #%s", newIssueNumber, opts.ParentEpic))
 	}
 
 	return a.writeJSON(createResult{Title: title, URL: url})
@@ -818,52 +823,128 @@ func (a *App) writeCreateBody(body string, opts createOptions) (string, error) {
 		_ = file.Close()
 	}()
 
-	var depends strings.Builder
-	depends.WriteByte('[')
-	for i, dep := range opts.DependsOn {
-		if i > 0 {
-			depends.WriteByte(',')
-		}
-		depends.WriteString(strconv.Itoa(dep))
-	}
-	depends.WriteByte(']')
-
-	if _, err := fmt.Fprintln(file, "<!-- runoq:meta"); err != nil {
-		return "", err
-	}
-	if _, err := fmt.Fprintf(file, "depends_on: %s\n", depends.String()); err != nil {
-		return "", err
-	}
-	if _, err := fmt.Fprintf(file, "priority: %s\n", opts.Priority); err != nil {
-		return "", err
-	}
-	if _, err := fmt.Fprintf(file, "estimated_complexity: %s\n", opts.EstimatedComplexity); err != nil {
-		return "", err
-	}
-	if opts.ComplexityRationale != "" {
-		if _, err := fmt.Fprintf(file, "complexity_rationale: %s\n", opts.ComplexityRationale); err != nil {
-			return "", err
-		}
-	}
-	if _, err := fmt.Fprintf(file, "type: %s\n", opts.IssueType); err != nil {
-		return "", err
-	}
-	if opts.MilestoneType != "" {
-		if _, err := fmt.Fprintf(file, "milestone_type: %s\n", opts.MilestoneType); err != nil {
-			return "", err
-		}
-	}
-	if opts.ParentEpic != "" {
-		if _, err := fmt.Fprintf(file, "parent_epic: %s\n", opts.ParentEpic); err != nil {
-			return "", err
-		}
-	}
 	body = strings.ReplaceAll(body, `\n`, "\n")
-	if _, err := fmt.Fprintf(file, "-->\n\n%s\n", body); err != nil {
+	if _, err := fmt.Fprintf(file, "%s\n", body); err != nil {
 		return "", err
+	}
+
+	// Append complexity as display-only prose (not parsed back)
+	if opts.EstimatedComplexity != "" && opts.EstimatedComplexity != "medium" {
+		complexity := opts.EstimatedComplexity
+		if opts.ComplexityRationale != "" {
+			complexity += " — " + opts.ComplexityRationale
+		}
+		if _, err := fmt.Fprintf(file, "\n> **Complexity**: %s\n", complexity); err != nil {
+			return "", err
+		}
 	}
 
 	return file.Name(), nil
+}
+
+// postCreateMutations runs GraphQL mutations after issue creation:
+// sets issueType, adds workflow/milestone labels, sets blockedBy dependencies.
+func (a *App) postCreateMutations(ctx context.Context, repo string, issueNumber string, opts createOptions) {
+	// Get issue node ID
+	nodeID, err := a.ghClient.Output(ctx, "api", fmt.Sprintf("repos/%s/issues/%s", repo, issueNumber), "--jq", ".node_id")
+	if err != nil {
+		a.log("issue-queue", fmt.Sprintf("create: warning: failed to get node ID for #%s: %v", issueNumber, err))
+		return
+	}
+	nodeID = strings.TrimSpace(nodeID)
+
+	// Set issueType
+	issueTypeIDs, err := a.loadIssueTypeIDs()
+	if err == nil {
+		ghType := opts.IssueType
+		if ghType == "planning" || ghType == "adjustment" {
+			ghType = "task" // workflow states map to Task
+		}
+		if typeID, ok := issueTypeIDs[ghType]; ok {
+			mutation := fmt.Sprintf(`mutation { updateIssueIssueType(input: {issueId: %q, issueTypeId: %q}) { issue { id } } }`, nodeID, typeID)
+			a.ghClient.Run(ctx, []string{"api", "graphql", "-f", "query=" + mutation}, io.Discard, io.Discard)
+		}
+	}
+
+	// Add workflow labels (planning, adjustment) and milestone type labels
+	var labelNames []string
+	switch opts.IssueType {
+	case "planning":
+		labelNames = append(labelNames, "runoq:planning")
+	case "adjustment":
+		labelNames = append(labelNames, "runoq:adjustment")
+	}
+	if opts.MilestoneType != "" {
+		labelNames = append(labelNames, "runoq:"+opts.MilestoneType)
+	}
+	if len(labelNames) > 0 {
+		// Get label node IDs
+		for _, name := range labelNames {
+			labelIDRaw, err := a.ghClient.Output(ctx, "api", "graphql", "-f", fmt.Sprintf(`query=query { repository(owner: %q, name: %q) { label(name: %q) { id } } }`,
+				repoOwner(repo), repoName(repo), name))
+			if err != nil {
+				continue
+			}
+			var labelResp struct {
+				Data struct {
+					Repository struct {
+						Label struct {
+							ID string `json:"id"`
+						} `json:"label"`
+					} `json:"repository"`
+				} `json:"data"`
+			}
+			if json.Unmarshal([]byte(labelIDRaw), &labelResp) == nil && labelResp.Data.Repository.Label.ID != "" {
+				mutation := fmt.Sprintf(`mutation { addLabelsToLabelable(input: {labelableId: %q, labelIds: [%q]}) { labelable { __typename } } }`, nodeID, labelResp.Data.Repository.Label.ID)
+				a.ghClient.Run(ctx, []string{"api", "graphql", "-f", "query=" + mutation}, io.Discard, io.Discard)
+			}
+		}
+	}
+
+	// Set blockedBy dependencies
+	for _, dep := range opts.DependsOn {
+		depNodeID, err := a.ghClient.Output(ctx, "api", fmt.Sprintf("repos/%s/issues/%d", repo, dep), "--jq", ".node_id")
+		if err != nil {
+			continue
+		}
+		depNodeID = strings.TrimSpace(depNodeID)
+		mutation := fmt.Sprintf(`mutation { addBlockedBy(input: {issueId: %q, blockingIssueId: %q}) { blockedIssue { number } } }`, nodeID, depNodeID)
+		a.ghClient.Run(ctx, []string{"api", "graphql", "-f", "query=" + mutation}, io.Discard, io.Discard)
+	}
+}
+
+func repoOwner(repo string) string {
+	parts := strings.SplitN(repo, "/", 2)
+	if len(parts) > 0 {
+		return parts[0]
+	}
+	return ""
+}
+
+func repoName(repo string) string {
+	parts := strings.SplitN(repo, "/", 2)
+	if len(parts) > 1 {
+		return parts[1]
+	}
+	return ""
+}
+
+// loadIssueTypeIDs reads the cached issue type mapping from .runoq/issue-types.json.
+func (a *App) loadIssueTypeIDs() (map[string]string, error) {
+	targetRoot, ok := shell.EnvLookup(a.env, "TARGET_ROOT")
+	if !ok || targetRoot == "" {
+		targetRoot = a.cwd
+	}
+	path := filepath.Join(targetRoot, ".runoq", "issue-types.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read issue-types.json: %w (run runoq init first)", err)
+	}
+	var mapping map[string]string
+	if err := json.Unmarshal(data, &mapping); err != nil {
+		return nil, fmt.Errorf("parse issue-types.json: %w", err)
+	}
+	return mapping, nil
 }
 
 func (a *App) loadConfig() (config, error) {

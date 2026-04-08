@@ -302,8 +302,12 @@ func TestSetStatusDoneRetriesCloseOnce(t *testing.T) {
 	}
 }
 
-func TestCreateWritesMetadataAndLinksParentEpic(t *testing.T) {
+func TestCreateSetsIssueTypeAndLinksParentEpic(t *testing.T) {
 	t.Parallel()
+
+	tmpDir := t.TempDir()
+	os.MkdirAll(filepath.Join(tmpDir, ".runoq"), 0o755)
+	os.WriteFile(filepath.Join(tmpDir, ".runoq", "issue-types.json"), []byte(`{"task":"IT_task","epic":"IT_epic"}`), 0o644)
 
 	app := newTestApp(t, []string{
 		"create", "owner/repo", "Implement queue", "## Acceptance Criteria\n\n- [ ] Works.",
@@ -314,6 +318,8 @@ func TestCreateWritesMetadataAndLinksParentEpic(t *testing.T) {
 		"--type", "task",
 		"--parent-epic", "77",
 	})
+	app.AppendEnv("TARGET_ROOT=" + tmpDir)
+
 	var bodyText string
 	var commands []string
 	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
@@ -321,7 +327,7 @@ func TestCreateWritesMetadataAndLinksParentEpic(t *testing.T) {
 		command := req.Name + " " + strings.Join(req.Args, " ")
 		commands = append(commands, command)
 		switch {
-		case strings.Contains(command, "issue create --repo owner/repo --title Implement queue --body-file "):
+		case strings.Contains(command, "issue create"):
 			for i := range len(req.Args) {
 				if req.Args[i] == "--body-file" {
 					data, err := os.ReadFile(req.Args[i+1])
@@ -334,13 +340,17 @@ func TestCreateWritesMetadataAndLinksParentEpic(t *testing.T) {
 			}
 			_, _ = req.Stdout.Write([]byte("https://github.com/owner/repo/issues/99"))
 			return nil
-		case strings.Contains(command, "api repos/owner/repo/issues/99 --jq .id"):
+		case strings.Contains(command, "--jq .node_id"):
+			_, _ = req.Stdout.Write([]byte("MDU6SXNzdWU5OQ=="))
+			return nil
+		case strings.Contains(command, "--jq .id"):
 			_, _ = req.Stdout.Write([]byte("12345"))
 			return nil
-		case strings.Contains(command, "api repos/owner/repo/issues/77/sub_issues --method POST -F sub_issue_id=12345"):
+		case strings.Contains(command, "api graphql"):
+			return nil
+		case strings.Contains(command, "sub_issues"):
 			return nil
 		default:
-			t.Fatalf("unexpected command: %s", command)
 			return nil
 		}
 	})
@@ -349,16 +359,46 @@ func TestCreateWritesMetadataAndLinksParentEpic(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run returned %d stderr=%q", code, app.stderr.(*bytes.Buffer).String())
 	}
-	if !strings.Contains(bodyText, "depends_on: [12,14]") || !strings.Contains(bodyText, "priority: 1") || !strings.Contains(bodyText, "complexity_rationale: touches queue scheduling") {
-		t.Fatalf("unexpected body file:\n%s", bodyText)
+	// Body should NOT contain runoq:meta block
+	if strings.Contains(bodyText, "runoq:meta") {
+		t.Fatalf("body should not contain runoq:meta block:\n%s", bodyText)
 	}
-	if len(commands) != 3 {
-		t.Fatalf("unexpected command count: %v", commands)
+	// Body should contain the actual content
+	if !strings.Contains(bodyText, "## Acceptance Criteria") {
+		t.Fatalf("body should contain acceptance criteria:\n%s", bodyText)
+	}
+	// Should have GraphQL calls for issueType and blockedBy
+	hasIssueTypeMutation := false
+	hasBlockedByMutation := false
+	hasSubIssuesCall := false
+	for _, cmd := range commands {
+		if strings.Contains(cmd, "updateIssueIssueType") {
+			hasIssueTypeMutation = true
+		}
+		if strings.Contains(cmd, "addBlockedBy") {
+			hasBlockedByMutation = true
+		}
+		if strings.Contains(cmd, "sub_issues") {
+			hasSubIssuesCall = true
+		}
+	}
+	if !hasIssueTypeMutation {
+		t.Error("expected updateIssueIssueType mutation")
+	}
+	if !hasBlockedByMutation {
+		t.Error("expected addBlockedBy mutation for dependencies")
+	}
+	if !hasSubIssuesCall {
+		t.Error("expected sub_issues API call for parent epic")
 	}
 }
 
-func TestCreatePlanningWritesPlanningType(t *testing.T) {
+func TestCreatePlanningAddsLabel(t *testing.T) {
 	t.Parallel()
+
+	tmpDir := t.TempDir()
+	os.MkdirAll(filepath.Join(tmpDir, ".runoq"), 0o755)
+	os.WriteFile(filepath.Join(tmpDir, ".runoq", "issue-types.json"), []byte(`{"task":"IT_task","epic":"IT_epic"}`), 0o644)
 
 	app := newTestApp(t, []string{
 		"create", "owner/repo", "Plan milestone 1", "body",
@@ -366,28 +406,27 @@ func TestCreatePlanningWritesPlanningType(t *testing.T) {
 		"--priority", "1",
 		"--estimated-complexity", "low",
 	})
-	var bodyText string
+	app.AppendEnv("TARGET_ROOT=" + tmpDir)
+
+	var commands []string
 	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
-		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
-		if strings.Contains(command, "issue create --repo owner/repo --title Plan milestone 1 --body-file ") {
+		commands = append(commands, command)
+		if strings.Contains(command, "issue create") {
 			if strings.Contains(command, "--assignee") {
 				t.Fatal("create must not assign; assignment is a separate step")
-			}
-			for i := range len(req.Args) {
-				if req.Args[i] == "--body-file" {
-					data, err := os.ReadFile(req.Args[i+1])
-					if err != nil {
-						t.Fatalf("read body file: %v", err)
-					}
-					bodyText = string(data)
-					break
-				}
 			}
 			_, _ = req.Stdout.Write([]byte("https://github.com/owner/repo/issues/99"))
 			return nil
 		}
-		t.Fatalf("unexpected command: %s", command)
+		if strings.Contains(command, "--jq .node_id") {
+			_, _ = req.Stdout.Write([]byte("NODE99"))
+			return nil
+		}
+		if strings.Contains(command, "runoq:planning") {
+			_, _ = req.Stdout.Write([]byte(`{"data":{"repository":{"label":{"id":"LA_planning"}}}}`))
+			return nil
+		}
 		return nil
 	})
 
@@ -395,13 +434,31 @@ func TestCreatePlanningWritesPlanningType(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run returned %d stderr=%q", code, app.stderr.(*bytes.Buffer).String())
 	}
-	if !strings.Contains(bodyText, "type: planning") {
-		t.Fatalf("unexpected body file:\n%s", bodyText)
+	// Should set issueType to Task (planning maps to Task) and add runoq:planning label
+	hasTypeMutation := false
+	hasLabelMutation := false
+	for _, cmd := range commands {
+		if strings.Contains(cmd, "updateIssueIssueType") && strings.Contains(cmd, "IT_task") {
+			hasTypeMutation = true
+		}
+		if strings.Contains(cmd, "addLabelsToLabelable") && strings.Contains(cmd, "LA_planning") {
+			hasLabelMutation = true
+		}
+	}
+	if !hasTypeMutation {
+		t.Error("expected issueType set to Task for planning type")
+	}
+	if !hasLabelMutation {
+		t.Error("expected runoq:planning label added")
 	}
 }
 
-func TestCreateAdjustmentWritesAdjustmentType(t *testing.T) {
+func TestCreateAdjustmentAddsLabel(t *testing.T) {
 	t.Parallel()
+
+	tmpDir := t.TempDir()
+	os.MkdirAll(filepath.Join(tmpDir, ".runoq"), 0o755)
+	os.WriteFile(filepath.Join(tmpDir, ".runoq", "issue-types.json"), []byte(`{"task":"IT_task","epic":"IT_epic"}`), 0o644)
 
 	app := newTestApp(t, []string{
 		"create", "owner/repo", "Adjust milestones", "body",
@@ -409,28 +466,24 @@ func TestCreateAdjustmentWritesAdjustmentType(t *testing.T) {
 		"--priority", "1",
 		"--estimated-complexity", "low",
 	})
-	var bodyText string
+	app.AppendEnv("TARGET_ROOT=" + tmpDir)
+
+	var commands []string
 	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
-		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
-		if strings.Contains(command, "issue create --repo owner/repo --title Adjust milestones --body-file ") {
-			if strings.Contains(command, "--assignee") {
-				t.Fatal("create must not assign; assignment is a separate step")
-			}
-			for i := range len(req.Args) {
-				if req.Args[i] == "--body-file" {
-					data, err := os.ReadFile(req.Args[i+1])
-					if err != nil {
-						t.Fatalf("read body file: %v", err)
-					}
-					bodyText = string(data)
-					break
-				}
-			}
+		commands = append(commands, command)
+		if strings.Contains(command, "issue create") {
 			_, _ = req.Stdout.Write([]byte("https://github.com/owner/repo/issues/100"))
 			return nil
 		}
-		t.Fatalf("unexpected command: %s", command)
+		if strings.Contains(command, "--jq .node_id") {
+			_, _ = req.Stdout.Write([]byte("NODE100"))
+			return nil
+		}
+		if strings.Contains(command, "runoq:adjustment") {
+			_, _ = req.Stdout.Write([]byte(`{"data":{"repository":{"label":{"id":"LA_adj"}}}}`))
+			return nil
+		}
 		return nil
 	})
 
@@ -438,8 +491,14 @@ func TestCreateAdjustmentWritesAdjustmentType(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run returned %d stderr=%q", code, app.stderr.(*bytes.Buffer).String())
 	}
-	if !strings.Contains(bodyText, "type: adjustment") {
-		t.Fatalf("unexpected body file:\n%s", bodyText)
+	hasAdjLabel := false
+	for _, cmd := range commands {
+		if strings.Contains(cmd, "addLabelsToLabelable") && strings.Contains(cmd, "LA_adj") {
+			hasAdjLabel = true
+		}
+	}
+	if !hasAdjLabel {
+		t.Error("expected runoq:adjustment label added")
 	}
 }
 
@@ -577,7 +636,6 @@ func TestCreateBodyInterpretsEscapedNewlines(t *testing.T) {
 	})
 	var bodyText string
 	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
-		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
 		if strings.Contains(command, "issue create") {
 			for i := range len(req.Args) {
@@ -593,8 +651,7 @@ func TestCreateBodyInterpretsEscapedNewlines(t *testing.T) {
 			_, _ = req.Stdout.Write([]byte("https://github.com/owner/repo/issues/99"))
 			return nil
 		}
-		t.Fatalf("unexpected command: %s", command)
-		return nil
+		return nil // allow post-create mutations
 	})
 
 	code := app.Run(t.Context())
@@ -619,7 +676,6 @@ func TestCreatePlanningDoesNotAssign(t *testing.T) {
 		"--estimated-complexity", "low",
 	})
 	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
-		t.Helper()
 		command := req.Name + " " + strings.Join(req.Args, " ")
 		if strings.Contains(command, "issue create") {
 			if strings.Contains(command, "--assignee") {
@@ -628,8 +684,7 @@ func TestCreatePlanningDoesNotAssign(t *testing.T) {
 			_, _ = req.Stdout.Write([]byte("https://github.com/owner/repo/issues/99"))
 			return nil
 		}
-		t.Fatalf("unexpected command: %s", command)
-		return nil
+		return nil // allow post-create mutations
 	})
 
 	code := app.Run(t.Context())
@@ -759,8 +814,11 @@ func TestCreateExportedMethodSkipsArgParsing(t *testing.T) {
 	if !strings.Contains(stdout, "github.com/owner/repo/issues/99") {
 		t.Fatalf("expected issue URL in stdout, got %q", stdout)
 	}
-	if !strings.Contains(bodyText, "type: task") || !strings.Contains(bodyText, "priority: 1") {
-		t.Fatalf("unexpected body:\n%s", bodyText)
+	if strings.Contains(bodyText, "runoq:meta") {
+		t.Fatalf("body should not contain metadata block:\n%s", bodyText)
+	}
+	if !strings.Contains(bodyText, "## AC") {
+		t.Fatalf("body should contain content:\n%s", bodyText)
 	}
 }
 
