@@ -2,7 +2,6 @@ package planning
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 )
 
@@ -77,37 +76,3 @@ func ExtractMarkedJSONBlock(text, marker string) (string, error) {
 	return "", fmt.Errorf("no fenced code block after marker %q", marker)
 }
 
-// MetadataValue extracts a value from a runoq:meta block in an issue body.
-// Returns empty string if the key is not found.
-func MetadataValue(body string, key string) string {
-	inMeta := false
-	prefix := key + ":"
-	for line := range strings.SplitSeq(body, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.Contains(trimmed, "<!-- runoq:meta") {
-			inMeta = true
-			continue
-		}
-		if inMeta && strings.Contains(trimmed, "-->") {
-			return ""
-		}
-		if inMeta && strings.HasPrefix(trimmed, prefix) {
-			return strings.TrimSpace(strings.TrimPrefix(trimmed, prefix))
-		}
-	}
-	return ""
-}
-
-// MetadataPriority extracts the priority from a runoq:meta block.
-// Returns 999999 if not found or not a valid integer.
-func MetadataPriority(body string) int {
-	val := MetadataValue(body, "priority")
-	if val == "" {
-		return 999999
-	}
-	n, err := strconv.Atoi(val)
-	if err != nil {
-		return 999999
-	}
-	return n
-}
