@@ -33,6 +33,7 @@ type App struct {
 	stdout      io.Writer
 	stderr      io.Writer
 	execCommand shell.CommandExecutor
+	cfgCache    *config // non-nil when injected by caller
 }
 
 type contractError struct {
@@ -87,6 +88,39 @@ func (a *App) SetCommandExecutor(execFn shell.CommandExecutor) {
 		return
 	}
 	a.execCommand = execFn
+}
+
+// DispatchConfig holds label and naming config for injection by callers.
+type DispatchConfig struct {
+	ReadyLabel      string
+	InProgressLabel string
+	DoneLabel       string
+	NeedsReview     string
+	Blocked         string
+	BranchPrefix    string
+	WorktreePrefix  string
+}
+
+// SetConfig injects config so the app skips reading from disk.
+// Used by callers that already loaded the config (e.g. the tick runner).
+func (a *App) SetConfig(dc DispatchConfig) {
+	a.cfgCache = &config{
+		Labels: struct {
+			Ready       string `json:"ready"`
+			InProgress  string `json:"inProgress"`
+			Done        string `json:"done"`
+			NeedsReview string `json:"needsReview"`
+			Blocked     string `json:"blocked"`
+		}{
+			Ready:       dc.ReadyLabel,
+			InProgress:  dc.InProgressLabel,
+			Done:        dc.DoneLabel,
+			NeedsReview: dc.NeedsReview,
+			Blocked:     dc.Blocked,
+		},
+		BranchPrefix:   dc.BranchPrefix,
+		WorktreePrefix: dc.WorktreePrefix,
+	}
 }
 
 func (a *App) Run(ctx context.Context) int {
@@ -659,6 +693,9 @@ func (a *App) ghOutputQuiet(ctx context.Context, args ...string) (string, error)
 }
 
 func (a *App) loadConfig() (config, error) {
+	if a.cfgCache != nil {
+		return *a.cfgCache, nil
+	}
 	configPath, err := a.configPath()
 	if err != nil {
 		return config{}, err

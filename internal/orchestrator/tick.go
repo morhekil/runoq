@@ -31,6 +31,10 @@ type TickConfig struct {
 	ReadyLabel        string
 	InProgressLabel    string
 	DoneLabel          string
+	NeedsReviewLabel   string
+	BlockedLabel       string
+	BranchPrefix       string
+	WorktreePrefix     string
 	LastCompletedIssue int
 	Env                []string
 	ExecCommand       shell.CommandExecutor
@@ -81,6 +85,17 @@ func (t *tickRunner) run(ctx context.Context) int {
 
 	dsApp := dispatchsafety.New(nil, t.cfg.Env, "", io.Discard, io.Discard)
 	dsApp.SetCommandExecutor(t.cfg.ExecCommand)
+	if t.cfg.ReadyLabel != "" {
+		dsApp.SetConfig(dispatchsafety.DispatchConfig{
+			ReadyLabel:      t.cfg.ReadyLabel,
+			InProgressLabel: t.cfg.InProgressLabel,
+			DoneLabel:       t.cfg.DoneLabel,
+			NeedsReview:     t.cfg.NeedsReviewLabel,
+			Blocked:         t.cfg.BlockedLabel,
+			BranchPrefix:    t.cfg.BranchPrefix,
+			WorktreePrefix:  t.cfg.WorktreePrefix,
+		})
+	}
 	dsApp.Reconcile(ctx, t.cfg.Repo)
 
 	t.step("Fetching issues")
@@ -886,6 +901,9 @@ func (t *tickRunner) newIssueQueueApp() (*issuequeue.App, *bytes.Buffer) {
 	var stdout bytes.Buffer
 	app := issuequeue.New(nil, t.cfg.Env, "", &stdout, t.cfg.Stderr)
 	app.SetCommandExecutor(t.cfg.ExecCommand)
+	if t.cfg.ReadyLabel != "" {
+		app.SetLabels(t.cfg.ReadyLabel, t.cfg.InProgressLabel, t.cfg.DoneLabel, t.cfg.NeedsReviewLabel, t.cfg.BlockedLabel)
+	}
 	return app, &stdout
 }
 

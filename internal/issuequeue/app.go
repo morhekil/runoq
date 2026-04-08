@@ -36,6 +36,7 @@ type App struct {
 	stderr      io.Writer
 	execCommand shell.CommandExecutor
 	ghClient    *gh.Client
+	cfgCache    *config // non-nil when injected by caller
 }
 
 type config struct {
@@ -174,6 +175,26 @@ func (a *App) SetCommandExecutor(execFn shell.CommandExecutor) {
 	}
 	a.execCommand = execFn
 	a.ghClient = gh.NewClient(execFn, http.DefaultClient, a.env, a.cwd)
+}
+
+// SetLabels injects label config so the app skips reading from disk.
+// Used by callers that already loaded the config (e.g. the tick runner).
+func (a *App) SetLabels(ready, inProgress, done, needsReview, blocked string) {
+	a.cfgCache = &config{
+		Labels: struct {
+			Ready       string `json:"ready"`
+			InProgress  string `json:"inProgress"`
+			Done        string `json:"done"`
+			NeedsReview string `json:"needsReview"`
+			Blocked     string `json:"blocked"`
+		}{
+			Ready:       ready,
+			InProgress:  inProgress,
+			Done:        done,
+			NeedsReview: needsReview,
+			Blocked:     blocked,
+		},
+	}
 }
 
 func (a *App) Run(ctx context.Context) int {
@@ -829,6 +850,9 @@ func (a *App) writeCreateBody(body string, opts createOptions) (string, error) {
 }
 
 func (a *App) loadConfig() (config, error) {
+	if a.cfgCache != nil {
+		return *a.cfgCache, nil
+	}
 	path, err := a.configPath()
 	if err != nil {
 		return config{}, err

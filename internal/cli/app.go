@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/saruman/runoq/internal/config"
 	"github.com/saruman/runoq/internal/gitops"
 	"github.com/saruman/runoq/internal/runlog"
 	"github.com/saruman/runoq/internal/orchestrator"
@@ -108,6 +109,17 @@ Run a maintenance review of the target repository.
 `,
 }
 
+// configLabels holds the label names loaded from runoq.json.
+type configLabels struct {
+	Ready             string `json:"ready"`
+	InProgress        string `json:"inProgress"`
+	Done              string `json:"done"`
+	NeedsReview       string `json:"needsReview"`
+	Blocked           string `json:"blocked"`
+	PlanApproved      string `json:"planApproved"`
+	MaintenanceReview string `json:"maintenanceReview"`
+}
+
 type App struct {
 	args           []string
 	env            []string
@@ -117,6 +129,10 @@ type App struct {
 	executablePath string
 	execCommand    shell.CommandExecutor
 	logCloser      io.Closer // set when log writer is created
+	labels         configLabels
+	branchPrefix   string
+	worktreePrefix string
+	configRaw      map[string]json.RawMessage
 }
 
 func New(args []string, env []string, cwd string, stdout io.Writer, stderr io.Writer, executablePath string) *App {
@@ -298,6 +314,24 @@ func (a *App) prepareTargetContext(ctx context.Context, runoqRoot string, env []
 	nextEnv = shell.EnvSet(nextEnv, "TARGET_ROOT", targetRoot)
 	nextEnv = shell.EnvSet(nextEnv, "REPO", repo)
 	nextEnv = prependPath(nextEnv, filepath.Join(runoqRoot, "scripts"))
+
+	// Load runoq.json once for the lifetime of this command.
+	configPath, _ := shell.EnvLookup(nextEnv, "RUNOQ_CONFIG")
+	configPath = config.ResolvePath(configPath, runoqRoot)
+	raw, loadErr := config.LoadFile(configPath)
+	if loadErr == nil {
+		a.configRaw = raw
+		if labelsJSON, ok := raw["labels"]; ok {
+			_ = json.Unmarshal(labelsJSON, &a.labels)
+		}
+		if v, ok := raw["branchPrefix"]; ok {
+			_ = json.Unmarshal(v, &a.branchPrefix)
+		}
+		if v, ok := raw["worktreePrefix"]; ok {
+			_ = json.Unmarshal(v, &a.worktreePrefix)
+		}
+	}
+
 	return nextEnv, 0
 }
 
@@ -464,21 +498,18 @@ func (a *App) runTick(ctx context.Context, env []string, runoqRoot string) int {
 		return shell.Fail(a.stderr, err.Error())
 	}
 
-	// Read labels from runoq config
-	configPath, _ := shell.EnvLookup(env, "RUNOQ_CONFIG")
-	planApprovedLabel := readConfigLabel(configPath, "planApproved")
-	readyLabel := readConfigLabel(configPath, "ready")
-	inProgressLabel := readConfigLabel(configPath, "inProgress")
-	doneLabel := readConfigLabel(configPath, "done")
-
 	return orchestrator.RunTick(ctx, orchestrator.TickConfig{
 		Repo:              repo,
 		PlanFile:          planFile,
 		RunoqRoot:         runoqRoot,
-		PlanApprovedLabel: planApprovedLabel,
-		ReadyLabel:        readyLabel,
-		InProgressLabel:   inProgressLabel,
-		DoneLabel:         doneLabel,
+		PlanApprovedLabel: a.labels.PlanApproved,
+		ReadyLabel:        a.labels.Ready,
+		InProgressLabel:   a.labels.InProgress,
+		DoneLabel:         a.labels.Done,
+		NeedsReviewLabel:  a.labels.NeedsReview,
+		BlockedLabel:      a.labels.Blocked,
+		BranchPrefix:      a.branchPrefix,
+		WorktreePrefix:    a.worktreePrefix,
 		Env:               env,
 		ExecCommand:       a.execCommand,
 		Stdout:            a.stdout,
@@ -495,12 +526,6 @@ func (a *App) runTickWithCapture(ctx context.Context, env []string, runoqRoot st
 		return shell.Fail(a.stderr, err.Error()), 0
 	}
 
-	configPath, _ := shell.EnvLookup(env, "RUNOQ_CONFIG")
-	planApprovedLabel := readConfigLabel(configPath, "planApproved")
-	readyLabel := readConfigLabel(configPath, "ready")
-	inProgressLabel := readConfigLabel(configPath, "inProgress")
-	doneLabel := readConfigLabel(configPath, "done")
-
 	var buf bytes.Buffer
 	teeStdout := io.MultiWriter(a.stdout, &buf)
 
@@ -508,10 +533,14 @@ func (a *App) runTickWithCapture(ctx context.Context, env []string, runoqRoot st
 		Repo:               repo,
 		PlanFile:            planFile,
 		RunoqRoot:           runoqRoot,
-		PlanApprovedLabel:   planApprovedLabel,
-		ReadyLabel:          readyLabel,
-		InProgressLabel:     inProgressLabel,
-		DoneLabel:           doneLabel,
+		PlanApprovedLabel:   a.labels.PlanApproved,
+		ReadyLabel:          a.labels.Ready,
+		InProgressLabel:     a.labels.InProgress,
+		DoneLabel:           a.labels.Done,
+		NeedsReviewLabel:    a.labels.NeedsReview,
+		BlockedLabel:        a.labels.Blocked,
+		BranchPrefix:        a.branchPrefix,
+		WorktreePrefix:      a.worktreePrefix,
 		LastCompletedIssue:  lastCompleted,
 		Env:                 env,
 		ExecCommand:         a.execCommand,
@@ -542,20 +571,6 @@ func parseCompletedIssue(output string) int {
 		}
 	}
 	return 0
-}
-
-func readConfigLabel(configPath string, key string) string {
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return ""
-	}
-	var cfg struct {
-		Labels map[string]string `json:"labels"`
-	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return ""
-	}
-	return cfg.Labels[key]
 }
 
 func (a *App) runLoop(ctx context.Context, env []string, runoqRoot string, args []string) int {
