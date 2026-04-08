@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -483,6 +484,62 @@ func (a *App) runTick(ctx context.Context, env []string, runoqRoot string) int {
 	})
 }
 
+func (a *App) runTickWithCapture(ctx context.Context, env []string, runoqRoot string, lastCompleted int) (int, int) {
+	repo, _ := shell.EnvLookup(env, "REPO")
+	targetRoot, _ := shell.EnvLookup(env, "TARGET_ROOT")
+
+	planFile, err := readProjectPlanFile(targetRoot)
+	if err != nil {
+		return shell.Fail(a.stderr, err.Error()), 0
+	}
+
+	configPath, _ := shell.EnvLookup(env, "RUNOQ_CONFIG")
+	planApprovedLabel := readConfigLabel(configPath, "planApproved")
+	readyLabel := readConfigLabel(configPath, "ready")
+	inProgressLabel := readConfigLabel(configPath, "inProgress")
+
+	var buf bytes.Buffer
+	teeStdout := io.MultiWriter(a.stdout, &buf)
+
+	code := orchestrator.RunTick(ctx, orchestrator.TickConfig{
+		Repo:               repo,
+		PlanFile:            planFile,
+		RunoqRoot:           runoqRoot,
+		PlanApprovedLabel:   planApprovedLabel,
+		ReadyLabel:          readyLabel,
+		InProgressLabel:     inProgressLabel,
+		LastCompletedIssue:  lastCompleted,
+		Env:                 env,
+		ExecCommand:         a.execCommand,
+		Stdout:              teeStdout,
+		Stderr:              a.stderr,
+	})
+
+	completed := parseCompletedIssue(buf.String())
+	return code, completed
+}
+
+// parseCompletedIssue extracts the issue number from "Issue #N — phase: DONE" output.
+func parseCompletedIssue(output string) int {
+	for line := range strings.SplitSeq(output, "\n") {
+		if strings.Contains(line, "phase: DONE") {
+			// "Issue #42 — phase: DONE"
+			if start := strings.Index(line, "#"); start >= 0 {
+				rest := line[start+1:]
+				end := strings.IndexFunc(rest, func(r rune) bool { return r < '0' || r > '9' })
+				if end < 0 {
+					end = len(rest)
+				}
+				if end > 0 {
+					n, _ := strconv.Atoi(rest[:end])
+					return n
+				}
+			}
+		}
+	}
+	return 0
+}
+
 func readConfigLabel(configPath string, key string) string {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -529,8 +586,9 @@ func (a *App) runLoop(ctx context.Context, env []string, runoqRoot string, args 
 	defer cancel()
 
 	waitCycles := 0
+	lastCompleted := 0
 	for {
-		code := a.runTick(loopCtx, env, runoqRoot)
+		code, completed := a.runTickWithCapture(loopCtx, env, runoqRoot, lastCompleted)
 
 		select {
 		case <-loopCtx.Done():
@@ -542,6 +600,9 @@ func (a *App) runLoop(ctx context.Context, env []string, runoqRoot string, args 
 		case 0:
 			// Work done, reset wait counter, loop immediately
 			waitCycles = 0
+			if completed > 0 {
+				lastCompleted = completed
+			}
 		case 2:
 			waitCycles++
 			if maxWaitCycles > 0 && waitCycles >= maxWaitCycles {

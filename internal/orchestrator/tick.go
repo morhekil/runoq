@@ -29,6 +29,7 @@ type TickConfig struct {
 	PlanApprovedLabel string
 	ReadyLabel        string
 	InProgressLabel   string
+	LastCompletedIssue int
 	Env               []string
 	ExecCommand       shell.CommandExecutor
 	Stdout            io.Writer
@@ -479,7 +480,7 @@ func (t *tickRunner) handleImplementation(ctx context.Context, epicNumber int) i
 
 	graph := BuildDepGraph(t.issues, epicNumber, t.cfg.ReadyLabel)
 
-	task := graph.Next()
+	task := graph.NextAfter(t.cfg.LastCompletedIssue)
 	if task == nil {
 		if graph.HasCycle() {
 			members := graph.CycleMembers()
