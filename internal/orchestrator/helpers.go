@@ -293,7 +293,7 @@ func (a *App) runoqRoot() string {
 	if root, ok := shell.EnvLookup(a.env, "RUNOQ_ROOT"); ok && strings.TrimSpace(root) != "" {
 		return root
 	}
-	if a.cwd != "" && shell.FileExists(filepath.Join(a.cwd, "scripts", "lib", "common.sh")) {
+	if a.cwd != "" && shell.FileExists(filepath.Join(a.cwd, "config", "runoq.json")) {
 		return a.cwd
 	}
 	return ""

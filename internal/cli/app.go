@@ -267,7 +267,7 @@ func (a *App) resolveRuntimeEnv() (string, []string, bool) {
 }
 
 func (a *App) fallbackRoot() string {
-	if a.cwd != "" && shell.FileExists(filepath.Join(a.cwd, "scripts", "lib", "common.sh")) {
+	if a.cwd != "" && shell.FileExists(filepath.Join(a.cwd, "config", "runoq.json")) {
 		return a.cwd
 	}
 	if a.executablePath == "" {
@@ -275,7 +275,7 @@ func (a *App) fallbackRoot() string {
 	}
 	base := filepath.Dir(a.executablePath)
 	candidate := filepath.Clean(filepath.Join(base, ".."))
-	if shell.FileExists(filepath.Join(candidate, "scripts", "lib", "common.sh")) {
+	if shell.FileExists(filepath.Join(candidate, "config", "runoq.json")) {
 		return candidate
 	}
 	return ""

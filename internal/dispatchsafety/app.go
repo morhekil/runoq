@@ -837,7 +837,7 @@ func (a *App) runoqRoot() (string, error) {
 		return value, nil
 	}
 	if strings.TrimSpace(a.cwd) != "" {
-		candidate := filepath.Join(a.cwd, "scripts", "lib", "common.sh")
+		candidate := filepath.Join(a.cwd, "config", "runoq.json")
 		if _, err := os.Stat(candidate); err == nil {
 			return a.cwd, nil
 		}
