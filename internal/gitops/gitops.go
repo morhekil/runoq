@@ -3,6 +3,8 @@
 // go-git-backed, or filesystem-backed depending on the operation.
 package gitops
 
+import "io"
+
 // Repo abstracts all git operations needed by runoq.
 type Repo interface {
 	// Root returns the repository root path.
@@ -79,4 +81,15 @@ type Commit struct {
 type FileChange struct {
 	Status string // "A", "M", "D", "R"
 	Path   string
+}
+
+// SetLogWriter sets a writer for capturing all git subprocess output.
+// Implementations that shell out to git should tee stdout/stderr to this writer.
+func SetLogWriter(r Repo, w io.Writer) {
+	type logWritable interface {
+		SetLogWriter(io.Writer)
+	}
+	if lw, ok := r.(logWritable); ok {
+		lw.SetLogWriter(w)
+	}
 }

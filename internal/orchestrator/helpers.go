@@ -324,6 +324,10 @@ func (a *App) runScript(ctx context.Context, root string, env []string, script s
 }
 
 func (a *App) runProgram(ctx context.Context, env []string, name string, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
+	if a.logWriter != nil {
+		stdout = teeWriter(stdout, a.logWriter)
+		stderr = teeWriter(stderr, a.logWriter)
+	}
 	return a.execCommand(ctx, shell.CommandRequest{
 		Name:   name,
 		Args:   append([]string(nil), args...),
@@ -333,6 +337,15 @@ func (a *App) runProgram(ctx context.Context, env []string, name string, args []
 		Stdout: stdout,
 		Stderr: stderr,
 	})
+}
+
+// teeWriter returns a writer that writes to both w and log.
+// If w is io.Discard, returns log directly to avoid unnecessary copies.
+func teeWriter(w io.Writer, log io.Writer) io.Writer {
+	if w == io.Discard {
+		return log
+	}
+	return io.MultiWriter(w, log)
 }
 
 func (a *App) runoqRoot() string {

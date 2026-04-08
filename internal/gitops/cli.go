@@ -20,10 +20,13 @@ import (
 // cliRepo implements Repo using go-git where possible, with CLI fallbacks
 // for environments where PlainOpen is unavailable (e.g. mock-based tests).
 type cliRepo struct {
-	root string
-	ctx  context.Context
-	exec shell.CommandExecutor
+	root      string
+	ctx       context.Context
+	exec      shell.CommandExecutor
+	logWriter io.Writer
 }
+
+func (r *cliRepo) SetLogWriter(w io.Writer) { r.logWriter = w }
 
 // OpenCLI creates a Repo backed by go-git with CLI fallbacks.
 func OpenCLI(ctx context.Context, root string, exec shell.CommandExecutor) Repo {
@@ -41,12 +44,18 @@ func (r *cliRepo) open(root string) (*git.Repository, error) {
 func (r *cliRepo) git(args ...string) (string, error) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
+	stdoutW := io.Writer(&stdout)
+	stderrW := io.Writer(&stderr)
+	if r.logWriter != nil {
+		stdoutW = io.MultiWriter(&stdout, r.logWriter)
+		stderrW = io.MultiWriter(&stderr, r.logWriter)
+	}
 	err := r.exec(r.ctx, shell.CommandRequest{
 		Name:   "git",
 		Args:   append([]string{"-C", r.root}, args...),
 		Dir:    r.root,
-		Stdout: &stdout,
-		Stderr: &stderr,
+		Stdout: stdoutW,
+		Stderr: stderrW,
 	})
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
@@ -56,12 +65,18 @@ func (r *cliRepo) git(args ...string) (string, error) {
 
 func (r *cliRepo) gitQuiet(args ...string) error {
 	var stderr bytes.Buffer
+	stdoutW := io.Writer(io.Discard)
+	stderrW := io.Writer(&stderr)
+	if r.logWriter != nil {
+		stdoutW = r.logWriter
+		stderrW = io.MultiWriter(&stderr, r.logWriter)
+	}
 	err := r.exec(r.ctx, shell.CommandRequest{
 		Name:   "git",
 		Args:   append([]string{"-C", r.root}, args...),
 		Dir:    r.root,
-		Stdout: io.Discard,
-		Stderr: &stderr,
+		Stdout: stdoutW,
+		Stderr: stderrW,
 	})
 	if err != nil {
 		return fmt.Errorf("git %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
@@ -71,12 +86,18 @@ func (r *cliRepo) gitQuiet(args ...string) error {
 
 func (r *cliRepo) gitDir(dir string, args ...string) error {
 	var stderr bytes.Buffer
+	stdoutW := io.Writer(io.Discard)
+	stderrW := io.Writer(&stderr)
+	if r.logWriter != nil {
+		stdoutW = r.logWriter
+		stderrW = io.MultiWriter(&stderr, r.logWriter)
+	}
 	err := r.exec(r.ctx, shell.CommandRequest{
 		Name:   "git",
 		Args:   append([]string{"-C", dir}, args...),
 		Dir:    dir,
-		Stdout: io.Discard,
-		Stderr: &stderr,
+		Stdout: stdoutW,
+		Stderr: stderrW,
 	})
 	if err != nil {
 		return fmt.Errorf("git %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))

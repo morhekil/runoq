@@ -223,6 +223,35 @@ func TestParseStateFromCommentsEmpty(t *testing.T) {
 	}
 }
 
+func TestRunProgramTeesOutputToLogWriter(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var logBuf bytes.Buffer
+	var stderr bytes.Buffer
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, &stderr)
+	app.SetLogWriter(&logBuf)
+	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
+		_, _ = io.WriteString(req.Stdout, "stdout-data\n")
+		_, _ = io.WriteString(req.Stderr, "stderr-data\n")
+		return nil
+	})
+
+	// Caller passes io.Discard — output should still reach the log writer
+	err := app.runProgram(ctx, app.env, "test-program", nil, nil, io.Discard, io.Discard)
+	if err != nil {
+		t.Fatalf("runProgram: %v", err)
+	}
+
+	logOutput := logBuf.String()
+	if !strings.Contains(logOutput, "stdout-data") {
+		t.Fatalf("expected stdout in log, got %q", logOutput)
+	}
+	if !strings.Contains(logOutput, "stderr-data") {
+		t.Fatalf("expected stderr in log, got %q", logOutput)
+	}
+}
+
 func TestReplaceMarkerContent(t *testing.T) {
 	body := "## Summary\n<!-- runoq:summary:start -->\nPending.\n<!-- runoq:summary:end -->\n\n## Linked Issue\nCloses #42\n"
 	updated := replaceMarkerContent(body, "<!-- runoq:summary:start -->", "<!-- runoq:summary:end -->", "Implemented queue processing.")

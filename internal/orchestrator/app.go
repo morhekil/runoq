@@ -19,6 +19,7 @@ type App struct {
 	cwd         string
 	stdout      io.Writer
 	stderr      io.Writer
+	logWriter   io.Writer
 	execCommand shell.CommandExecutor
 }
 
@@ -31,6 +32,10 @@ func New(args []string, env []string, cwd string, stdout io.Writer, stderr io.Wr
 		stderr:      stderr,
 		execCommand: shell.RunCommand,
 	}
+}
+
+func (a *App) SetLogWriter(w io.Writer) {
+	a.logWriter = w
 }
 
 func (a *App) SetCommandExecutor(execFn shell.CommandExecutor) {
