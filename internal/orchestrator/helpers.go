@@ -390,7 +390,7 @@ func finalizeDecision(state struct {
 	Round    int      `json:"round"`
 	Caveats  []string `json:"caveats"`
 	Summary  string   `json:"summary"`
-}, cfg queueConfig, complexity string) (finalizeVerdict string, issueStatus string, finalizeReason string, complexityOK bool) {
+}, cfg queueConfig) (finalizeVerdict string, issueStatus string, finalizeReason string, complexityOK bool) {
 	if state.Verdict != "PASS" {
 		return "needs-review", "needs-review", fmt.Sprintf("Review verdict was %s (not PASS).", defaultString(state.Verdict, "FAIL")), false
 	}
@@ -401,37 +401,7 @@ func finalizeDecision(state struct {
 		return "needs-review", "needs-review", "Auto-merge is disabled in config.", false
 	}
 
-	complexityOK = autoMergeComplexityAllowed(complexity, autoMergeMaxComplexity(cfg))
-	if complexityOK {
-		return "auto-merge", "done", "", true
-	}
-	return "needs-review", "needs-review", fmt.Sprintf("Complexity %q exceeds auto-merge threshold %q.", complexity, autoMergeMaxComplexity(cfg)), false
-}
-
-func autoMergeComplexityAllowed(complexity string, maxComplexity string) bool {
-	switch maxComplexity {
-	case "high":
-		return true
-	case "medium":
-		return complexity == "low" || complexity == "medium"
-	default:
-		return complexity == "low"
-	}
-}
-
-func autoMergeMaxComplexity(cfg queueConfig) string {
-	value := strings.TrimSpace(cfg.AutoMerge.MaxComplexity)
-	if value == "" {
-		return "low"
-	}
-	return value
-}
-
-func complexityDecisionValue(ok bool) string {
-	if ok {
-		return "true"
-	}
-	return "false"
+	return "auto-merge", "done", "", true
 }
 
 func defaultString(value string, fallback string) string {

@@ -805,7 +805,7 @@ func TestRunLowComplexityIterateReentersDevelopWithChecklist(t *testing.T) {
 	}
 }
 
-func TestRunMediumComplexityGoesToDevelopAndFinalizesNeedsReview(t *testing.T) {
+func TestRunMediumComplexityGoesToDevelopAndAutoMerges(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
 	writeRuntimeConfig(t, root)
@@ -891,9 +891,9 @@ func TestRunMediumComplexityGoesToDevelopAndFinalizesNeedsReview(t *testing.T) {
 	if !strings.Contains(stdout.String(), `"phase":"DONE"`) {
 		t.Fatalf("expected DONE state, got %q", stdout.String())
 	}
-	// Medium complexity + PASS → finalize as needs-review (auto-merge max is "low" in config)
-	if !strings.Contains(stdout.String(), `"finalize_verdict":"needs-review"`) {
-		t.Fatalf("expected needs-review finalize verdict, got %q", stdout.String())
+	// Medium complexity + PASS → auto-merge (complexity gate removed, reviewer verdict is PASS)
+	if !strings.Contains(stdout.String(), `"finalize_verdict":"auto-merge"`) {
+		t.Fatalf("expected auto-merge finalize verdict, got %q", stdout.String())
 	}
 	// Must have invoked issue-runner (went through DEVELOP)
 	if !containsCall(calls, "issue-runner.sh run") {

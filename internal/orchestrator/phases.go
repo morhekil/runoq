@@ -597,20 +597,12 @@ func (a *App) phaseFinalize(ctx context.Context, root string, env []string, repo
 		return "", err
 	}
 
-	complexity := strings.TrimSpace(metadata.EstimatedComplexity)
-	if complexity == "" {
-		complexity = "medium"
-	}
+	a.logInfo("FINALIZE: issue #%d decision=%s", issueNumber, defaultString(state.Decision, "finalize-needs-review"))
 
-	a.logInfo("FINALIZE: issue #%d decision=%s complexity=%s", issueNumber, defaultString(state.Decision, "finalize-needs-review"), complexity)
-
-	finalizeVerdict, issueStatus, finalizeReason, complexityOK := finalizeDecision(state, cfg, complexity)
+	finalizeVerdict, issueStatus, finalizeReason, _ := finalizeDecision(state, cfg)
 	a.logInfo(
-		"FINALIZE: decision table: auto_merge_enabled=%t max_complexity=%s complexity=%s complexity_ok=%s finalize_verdict=%s finalize_reason=%s issue_status=%s",
+		"FINALIZE: decision table: auto_merge_enabled=%t finalize_verdict=%s finalize_reason=%s issue_status=%s",
 		cfg.AutoMerge.Enabled,
-		autoMergeMaxComplexity(cfg),
-		complexity,
-		complexityDecisionValue(complexityOK),
 		finalizeVerdict,
 		defaultString(finalizeReason, "none"),
 		issueStatus,
@@ -645,15 +637,13 @@ func (a *App) phaseFinalize(ctx context.Context, root string, env []string, repo
 	}
 
 	finalizeBody := fmt.Sprintf(
-		"## Finalize - issue #%d\n\n| Field | Value |\n|-------|-------|\n| **Decision** | `%s` |\n| **Issue status** | `%s` |\n| **Review verdict** | %s |\n| **Review score** | %s |\n| **Complexity** | %s |\n| **Auto-merge enabled** | %t |\n| **Auto-merge max complexity** | %s |\n| **Round** | %d / %d |\n",
+		"## Finalize - issue #%d\n\n| Field | Value |\n|-------|-------|\n| **Decision** | `%s` |\n| **Issue status** | `%s` |\n| **Review verdict** | %s |\n| **Review score** | %s |\n| **Auto-merge enabled** | %t |\n| **Round** | %d / %d |\n",
 		issueNumber,
 		finalizeVerdict,
 		issueStatus,
 		defaultString(strings.TrimSpace(state.Verdict), "FAIL"),
 		defaultString(strings.TrimSpace(state.Score), "0"),
-		complexity,
 		cfg.AutoMerge.Enabled,
-		autoMergeMaxComplexity(cfg),
 		max(state.Round, 1),
 		cfg.MaxRounds,
 	)
