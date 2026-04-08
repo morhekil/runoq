@@ -62,15 +62,16 @@ func TestNoEnvLeakageInInternalPackages(t *testing.T) {
 		"internal/cli":    true,
 	}
 
-	// Packages that run as script entry points (invoked as subprocesses)
-	// and need their own config/env loading at their New() constructor.
+	// Packages with standalone CLI entry points (shell wrappers for operator use).
+	// Their New() constructors read env vars for that path; NewDirect() does not.
+	// The orchestrator uses NewDirect() — these exceptions are for the CLI path only.
 	scriptEntryPoints := map[string]bool{
-		"internal/worktree":      true,
-		"internal/verify":        true,
-		"internal/state":         true,
-		"internal/report":        true,
-		"internal/issuequeue":    true,
-		"internal/dispatchsafety": true,
+		"internal/worktree":       true, // worktree.sh — standalone worktree management
+		"internal/verify":         true, // verify.sh — standalone verification
+		"internal/state":          true, // state.sh — standalone state operations
+		"internal/report":         true, // report subcommand
+		"internal/issuequeue":     true, // gh-issue-queue.sh — standalone queue management
+		"internal/dispatchsafety": true, // dispatch-safety.sh — standalone eligibility check
 	}
 
 	root, err := os.Getwd()
