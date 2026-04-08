@@ -13,6 +13,9 @@ import (
 	"strconv"
 	"strings"
 
+	"net/http"
+
+	"github.com/saruman/runoq/internal/gh"
 	"github.com/saruman/runoq/internal/gitops"
 	"github.com/saruman/runoq/internal/shell"
 )
@@ -200,37 +203,24 @@ func parseReviewVerdict(path string) (reviewVerdictResult, error) {
 }
 
 func (a *App) prepareAuth(ctx context.Context, root string, env []string) []string {
-	authEnv := shell.EnvSet(env, "RUNOQ_FORCE_REFRESH_TOKEN", "1")
-	var stdout bytes.Buffer
-	err := a.execCommand(ctx, shell.CommandRequest{
-		Name: "bash",
-		Args: []string{
-			"-lc",
-			`if eval "$("$1" export-token)" 2>/dev/null; then printf 'ok\n%s' "${GH_TOKEN:-}"; else printf 'fail\n%s' "${GH_TOKEN:-}"; fi`,
-			"bash",
-			filepath.Join(root, "scripts", "gh-auth.sh"),
-		},
-		Dir:    a.cwd,
-		Env:    authEnv,
-		Stdout: &stdout,
-		Stderr: a.stderr,
-	})
-	if err != nil {
+	homeDir := ""
+	if h, err := os.UserHomeDir(); err == nil {
+		homeDir = h
+	}
+	client := gh.NewClient(a.execCommand, http.DefaultClient, env, a.cwd, homeDir)
+	if err := client.EnsureToken(ctx); err != nil {
 		a.logInfo("Token mint failed or skipped (will use ambient credentials)")
-		return authEnv
+		return env
 	}
 
-	out := strings.TrimSpace(stdout.String())
-	status, token, _ := strings.Cut(out, "\n")
-	if status == "ok" {
+	// EnsureToken may have set GH_TOKEN on the client's env
+	clientEnv := client.Env()
+	if token, ok := shell.EnvLookup(clientEnv, "GH_TOKEN"); ok && token != "" {
 		a.logInfo("Token mint succeeded")
-	} else {
-		a.logInfo("Token mint failed or skipped (will use ambient credentials)")
+		return shell.EnvSet(env, "GH_TOKEN", token)
 	}
-	if strings.TrimSpace(token) != "" {
-		authEnv = shell.EnvSet(authEnv, "GH_TOKEN", strings.TrimSpace(token))
-	}
-	return authEnv
+	a.logInfo("Token mint skipped (no identity or ambient credentials)")
+	return env
 }
 
 func (a *App) targetRoot(ctx context.Context, env []string) (string, error) {
