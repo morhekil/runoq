@@ -337,6 +337,82 @@ func TestRunProgramTeesOutputToLogWriter(t *testing.T) {
 	}
 }
 
+func TestParseReviewVerdictExtractsScorecard(t *testing.T) {
+	content := `Some review preamble.
+
+## Diff Metrics
+
+| Metric | Value | Target | Status |
+|---|---|---|---|
+| Changed files | 3 | - | |
+| Formatter violations | 0 files | 0 | OK |
+
+## PERFECT-D Scorecard (Diff-Scoped)
+
+| Dimension | Score | Notes |
+|---|---|---|
+| Purpose | 5/5 | Clean |
+| Edge Cases | 4/5 | Minor gap |
+| **Total** | **38/40** | |
+
+## Issues Found
+- **file.go:10** - missing error check
+
+## Checklist
+- [ ] Add error check
+
+REVIEW-TYPE: diff
+VERDICT: ITERATE
+SCORE: 38/40
+CHECKLIST:
+- [ ] Add error check at file.go:10
+`
+	tmpFile, _ := os.CreateTemp("", "review-test-*")
+	tmpFile.WriteString(content)
+	tmpFile.Close()
+	defer os.Remove(tmpFile.Name())
+
+	result, err := parseReviewVerdict(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("parseReviewVerdict: %v", err)
+	}
+	if result.Verdict != "ITERATE" {
+		t.Fatalf("expected ITERATE, got %q", result.Verdict)
+	}
+	if result.Score != "38/40" {
+		t.Fatalf("expected 38/40, got %q", result.Score)
+	}
+	if !strings.Contains(result.Scorecard, "PERFECT-D Scorecard") {
+		t.Fatalf("expected scorecard in result, got %q", result.Scorecard)
+	}
+	if !strings.Contains(result.Scorecard, "Diff Metrics") {
+		t.Fatalf("expected metrics in scorecard, got %q", result.Scorecard)
+	}
+	if strings.Contains(result.Scorecard, "VERDICT:") {
+		t.Fatalf("scorecard should not contain VERDICT line, got %q", result.Scorecard)
+	}
+}
+
+func TestParseScoreNumber(t *testing.T) {
+	tests := []struct {
+		input string
+		want  int
+	}{
+		{"38/40", 38},
+		{"40/40", 40},
+		{"0", 0},
+		{"38", 38},
+		{"", 0},
+		{"abc", 0},
+	}
+	for _, tt := range tests {
+		got := parseScoreNumber(tt.input)
+		if got != tt.want {
+			t.Errorf("parseScoreNumber(%q) = %d, want %d", tt.input, got, tt.want)
+		}
+	}
+}
+
 func TestReplaceMarkerContent(t *testing.T) {
 	body := "## Summary\n<!-- runoq:summary:start -->\nPending.\n<!-- runoq:summary:end -->\n\n## Linked Issue\nCloses #42\n"
 	updated := replaceMarkerContent(body, "<!-- runoq:summary:start -->", "<!-- runoq:summary:end -->", "Implemented queue processing.")
@@ -599,6 +675,89 @@ func TestPhaseFinalizeNeedsReviewWhenAutoMergeDisabled(t *testing.T) {
 	}
 	if !strings.Contains(result, `"finalize_verdict":"needs-review"`) {
 		t.Fatalf("expected needs-review, got %s", result)
+	}
+}
+
+func TestFinalizeDecisionScoreBelowThresholdNeedsReview(t *testing.T) {
+	state := struct {
+		PRNumber int      `json:"pr_number"`
+		Worktree string   `json:"worktree"`
+		Verdict  string   `json:"verdict"`
+		Decision string   `json:"decision"`
+		Score    string   `json:"score"`
+		Round    int      `json:"round"`
+		Caveats  []string `json:"caveats"`
+		Summary  string   `json:"summary"`
+	}{
+		PRNumber: 87,
+		Verdict:  "PASS",
+		Score:    "30/40",
+		Round:    1,
+	}
+
+	cfg := defaultOrchestratorConfig()
+	cfg.AutoMergeMinScore = 35
+
+	verdict, issueStatus, reason, _ := finalizeDecision(state, cfg)
+	if verdict != "needs-review" {
+		t.Fatalf("expected needs-review for low score, got %q", verdict)
+	}
+	if issueStatus != "needs-review" {
+		t.Fatalf("expected needs-review status, got %q", issueStatus)
+	}
+	if !strings.Contains(reason, "Score 30 below auto-merge threshold 35") {
+		t.Fatalf("expected score threshold reason, got %q", reason)
+	}
+}
+
+func TestFinalizeDecisionScoreAboveThresholdAutoMerges(t *testing.T) {
+	state := struct {
+		PRNumber int      `json:"pr_number"`
+		Worktree string   `json:"worktree"`
+		Verdict  string   `json:"verdict"`
+		Decision string   `json:"decision"`
+		Score    string   `json:"score"`
+		Round    int      `json:"round"`
+		Caveats  []string `json:"caveats"`
+		Summary  string   `json:"summary"`
+	}{
+		PRNumber: 87,
+		Verdict:  "PASS",
+		Score:    "38/40",
+		Round:    1,
+	}
+
+	cfg := defaultOrchestratorConfig()
+	cfg.AutoMergeMinScore = 35
+
+	verdict, _, _, _ := finalizeDecision(state, cfg)
+	if verdict != "auto-merge" {
+		t.Fatalf("expected auto-merge for score above threshold, got %q", verdict)
+	}
+}
+
+func TestFinalizeDecisionZeroThresholdIgnoresScore(t *testing.T) {
+	state := struct {
+		PRNumber int      `json:"pr_number"`
+		Worktree string   `json:"worktree"`
+		Verdict  string   `json:"verdict"`
+		Decision string   `json:"decision"`
+		Score    string   `json:"score"`
+		Round    int      `json:"round"`
+		Caveats  []string `json:"caveats"`
+		Summary  string   `json:"summary"`
+	}{
+		PRNumber: 87,
+		Verdict:  "PASS",
+		Score:    "10/40",
+		Round:    1,
+	}
+
+	cfg := defaultOrchestratorConfig()
+	// AutoMergeMinScore defaults to 0, which means no threshold
+	verdict, _, _, _ := finalizeDecision(state, cfg)
+	if verdict != "auto-merge" {
+		t.Fatalf("expected auto-merge when threshold is 0, got %q", verdict)
 	}
 }
 
@@ -1237,6 +1396,170 @@ func dryRunMockExecutor(t *testing.T) shell.CommandExecutor {
 }
 
 // defaultOrchestratorConfig returns the standard test config with all labels and prefix set.
+func TestPhaseOpenPRCreatesPRAndSetsState(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var stderr bytes.Buffer
+	var calls []string
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, &stderr)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{calls: &calls, issueNumber: 42, issueTitle: "Implement queue"}))
+
+	stateJSON := `{"issue":42,"phase":"DEVELOP","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":0,"round":1}`
+	result, err := app.phaseOpenPR(ctx, root, app.env, "owner/repo", 42, stateJSON, "Implement queue")
+	if err != nil {
+		t.Fatalf("phaseOpenPR: %v", err)
+	}
+	if !strings.Contains(result, `"phase":"OPEN-PR"`) {
+		t.Fatalf("expected OPEN-PR phase, got %s", result)
+	}
+	if !strings.Contains(result, `"pr_number":87`) {
+		t.Fatalf("expected pr_number 87, got %s", result)
+	}
+	if !containsCall(calls, "pr create") {
+		t.Fatalf("expected pr create call, got %v", calls)
+	}
+	if !strings.Contains(stderr.String(), "OPEN-PR: created draft PR #87") {
+		t.Fatalf("expected OPEN-PR log, got %q", stderr.String())
+	}
+}
+
+func TestEnsurePRCreatedSkipsWhenPRExists(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var calls []string
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, io.Discard)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{calls: &calls, issueNumber: 42, issueTitle: "Implement queue"}))
+
+	stateJSON := `{"issue":42,"phase":"DEVELOP","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":87,"round":1}`
+	result, err := app.ensurePRCreated(ctx, root, app.env, "owner/repo", 42, stateJSON, "Implement queue")
+	if err != nil {
+		t.Fatalf("ensurePRCreated: %v", err)
+	}
+	if result != stateJSON {
+		t.Fatalf("expected unchanged state, got %s", result)
+	}
+	for _, call := range calls {
+		if strings.Contains(call, "pr create") {
+			t.Fatalf("should not have created PR when pr_number exists, got %v", calls)
+		}
+	}
+}
+
+func TestPhaseRespondAcknowledgesComments(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var stderr bytes.Buffer
+	var calls []string
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, &stderr)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		calls:       &calls,
+		issueNumber: 42,
+		issueTitle:  "Implement queue",
+		ghHandler: func(ghArgs string, req shell.CommandRequest) (bool, error) {
+			// findUnprocessedComments API call
+			if strings.Contains(ghArgs, "api") && strings.Contains(ghArgs, "issues/87/comments") && !strings.Contains(ghArgs, "reactions") {
+				_, _ = io.WriteString(req.Stdout, `[
+					{"id": 300, "body": "Please add error handling", "user": {"login": "human1"}, "created_at": "2026-01-01T00:00:00Z", "reactions": {"+1": 0}}
+				]`)
+				return true, nil
+			}
+			// +1 reaction
+			if strings.Contains(ghArgs, "api") && strings.Contains(ghArgs, "reactions") && strings.Contains(ghArgs, "+1") {
+				return true, nil
+			}
+			return false, nil
+		},
+	}))
+
+	stateJSON := `{"issue":42,"phase":"REVIEW","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":87,"round":1}`
+	result, err := app.phaseRespond(ctx, root, app.env, "owner/repo", 42, stateJSON)
+	if err != nil {
+		t.Fatalf("phaseRespond: %v", err)
+	}
+	if !strings.Contains(result, `"phase":"RESPOND"`) {
+		t.Fatalf("expected RESPOND phase, got %s", result)
+	}
+	if !strings.Contains(result, `"responded_comments":1`) {
+		t.Fatalf("expected 1 responded comment, got %s", result)
+	}
+	if !containsCall(calls, "pr comment 87") {
+		t.Fatalf("expected PR comment call, got %v", calls)
+	}
+	if !strings.Contains(stderr.String(), "RESPOND: replied to comment 300 by human1") {
+		t.Fatalf("expected respond log, got %q", stderr.String())
+	}
+}
+
+func TestPhaseRespondNoPRSkips(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, io.Discard)
+	app.SetConfig(defaultOrchestratorConfig())
+
+	stateJSON := `{"issue":42,"phase":"DEVELOP","pr_number":0}`
+	result, err := app.phaseRespond(ctx, root, app.env, "owner/repo", 42, stateJSON)
+	if err != nil {
+		t.Fatalf("phaseRespond: %v", err)
+	}
+	if result != stateJSON {
+		t.Fatalf("expected unchanged state, got %s", result)
+	}
+}
+
+func TestPhaseRespondNoComments(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, io.Discard)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
+		args := strings.Join(req.Args, " ")
+		if strings.Contains(args, "api") && strings.Contains(args, "comments") {
+			_, _ = io.WriteString(req.Stdout, `[]`)
+		}
+		return nil
+	})
+
+	stateJSON := `{"issue":42,"phase":"REVIEW","pr_number":87}`
+	result, err := app.phaseRespond(ctx, root, app.env, "owner/repo", 42, stateJSON)
+	if err != nil {
+		t.Fatalf("phaseRespond: %v", err)
+	}
+	if result != stateJSON {
+		t.Fatalf("expected unchanged state when no comments, got %s", result)
+	}
+}
+
+func TestPhaseInitDryRunNoPRCreation(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var stderr bytes.Buffer
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, &stderr)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{issueNumber: 42, issueTitle: "Implement queue"}))
+
+	// Dry-run verifies that phaseInit constructs state without PR creation
+	result, err := app.phaseInit(ctx, root, app.env, "owner/repo", 42, true, "Implement queue")
+	if err != nil {
+		t.Fatalf("phaseInit dry-run: %v", err)
+	}
+	// Dry-run produces its own state shape; verify no PR creation call happened
+	if strings.Contains(result, `"pr_number":87`) {
+		t.Fatalf("dry-run should not create a PR, got %s", result)
+	}
+}
+
 func defaultOrchestratorConfig() OrchestratorConfig {
 	return OrchestratorConfig{
 		MaxRounds:        5,

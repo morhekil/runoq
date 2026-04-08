@@ -28,6 +28,11 @@ type OrchestratorConfig struct {
 	IdentityHandle   string
 	ReadyLabel       string
 
+	// AutoMergeMinScore is the minimum PERFECT-D score required for auto-merge.
+	// When > 0, a PASS verdict with a score below this threshold routes to needs-review
+	// instead of auto-merge. The score is parsed from "NN/40" format.
+	AutoMergeMinScore int
+
 	// Label config for sub-apps (issuequeue, dispatchsafety).
 	// When empty, sub-apps fall back to loading config from RUNOQ_CONFIG.
 	InProgressLabel string

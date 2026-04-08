@@ -346,6 +346,75 @@ func TestResolveDependsOnReturnsEmptyForNoDeps(t *testing.T) {
 	}
 }
 
+func TestHandleActiveConversationsFindsAndResponds(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// Task #10 is in-progress with a linked PR that has an unprocessed comment
+	runner := &tickRunner{
+		cfg: TickConfig{
+			Repo:            "owner/repo",
+			RunoqRoot:       tmpDir,
+			InProgressLabel: "runoq:in-progress",
+			ReadyLabel:      "runoq:ready",
+			Env:             []string{"RUNOQ_ROOT=" + tmpDir},
+			Stdout:          io.Discard,
+			Stderr:          io.Discard,
+		},
+		issues: []issue{
+			{Number: 10, Title: "Task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\n-->", Labels: []label{{Name: "runoq:in-progress"}}},
+		},
+	}
+
+	var prCommentPosted bool
+	runner.cfg.ExecCommand = func(_ context.Context, req shell.CommandRequest) error {
+		args := strings.Join(req.Args, " ")
+		switch {
+		case strings.Contains(args, "pr list") && strings.Contains(args, "closes #10"):
+			_, _ = io.WriteString(req.Stdout, `[{"number":87}]`)
+		case strings.Contains(args, "api") && strings.Contains(args, "issues/87/comments") && !strings.Contains(args, "reactions"):
+			_, _ = io.WriteString(req.Stdout, `[{"id":300,"body":"Fix this please","user":{"login":"human1"},"created_at":"2026-01-01T00:00:00Z","reactions":{"+1":0}}]`)
+		case strings.Contains(args, "pr comment 87"):
+			prCommentPosted = true
+		case strings.Contains(args, "api") && strings.Contains(args, "reactions"):
+			// +1 reaction
+		}
+		return nil
+	}
+
+	result := runner.handleActiveConversations(t.Context())
+	if result != 0 {
+		t.Fatalf("expected result 0, got %d", result)
+	}
+	if !prCommentPosted {
+		t.Fatal("expected PR comment to be posted")
+	}
+}
+
+func TestHandleActiveConversationsNoInProgressTasks(t *testing.T) {
+	t.Parallel()
+
+	runner := &tickRunner{
+		cfg: TickConfig{
+			InProgressLabel: "runoq:in-progress",
+			Stdout:          io.Discard,
+			Stderr:          io.Discard,
+		},
+		issues: []issue{
+			{Number: 10, Title: "Task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\n-->", Labels: []label{{Name: "runoq:ready"}}},
+		},
+	}
+	runner.cfg.ExecCommand = func(_ context.Context, req shell.CommandRequest) error {
+		return nil
+	}
+
+	result := runner.handleActiveConversations(t.Context())
+	if result != -1 {
+		t.Fatalf("expected -1 (no active conversations), got %d", result)
+	}
+}
+
 func TestTickSelectsTaskAndCallsRunIssue(t *testing.T) {
 	t.Parallel()
 

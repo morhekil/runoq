@@ -165,6 +165,12 @@ func (t *tickRunner) run(ctx context.Context) int {
 		t.info("none")
 	}
 
+	// Check for active conversations on in-progress coding PRs
+	t.step("Checking for active conversations")
+	if result := t.handleActiveConversations(ctx); result >= 0 {
+		return result
+	}
+
 	// Scan children of current epic
 	epicNumber := epic.Number
 	epicTitle := epic.Title
@@ -200,6 +206,89 @@ func (t *tickRunner) run(ctx context.Context) int {
 	t.warn(fmt.Sprintf("%d tasks in progress, none ready", openChildren))
 	fmt.Fprintf(t.cfg.Stdout, "%d tasks in progress, none ready\n", openChildren)
 	return 2
+}
+
+// handleActiveConversations scans in-progress tasks for linked PRs with unprocessed comments.
+// Returns a valid exit code (0, 1, 2) if a conversation was found and handled, or -1 if none found.
+func (t *tickRunner) handleActiveConversations(ctx context.Context) int {
+	if t.cfg.InProgressLabel == "" {
+		t.info("no in-progress label configured, skipping conversation check")
+		return -1
+	}
+
+	for i := range t.issues {
+		iss := &t.issues[i]
+		if iss.State != "OPEN" {
+			continue
+		}
+		if issueTypeOf(*iss) != "task" {
+			continue
+		}
+		if !t.issueHasLabel(iss, t.cfg.InProgressLabel) {
+			continue
+		}
+
+		// Find linked PR for this in-progress task
+		prListOut, err := t.ghOutput(ctx, "pr", "list", "--repo", t.cfg.Repo, "--search", fmt.Sprintf("closes #%d", iss.Number), "--json", "number")
+		if err != nil {
+			continue
+		}
+		var prs []struct {
+			Number int `json:"number"`
+		}
+		if err := json.Unmarshal([]byte(prListOut), &prs); err != nil || len(prs) == 0 {
+			continue
+		}
+		prNumber := prs[0].Number
+
+		// Check for unprocessed comments via the orchestrator App
+		orchApp := New(nil, t.cfg.Env, "", io.Discard, t.cfg.Stderr)
+		orchApp.SetCommandExecutor(t.cfg.ExecCommand)
+		orchApp.SetConfig(OrchestratorConfig{IdentityHandle: t.identityHandle()})
+
+		comments, err := orchApp.findUnprocessedComments(ctx, t.cfg.Repo, "pr", prNumber)
+		if err != nil || len(comments) == 0 {
+			continue
+		}
+
+		t.info(fmt.Sprintf("found %d unprocessed comment(s) on PR #%d for task #%d", len(comments), prNumber, iss.Number))
+		t.step(fmt.Sprintf("Responding to comments on PR #%d", prNumber))
+
+		// Build state from the PR's audit comments and run phaseRespond
+		respondApp := New(nil, t.cfg.Env, "", t.cfg.Stdout, t.cfg.Stderr)
+		respondApp.SetCommandExecutor(t.cfg.ExecCommand)
+		respondApp.SetConfig(OrchestratorConfig{IdentityHandle: t.identityHandle()})
+
+		stateJSON, _ := marshalJSON(map[string]any{
+			"issue":     iss.Number,
+			"pr_number": prNumber,
+			"phase":     "REVIEW",
+		})
+
+		root := t.cfg.RunoqRoot
+		_, err = respondApp.phaseRespond(ctx, root, t.cfg.Env, t.cfg.Repo, iss.Number, stateJSON)
+		if err != nil {
+			t.warn(fmt.Sprintf("RESPOND failed for PR #%d: %v", prNumber, err))
+			return 1
+		}
+
+		t.success(fmt.Sprintf("Responded to comments on PR #%d for task #%d", prNumber, iss.Number))
+		fmt.Fprintf(t.cfg.Stdout, "Responded to comments on PR #%d\n", prNumber)
+		return 0
+	}
+
+	t.info("no active conversations")
+	return -1
+}
+
+func (t *tickRunner) identityHandle() string {
+	// Try to extract from env or config
+	for _, e := range t.cfg.Env {
+		if strings.HasPrefix(e, "RUNOQ_IDENTITY=") {
+			return strings.TrimPrefix(e, "RUNOQ_IDENTITY=")
+		}
+	}
+	return "runoq"
 }
 
 func (t *tickRunner) handleBootstrap(ctx context.Context) int {

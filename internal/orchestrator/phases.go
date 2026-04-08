@@ -174,24 +174,12 @@ func (a *App) phaseInit(ctx context.Context, root string, env []string, repo str
 		return "", a.handleInitFailure(ctx, root, env, repo, issueNumber, "failed to push the initial worktree branch", branch, worktree, nil)
 	}
 
-	prResult, prErr := a.createDraftPR(ctx, repo, branch, issueNumber, title)
-	if prErr != nil {
-		return "", a.handleInitFailure(ctx, root, env, repo, issueNumber, fmt.Sprintf("draft PR creation failed: %v", prErr), branch, worktree, nil)
-	}
-
-	prNumber := prResult.Number
-	if prNumber == 0 {
-		return "", a.handleInitFailure(ctx, root, env, repo, issueNumber, "draft PR creation returned an invalid payload", branch, worktree, nil)
-	}
-
-	a.logInfo("INIT: created draft PR #%d for branch=%s", prNumber, branch)
-
 	stateJSON, err := marshalJSON(map[string]any{
 		"issue":                issueNumber,
 		"phase":                "INIT",
 		"branch":               branch,
 		"worktree":             worktree,
-		"pr_number":            prNumber,
+		"pr_number":            0,
 		"round":                0,
 		"cumulative_tokens":    0,
 		"consecutive_failures": 0,
@@ -200,9 +188,51 @@ func (a *App) phaseInit(ctx context.Context, root string, env []string, repo str
 		return "", err
 	}
 
-
-	_ = a.postAuditCommentWithState(ctx, root, env, repo, prNumber, "init", stateJSON, fmt.Sprintf("Orchestrator initialized. Branch: `%s`", branch))
+	a.logInfo("INIT: branch=%s worktree=%s (PR deferred to OPEN-PR phase)", branch, worktree)
 	return stateJSON, nil
+}
+
+// phaseOpenPR creates a draft PR after code has been pushed. This defers PR
+// creation from INIT to after the first successful DEVELOP round, so the PR
+// is born with actual code rather than an empty placeholder.
+func (a *App) phaseOpenPR(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, title string) (string, error) {
+	a.ensureSubApps()
+	a.logInfo("OPEN-PR: creating PR for issue #%d", issueNumber)
+
+	var state struct {
+		Branch   string `json:"branch"`
+		Worktree string `json:"worktree"`
+	}
+	if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
+		return "", fmt.Errorf("failed to parse state for open-pr: %v", err)
+	}
+	if strings.TrimSpace(state.Branch) == "" || strings.TrimSpace(state.Worktree) == "" {
+		return "", errors.New("OPEN-PR state is missing branch or worktree")
+	}
+
+	prResult, prErr := a.createDraftPR(ctx, repo, state.Branch, issueNumber, title)
+	if prErr != nil {
+		return "", fmt.Errorf("OPEN-PR: draft PR creation failed: %v", prErr)
+	}
+
+	prNumber := prResult.Number
+	if prNumber == 0 {
+		return "", errors.New("OPEN-PR: draft PR creation returned an invalid payload")
+	}
+
+	a.logInfo("OPEN-PR: created draft PR #%d for branch=%s", prNumber, state.Branch)
+
+	nextState, err := updateStateJSON(stateJSON, func(state map[string]any) {
+		state["phase"] = "OPEN-PR"
+		state["pr_number"] = prNumber
+	})
+	if err != nil {
+		return "", err
+	}
+
+	_ = a.postAuditCommentWithState(ctx, root, env, repo, prNumber, "open-pr", nextState, fmt.Sprintf("PR created. Branch: `%s`", state.Branch))
+
+	return nextState, nil
 }
 
 func (a *App) phaseCriteria(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
@@ -241,8 +271,8 @@ func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo 
 	if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
 		return "", issueRunnerResult{}, fmt.Errorf("failed to parse state for develop: %v", err)
 	}
-	if strings.TrimSpace(state.Worktree) == "" || strings.TrimSpace(state.Branch) == "" || state.PRNumber == 0 {
-		return "", issueRunnerResult{}, errors.New("INIT state is missing worktree, branch, or PR metadata")
+	if strings.TrimSpace(state.Worktree) == "" || strings.TrimSpace(state.Branch) == "" {
+		return "", issueRunnerResult{}, errors.New("INIT state is missing worktree or branch")
 	}
 
 	bodyOut, err := a.ghOutput(ctx, env, "issue", "view", strconv.Itoa(issueNumber), "--repo", repo, "--json", "body")
@@ -372,7 +402,9 @@ func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo 
 	if strings.TrimSpace(result.Summary) != "" {
 		developBody += "\n**Summary**: " + result.Summary + "\n"
 	}
-	_ = a.postAuditCommentWithState(ctx, root, env, repo, state.PRNumber, "develop", nextState, developBody)
+	if state.PRNumber != 0 {
+		_ = a.postAuditCommentWithState(ctx, root, env, repo, state.PRNumber, "develop", nextState, developBody)
+	}
 
 	return nextState, result, nil
 }
@@ -498,7 +530,10 @@ func (a *App) phaseReview(ctx context.Context, root string, env []string, repo s
 			changedFilesDisplay = string(b)
 		}
 	}
-	reviewBody := fmt.Sprintf("## Diff Review - round %d / %d\n\n> Posted by `orchestrator` via `diff-reviewer` agent\n\n| Field | Value |\n|-------|-------|\n| **Verdict** | %s |\n| **Score** | %s |\n| **Commit range** | `%s..%s` |\n| **Changed files** | %s |\n", round, cfg.MaxRounds, verdict, score, truncateHash(state.BaselineHash), truncateHash(state.HeadHash), changedFilesDisplay)
+	reviewBody := fmt.Sprintf("<!-- runoq:agent:diff-reviewer -->\n## Diff Review - round %d / %d\n\n> Posted by `orchestrator` via `diff-reviewer` agent\n\n| Field | Value |\n|-------|-------|\n| **Verdict** | %s |\n| **Score** | %s |\n| **Commit range** | `%s..%s` |\n| **Changed files** | %s |\n", round, cfg.MaxRounds, verdict, score, truncateHash(state.BaselineHash), truncateHash(state.HeadHash), changedFilesDisplay)
+	if strings.TrimSpace(verdictResult.Scorecard) != "" {
+		reviewBody += "\n" + verdictResult.Scorecard + "\n"
+	}
 	if strings.TrimSpace(reviewChecklist) != "" {
 		reviewBody += "\n### Checklist\n" + reviewChecklist + "\n"
 	}
@@ -666,9 +701,6 @@ func (a *App) phaseDevelopNeedsReview(ctx context.Context, root string, env []st
 	if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
 		return "", fmt.Errorf("failed to parse state for needs-review handoff: %v", err)
 	}
-	if state.PRNumber == 0 {
-		return "", errors.New("DEVELOP state is missing pr_number")
-	}
 
 	reviewState, err := updateStateJSON(stateJSON, func(state map[string]any) {
 		state["phase"] = "REVIEW"
@@ -689,8 +721,10 @@ func (a *App) phaseDevelopNeedsReview(ctx context.Context, root string, env []st
 
 	cfg := a.cfg
 	reviewer := firstReviewer(cfg.Reviewers)
-	if err := a.finalizePR(ctx, repo, state.PRNumber, "needs-review", reviewer); err != nil {
-		return "", err
+	if state.PRNumber != 0 {
+		if err := a.finalizePR(ctx, repo, state.PRNumber, "needs-review", reviewer); err != nil {
+			return "", err
+		}
 	}
 	if code := a.issueQueueApp.SetStatus(ctx, repo, strconv.Itoa(issueNumber), "needs-review"); code != 0 {
 		return "", fmt.Errorf("failed to set issue #%d status to needs-review", issueNumber)
@@ -712,6 +746,65 @@ func (a *App) phaseDevelopNeedsReview(ctx context.Context, root string, env []st
 		return "", err
 	}
 	return doneState, nil
+}
+
+// phaseRespond scans for unprocessed comments on the PR and posts acknowledgment
+// replies. Each comment receives a response and a +1 reaction (the "processed" marker).
+// This is the entry point for the conversation loop — agents address feedback here.
+func (a *App) phaseRespond(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string) (string, error) {
+	a.ensureSubApps()
+
+	var state struct {
+		PRNumber int `json:"pr_number"`
+	}
+	if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
+		return "", fmt.Errorf("failed to parse state for respond: %v", err)
+	}
+	if state.PRNumber == 0 {
+		a.logInfo("RESPOND: no PR for issue #%d, skipping", issueNumber)
+		return stateJSON, nil
+	}
+
+	a.logInfo("RESPOND: checking for unprocessed comments on PR #%d", state.PRNumber)
+
+	comments, err := a.findUnprocessedComments(ctx, repo, "pr", state.PRNumber)
+	if err != nil {
+		return "", fmt.Errorf("RESPOND: failed to find comments: %v", err)
+	}
+
+	if len(comments) == 0 {
+		a.logInfo("RESPOND: no unprocessed comments on PR #%d", state.PRNumber)
+		return stateJSON, nil
+	}
+
+	a.logInfo("RESPOND: found %d unprocessed comment(s) on PR #%d", len(comments), state.PRNumber)
+
+	// Post acknowledgment reply for each unprocessed comment and mark processed via +1 reaction
+	for _, comment := range comments {
+		reply := fmt.Sprintf("Acknowledged feedback from %s. This will be addressed in the next development round.", comment.CommenterIdentity)
+		if err := a.commentPR(ctx, repo, state.PRNumber, fmt.Sprintf("<!-- runoq:agent:codex -->\n> Re: comment by @%s\n\n%s", comment.Author, reply)); err != nil {
+			a.logInfo("RESPOND: failed to post reply for comment %d: %v", comment.ID, err)
+			continue
+		}
+
+		// Mark as processed with +1 reaction
+		reactionEndpoint := fmt.Sprintf("repos/%s/issues/comments/%d/reactions", repo, comment.ID)
+		if _, err := a.ghOutput(ctx, env, "api", reactionEndpoint, "-f", "content=+1", "--method", "POST"); err != nil {
+			a.logInfo("RESPOND: failed to add +1 reaction to comment %d: %v", comment.ID, err)
+		}
+
+		a.logInfo("RESPOND: replied to comment %d by %s", comment.ID, comment.Author)
+	}
+
+	nextState, err := updateStateJSON(stateJSON, func(state map[string]any) {
+		state["phase"] = "RESPOND"
+		state["responded_comments"] = len(comments)
+	})
+	if err != nil {
+		return "", err
+	}
+
+	return nextState, nil
 }
 
 func (a *App) handleInitFailure(ctx context.Context, root string, env []string, repo string, issueNumber int, reason string, branch string, worktree string, prNumber *int) error {

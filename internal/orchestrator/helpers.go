@@ -144,6 +144,7 @@ type reviewVerdictResult struct {
 	Verdict    string
 	Score      string
 	Checklist  string
+	Scorecard  string // Full PERFECT-D scorecard + metrics sections from the review log
 }
 
 func parseReviewVerdict(path string) (reviewVerdictResult, error) {
@@ -157,7 +158,9 @@ func parseReviewVerdict(path string) (reviewVerdictResult, error) {
 
 	result := reviewVerdictResult{}
 	var checklistLines []string
+	var scorecardLines []string
 	inChecklist := false
+	inScorecard := false
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -165,6 +168,20 @@ func parseReviewVerdict(path string) (reviewVerdictResult, error) {
 
 		if inChecklist {
 			checklistLines = append(checklistLines, line)
+			continue
+		}
+
+		// Capture scorecard sections: "## Diff Metrics", "## PERFECT-D Scorecard", "## Issues Found"
+		if strings.HasPrefix(line, "## Diff Metrics") ||
+			strings.HasPrefix(line, "## PERFECT-D Scorecard") {
+			inScorecard = true
+		}
+		// Stop scorecard capture at terminal verdict block
+		if inScorecard && (strings.HasPrefix(line, "REVIEW-TYPE:") || strings.HasPrefix(line, "VERDICT:") || strings.HasPrefix(line, "SCORE:") || line == "CHECKLIST:") {
+			inScorecard = false
+		}
+		if inScorecard {
+			scorecardLines = append(scorecardLines, line)
 			continue
 		}
 
@@ -184,7 +201,18 @@ func parseReviewVerdict(path string) (reviewVerdictResult, error) {
 	}
 
 	result.Checklist = strings.Join(checklistLines, "\n")
+	result.Scorecard = strings.TrimSpace(strings.Join(scorecardLines, "\n"))
 	return result, nil
+}
+
+// parseScoreNumber extracts the numeric score from a string like "38/40" or "38".
+func parseScoreNumber(score string) int {
+	s := strings.TrimSpace(score)
+	if idx := strings.Index(s, "/"); idx >= 0 {
+		s = s[:idx]
+	}
+	n, _ := strconv.Atoi(s)
+	return n
 }
 
 func (a *App) prepareAuth(ctx context.Context, root string, env []string) []string {
@@ -387,6 +415,12 @@ func finalizeDecision(state struct {
 	}
 	if !cfg.AutoMergeEnabled {
 		return "needs-review", "needs-review", "Auto-merge is disabled in config.", false
+	}
+	if cfg.AutoMergeMinScore > 0 {
+		score := parseScoreNumber(state.Score)
+		if score < cfg.AutoMergeMinScore {
+			return "needs-review", "needs-review", fmt.Sprintf("Score %d below auto-merge threshold %d.", score, cfg.AutoMergeMinScore), false
+		}
 	}
 
 	return "auto-merge", "done", "", true

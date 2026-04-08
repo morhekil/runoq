@@ -201,6 +201,8 @@ func (a *App) resumeFromState(ctx context.Context, root string, env []string, re
 	case "CRITERIA":
 		return a.runFromDevelop(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 	case "DEVELOP":
+		return a.runFromOpenPR(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+	case "OPEN-PR":
 		return a.runFromReview(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 	case "REVIEW":
 		return a.runFromDecide(ctx, root, env, repo, issueNumber, stateJSON, metadata)
@@ -251,6 +253,12 @@ func (a *App) runFromDevelop(ctx context.Context, root string, env []string, rep
 			return a.phaseDevelopNeedsReview(ctx, root, env, repo, issueNumber, stateJSON)
 		}
 
+		// Create PR after first successful develop if not yet created
+		stateJSON, err = a.ensurePRCreated(ctx, root, env, repo, issueNumber, stateJSON, metadata.Title)
+		if err != nil {
+			return "", err
+		}
+
 		stateJSON, err = a.runFromReviewLoop(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 		if err != nil {
 			return "", err
@@ -278,6 +286,29 @@ func (a *App) runFromDevelop(ctx context.Context, root string, env []string, rep
 
 		return a.phaseFinalize(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 	}
+}
+
+// ensurePRCreated calls phaseOpenPR if pr_number is not set in the state.
+func (a *App) ensurePRCreated(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, title string) (string, error) {
+	var state struct {
+		PRNumber int `json:"pr_number"`
+	}
+	if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
+		return "", err
+	}
+	if state.PRNumber != 0 {
+		return stateJSON, nil
+	}
+	return a.phaseOpenPR(ctx, root, env, repo, issueNumber, stateJSON, title)
+}
+
+func (a *App) runFromOpenPR(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
+	var err error
+	stateJSON, err = a.ensurePRCreated(ctx, root, env, repo, issueNumber, stateJSON, metadata.Title)
+	if err != nil {
+		return "", err
+	}
+	return a.runFromReview(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 }
 
 func (a *App) runFromReview(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
