@@ -3,6 +3,7 @@
 package runlog
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -55,6 +56,21 @@ func (w *Writer) Write(p []byte) (int, error) {
 // Path returns the absolute path to the log file.
 func (w *Writer) Path() string {
 	return w.file.Name()
+}
+
+// LogEvent writes a structured JSON-line entry to the log file.
+func (w *Writer) LogEvent(event string, data map[string]any) {
+	entry := make(map[string]any, len(data)+2)
+	entry["event"] = event
+	entry["timestamp"] = time.Now().UTC().Format(time.RFC3339)
+	for k, v := range data {
+		entry[k] = v
+	}
+	line, err := json.Marshal(entry)
+	if err != nil {
+		return
+	}
+	_, _ = w.file.Write(append(line, '\n'))
 }
 
 // Close closes the log file.

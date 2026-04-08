@@ -2,6 +2,7 @@ package runlog
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,6 +63,50 @@ func TestWriterCreatesLogFile(t *testing.T) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("log file should exist: %v", err)
+	}
+}
+
+func TestLogEventWritesJSON(t *testing.T) {
+	t.Parallel()
+
+	logDir := t.TempDir()
+	var terminal bytes.Buffer
+	w, err := NewWriter(&terminal, logDir)
+	if err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
+	defer w.Close()
+
+	w.LogEvent("phase_transition", map[string]any{
+		"issue":      42,
+		"from_phase": "DEVELOP",
+		"to_phase":   "REVIEW",
+	})
+
+	content, err := os.ReadFile(w.Path())
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	lastLine := lines[len(lines)-1]
+
+	if !strings.HasPrefix(lastLine, "{") {
+		t.Fatalf("expected JSON line, got %q", lastLine)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(lastLine), &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v (%q)", err, lastLine)
+	}
+	if parsed["event"] != "phase_transition" {
+		t.Fatalf("expected event=phase_transition, got %v", parsed["event"])
+	}
+	if parsed["issue"] != float64(42) {
+		t.Fatalf("expected issue=42, got %v", parsed["issue"])
+	}
+	if _, ok := parsed["timestamp"]; !ok {
+		t.Fatal("expected timestamp field")
 	}
 }
 
