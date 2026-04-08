@@ -313,6 +313,62 @@ func (g *DepGraph) detectCycles() {
 	}
 }
 
+// RenderMermaid generates a Mermaid graph visualization of the dependency DAG.
+// Each node shows its issue number, title (truncated), and status icon.
+// Also includes CLOSED issues that are dependencies (to show the full picture).
+func (g *DepGraph) RenderMermaid(inProgressLabel, doneLabel string) string {
+	var b strings.Builder
+	b.WriteString("```mermaid\ngraph LR\n")
+
+	// Collect all issue numbers referenced (nodes + their dependencies)
+	allIssues := make(map[int]*depNode)
+	for num, n := range g.nodes {
+		allIssues[num] = n
+	}
+
+	// Render nodes
+	for num, n := range allIssues {
+		icon := g.statusIcon(n, inProgressLabel, doneLabel)
+		title := truncateTitle(n.issue.Title, 40)
+		fmt.Fprintf(&b, "    %d[\"%s #%d %s\"]\n", num, icon, num, title)
+	}
+
+	// Render edges (dependency → dependent means dependent depends on dependency)
+	for num, n := range allIssues {
+		for _, dep := range n.dependsOn {
+			if _, exists := allIssues[dep]; exists {
+				fmt.Fprintf(&b, "    %d --> %d\n", dep, num)
+			}
+		}
+	}
+
+	b.WriteString("```")
+	return b.String()
+}
+
+func (g *DepGraph) statusIcon(n *depNode, inProgressLabel, doneLabel string) string {
+	if n.issue.State == "CLOSED" || hasLabel(n.issue, doneLabel) {
+		return "✅"
+	}
+	if n.inCycle {
+		return "🔴"
+	}
+	if hasLabel(n.issue, inProgressLabel) {
+		return "🔄"
+	}
+	if len(n.blockedBy) > 0 {
+		return "🚫"
+	}
+	return "⏳"
+}
+
+func truncateTitle(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-1] + "…"
+}
+
 func hasLabel(iss *issue, name string) bool {
 	for _, l := range iss.Labels {
 		if l.Name == name {

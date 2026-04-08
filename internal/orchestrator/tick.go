@@ -494,7 +494,12 @@ func (t *tickRunner) handleImplementation(ctx context.Context, epicNumber int) i
 	}
 
 	t.detail("selected", fmt.Sprintf("#%d %s", task.Number, task.Title))
-	return t.dispatchTask(ctx, task)
+	result := t.dispatchTask(ctx, task)
+
+	// Update DAG visualization on the epic
+	t.postDAGComment(ctx, epicNumber, graph)
+
+	return result
 }
 
 func (t *tickRunner) dispatchTask(ctx context.Context, task *issue) int {
@@ -721,6 +726,76 @@ func (t *tickRunner) ghEditBody(ctx context.Context, issueNumber string, newBody
 	tmpFile.Close()
 	defer os.Remove(tmpFile.Name())
 	t.ghOutput(ctx, "issue", "edit", issueNumber, "--repo", t.cfg.Repo, "--body-file", tmpFile.Name())
+}
+
+const dagMarker = "<!-- runoq:dag -->"
+
+func (t *tickRunner) postDAGComment(ctx context.Context, epicNumber int, graph *DepGraph) {
+	cfg, _ := t.loadConfig()
+	inProgressLabel := ""
+	doneLabel := ""
+	if cfg != nil {
+		inProgressLabel = cfg.Labels.InProgress
+		doneLabel = cfg.Labels.Done
+	}
+
+	mermaid := graph.RenderMermaid(inProgressLabel, doneLabel)
+	body := dagMarker + "\n\n" + mermaid + "\n"
+
+	epicStr := fmt.Sprintf("%d", epicNumber)
+
+	// Check if a DAG comment already exists
+	commentsJSON, err := t.ghOutput(ctx, "issue", "view", epicStr, "--repo", t.cfg.Repo, "--json", "comments", "--jq", ".comments")
+	if err == nil {
+		var comments []struct {
+			ID   string `json:"id"`
+			Body string `json:"body"`
+		}
+		if json.Unmarshal([]byte(commentsJSON), &comments) == nil {
+			for _, c := range comments {
+				if strings.Contains(c.Body, dagMarker) {
+					// Update existing comment
+					t.ghOutput(ctx, "api", "--method", "PATCH",
+						fmt.Sprintf("repos/%s/issues/comments/%s", t.cfg.Repo, c.ID),
+						"-f", "body="+body)
+					return
+				}
+			}
+		}
+	}
+
+	// Post new comment
+	tmpFile, _ := os.CreateTemp("", "runoq-dag-*.md")
+	tmpFile.WriteString(body)
+	tmpFile.Close()
+	defer os.Remove(tmpFile.Name())
+	t.ghOutput(ctx, "issue", "comment", epicStr, "--repo", t.cfg.Repo, "--body-file", tmpFile.Name())
+}
+
+func (t *tickRunner) loadConfig() (*struct {
+	Labels struct {
+		InProgress string `json:"inProgress"`
+		Done       string `json:"done"`
+	} `json:"labels"`
+}, error) {
+	configPath, ok := shell.EnvLookup(t.cfg.Env, "RUNOQ_CONFIG")
+	if !ok || configPath == "" {
+		return nil, fmt.Errorf("no config")
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, err
+	}
+	var cfg struct {
+		Labels struct {
+			InProgress string `json:"inProgress"`
+			Done       string `json:"done"`
+		} `json:"labels"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
 }
 
 func sliceContains(s []int, v int) bool {

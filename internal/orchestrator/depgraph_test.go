@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -227,6 +228,60 @@ func TestDepGraphPartiallyDone(t *testing.T) {
 	}
 	if next.Number != 11 {
 		t.Fatalf("expected #11 (unblocked after A done), got #%d", next.Number)
+	}
+}
+
+func TestRenderMermaidLinearChain(t *testing.T) {
+	t.Parallel()
+
+	issues := []issue{
+		makeIssue(10, 1, "OPEN", nil),
+		makeIssue(11, 1, "OPEN", []int{10}),
+		makeIssue(12, 1, "OPEN", []int{11}),
+	}
+	// Mark #10 as in-progress for icon test
+	issues[0].Labels = append(issues[0].Labels, label{Name: "runoq:in-progress"})
+
+	g := BuildDepGraph(issues, 1, "runoq:ready")
+	mermaid := g.RenderMermaid("runoq:in-progress", "runoq:done")
+
+	if !strings.Contains(mermaid, "graph LR") {
+		t.Fatalf("expected mermaid graph header, got %q", mermaid)
+	}
+	if !strings.Contains(mermaid, "10[") && !strings.Contains(mermaid, "10(") {
+		t.Fatalf("expected node 10 in graph, got %q", mermaid)
+	}
+	// Edges
+	if !strings.Contains(mermaid, "10 --> 11") {
+		t.Fatalf("expected edge 10 --> 11, got %q", mermaid)
+	}
+	if !strings.Contains(mermaid, "11 --> 12") {
+		t.Fatalf("expected edge 11 --> 12, got %q", mermaid)
+	}
+	// Status icon for in-progress
+	if !strings.Contains(mermaid, "🔄") {
+		t.Fatalf("expected in-progress icon, got %q", mermaid)
+	}
+}
+
+func TestRenderMermaidDoneAndBlocked(t *testing.T) {
+	t.Parallel()
+
+	issues := []issue{
+		makeIssue(10, 1, "CLOSED", nil),
+		makeIssue(11, 1, "OPEN", []int{10}),
+		makeIssue(12, 1, "OPEN", []int{99}), // blocked by missing dep
+	}
+	issues[0].Labels = append(issues[0].Labels, label{Name: "runoq:done"})
+
+	g := BuildDepGraph(issues, 1, "runoq:ready")
+	mermaid := g.RenderMermaid("runoq:in-progress", "runoq:done")
+
+	if !strings.Contains(mermaid, "⏳") {
+		t.Fatalf("expected ready icon for #11, got %q", mermaid)
+	}
+	if !strings.Contains(mermaid, "🚫") {
+		t.Fatalf("expected blocked icon for #12, got %q", mermaid)
 	}
 }
 
