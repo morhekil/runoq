@@ -482,3 +482,21 @@ func TestTickSelectsTaskAndCallsRunIssue(t *testing.T) {
 		t.Errorf("expected RunIssue called with issue 11, got eligibility for issue %q; stderr:\n%s", eligibilityIssue, stderr.String())
 	}
 }
+
+func TestExtractJSONFromCodeFence(t *testing.T) {
+	t.Parallel()
+	body := "## Title\n\n<details>\n<summary>Raw JSON payload</summary>\n\n```json\n{\"key\":\"value\"}\n```\n\n</details>\n"
+	got := extractJSONFromCodeFence(body)
+	if got != `{"key":"value"}` {
+		t.Errorf("expected {\"key\":\"value\"}, got %q", got)
+	}
+}
+
+func TestExtractJSONFromCodeFenceNoFence(t *testing.T) {
+	t.Parallel()
+	body := "plain text"
+	got := extractJSONFromCodeFence(body)
+	if got != body {
+		t.Errorf("expected body unchanged, got %q", got)
+	}
+}

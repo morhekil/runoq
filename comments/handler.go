@@ -25,6 +25,7 @@ type HandleCommentsConfig struct {
 	PlanFile          string
 	RunoqRoot         string
 	PlanApprovedLabel string
+	ClaudeBin         string // optional, defaults to "claude"
 	GH                GHClient
 	Invoker           AgentInvoker
 }
@@ -79,10 +80,14 @@ func HandleComments(ctx context.Context, cfg HandleCommentsConfig) error {
 	})
 
 	// Call agent
+	claudeBin := cfg.ClaudeBin
+	if claudeBin == "" {
+		claudeBin = "claude"
+	}
 	resp, err := cfg.Invoker.Invoke(ctx, agents.InvokeOptions{
 		Backend: agents.Claude,
 		Agent:   "plan-comment-responder",
-		Bin:     "claude",
+		Bin:     claudeBin,
 		RawArgs: []string{"--agent", "plan-comment-responder", "--add-dir", cfg.RunoqRoot, "--", string(payload)},
 		WorkDir: cfg.RunoqRoot,
 		Payload: string(payload),

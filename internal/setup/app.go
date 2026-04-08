@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	git "github.com/go-git/go-git/v6"
 
@@ -259,9 +260,21 @@ func resolveInstallation(ctx context.Context, repo, jwt string, httpClient *http
 }
 
 func ensureLabels(ctx context.Context, repo string, ghClient *gh.Client, labels []string) error {
-	out, err := ghClient.Output(ctx, "label", "list", "--repo", repo, "--limit", "200", "--json", "name")
-	if err != nil {
-		return fmt.Errorf("list labels: %w", err)
+	// Retry label listing — newly created repos may not be immediately
+	// accessible via the GraphQL endpoint that gh label list uses.
+	var out string
+	var listErr error
+	for attempt := 1; attempt <= 5; attempt++ {
+		out, listErr = ghClient.Output(ctx, "label", "list", "--repo", repo, "--limit", "200", "--json", "name")
+		if listErr == nil {
+			break
+		}
+		if attempt < 5 {
+			time.Sleep(3 * time.Second)
+		}
+	}
+	if listErr != nil {
+		return fmt.Errorf("list labels: %w", listErr)
 	}
 
 	var existing []struct {

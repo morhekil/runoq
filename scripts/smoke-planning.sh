@@ -252,6 +252,13 @@ extract_marked_json_from_text() {
 proposal_json_from_issue_view() {
   local issue_view_json="$1"
   local proposal body
+  # Check issue body first (current approach: proposal is in issue body)
+  proposal="$(printf '%s' "$issue_view_json" | jq -r '.body // ""')"
+  if [[ "$proposal" == *"runoq:payload:plan-proposal"* ]]; then
+    body="$(extract_marked_json_from_text "$proposal" 'runoq:payload:plan-proposal')"
+    [[ -n "$body" ]] && { printf '%s\n' "$body"; return 0; }
+  fi
+  # Fallback: check comments
   proposal="$(printf '%s' "$issue_view_json" | jq -r '
     .comments // []
     | map(.body // "")

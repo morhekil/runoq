@@ -566,22 +566,24 @@ func (a *App) runTick(ctx context.Context, env []string, runoqRoot string) int {
 		return shell.Fail(a.stderr, err.Error())
 	}
 
+	dryImpl, _ := shell.EnvLookup(env, "RUNOQ_DRY_RUN_IMPL")
 	return orchestrator.RunTick(ctx, orchestrator.TickConfig{
-		Repo:              repo,
-		PlanFile:          planFile,
-		RunoqRoot:         runoqRoot,
-		PlanApprovedLabel: a.labels.PlanApproved,
-		ReadyLabel:        a.labels.Ready,
-		InProgressLabel:   a.labels.InProgress,
-		DoneLabel:         a.labels.Done,
-		NeedsReviewLabel:  a.labels.NeedsReview,
-		BlockedLabel:      a.labels.Blocked,
-		BranchPrefix:      a.branchPrefix,
-		WorktreePrefix:    a.worktreePrefix,
-		Env:               env,
-		ExecCommand:       a.execCommand,
-		Stdout:            a.stdout,
-		Stderr:            a.stderr,
+		Repo:                 repo,
+		PlanFile:             planFile,
+		RunoqRoot:            runoqRoot,
+		PlanApprovedLabel:    a.labels.PlanApproved,
+		ReadyLabel:           a.labels.Ready,
+		InProgressLabel:      a.labels.InProgress,
+		DoneLabel:            a.labels.Done,
+		NeedsReviewLabel:     a.labels.NeedsReview,
+		BlockedLabel:         a.labels.Blocked,
+		BranchPrefix:         a.branchPrefix,
+		WorktreePrefix:       a.worktreePrefix,
+		DryRunImplementation: dryImpl == "1",
+		Env:                  env,
+		ExecCommand:          a.execCommand,
+		Stdout:               a.stdout,
+		Stderr:               a.stderr,
 	})
 }
 

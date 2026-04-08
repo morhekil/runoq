@@ -218,30 +218,10 @@ tick_once() {
     cd "$TARGET_ROOT"
     "$root/bin/runoq" tick "$@"
   ) || status=$?
-  # Exit 2 = waiting (no work), not an error
-  if [[ "$status" -ne 0 && "$status" -ne 2 ]]; then
+  # Exit 2 = waiting (no work), 3 = complete — not errors
+  if [[ "$status" -ne 0 && "$status" -ne 2 && "$status" -ne 3 ]]; then
     return "$status"
   fi
-}
-
-create_fake_run_bin() {
-  local path="$1"
-  cat >"$path" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\n' "$*" >>"${RUNOQ_SMOKE_TICK_RUN_LOG:?}"
-EOF
-  chmod +x "$path"
-}
-
-create_fake_dispatch_safety_bin() {
-  local path="$1"
-  cat >"$path" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\n' "$*" >>"${RUNOQ_SMOKE_TICK_DISPATCH_LOG:?}"
-EOF
-  chmod +x "$path"
 }
 
 run_tick_smoke() {
@@ -315,15 +295,7 @@ run_tick_smoke() {
   export RUNOQ_APP_KEY="$(smoke_key_path)"
   runoq::_mint_bot_token || smoke_log "WARNING: bot token mint failed, using ambient credentials"
 
-  local run_bin dispatch_bin
-  run_bin="$tmpdir/fake-run"
-  dispatch_bin="$tmpdir/fake-dispatch"
-  export RUNOQ_SMOKE_TICK_RUN_LOG="$artifacts_dir/run-dispatch.log"
-  export RUNOQ_SMOKE_TICK_DISPATCH_LOG="$artifacts_dir/dispatch-safety.log"
-  create_fake_run_bin "$run_bin"
-  create_fake_dispatch_safety_bin "$dispatch_bin"
-  export RUNOQ_TICK_RUN_SCRIPT="$run_bin"
-  export RUNOQ_TICK_DISPATCH_SAFETY_SCRIPT="$dispatch_bin"
+  export RUNOQ_DRY_RUN_IMPL=1
 
   (
     cd "$target_dir"
@@ -437,9 +409,9 @@ run_tick_smoke() {
   output="$(tick_once "$root")"
   add_step "implementation_dispatch" "$output"
   add_check_or_failure \
-    "$( [[ -s "$RUNOQ_SMOKE_TICK_RUN_LOG" ]] && printf true || printf false )" \
+    "$( [[ "$output" == *"Issue #"*"phase:"* ]] && printf true || printf false )" \
     "implementation_dispatch_invoked" \
-    "Tick did not invoke the implementation dispatch shim."
+    "Tick did not dispatch implementation (expected 'Issue #N — phase:' in output)."
 
   while IFS= read -r task_number; do
     [[ -n "$task_number" ]] || continue

@@ -106,13 +106,16 @@ func RunDispatch(ctx context.Context, cfg DispatchConfig) (DispatchResult, error
 		// Review
 		d.step(fmt.Sprintf("Reviewing proposal (round %d)", round))
 
+		reviewPayload := proposalJSON
+
 		d.info("calling plan-reviewer-technical")
 		techResp, err := cfg.Invoker.Invoke(ctx, agents.InvokeOptions{
 			Backend: agents.Claude,
 			Agent:   "plan-reviewer-technical",
 			Bin:     claudeBin,
-			RawArgs: buildAgentArgs("plan-reviewer-technical", cfg.RunoqRoot, addDirs, ""),
+			RawArgs: buildAgentArgs("plan-reviewer-technical", cfg.RunoqRoot, addDirs, reviewPayload),
 			WorkDir: planDir,
+			Payload: reviewPayload,
 		})
 		if err != nil {
 			return DispatchResult{}, fmt.Errorf("technical reviewer failed: %w", err)
@@ -127,8 +130,9 @@ func RunDispatch(ctx context.Context, cfg DispatchConfig) (DispatchResult, error
 			Backend: agents.Claude,
 			Agent:   "plan-reviewer-product",
 			Bin:     claudeBin,
-			RawArgs: buildAgentArgs("plan-reviewer-product", cfg.RunoqRoot, addDirs, ""),
+			RawArgs: buildAgentArgs("plan-reviewer-product", cfg.RunoqRoot, addDirs, reviewPayload),
 			WorkDir: planDir,
+			Payload: reviewPayload,
 		})
 		if err != nil {
 			return DispatchResult{}, fmt.Errorf("product reviewer failed: %w", err)

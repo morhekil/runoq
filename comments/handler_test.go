@@ -39,9 +39,11 @@ func (f *fakeGH) AddReaction(_ context.Context, commentID string, content string
 
 type fakeInvoker struct {
 	responseText string
+	lastOpts     agents.InvokeOptions
 }
 
 func (f *fakeInvoker) Invoke(_ context.Context, opts agents.InvokeOptions) (agents.Response, error) {
+	f.lastOpts = opts
 	return agents.Response{Text: f.responseText}, nil
 }
 
@@ -113,6 +115,36 @@ func TestHandleCommentsApprove(t *testing.T) {
 		if c == "issue-add-label:runoq:plan-approved" { hasLabel = true }
 	}
 	if !hasLabel { t.Error("expected plan-approved label to be added") }
+}
+
+func TestHandleCommentsClaudeBinPassedToInvoker(t *testing.T) {
+	t.Parallel()
+
+	gh := &fakeGH{
+		issueView: `{"number":2,"title":"Review","body":"proposal body","comments":[
+			{"author":{"login":"human"},"body":"Looks good","id":"IC1","reactionGroups":[]}
+		]}`,
+	}
+	invoker := &fakeInvoker{
+		responseText: `{"action":"approve","reply":"Done."}`,
+	}
+
+	err := HandleComments(t.Context(), HandleCommentsConfig{
+		Repo:              "owner/repo",
+		IssueNumber:       2,
+		PlanFile:          "docs/plan.md",
+		RunoqRoot:         t.TempDir(),
+		PlanApprovedLabel: "runoq:plan-approved",
+		ClaudeBin:         "/custom/fixture-claude",
+		GH:                gh,
+		Invoker:           invoker,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if invoker.lastOpts.Bin != "/custom/fixture-claude" {
+		t.Errorf("expected Bin=/custom/fixture-claude, got %q", invoker.lastOpts.Bin)
+	}
 }
 
 func TestHandleCommentsNoUnrespondedSkips(t *testing.T) {

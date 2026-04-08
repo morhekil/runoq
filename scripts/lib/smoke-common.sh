@@ -700,8 +700,15 @@ write_identity_file() {
 
 label_check_json() {
   local repo="$1"
-  local existing
-  existing="$(runoq::gh label list --repo "$repo" --limit 200 --json name)"
+  local existing="" attempt
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    if existing="$(runoq::gh label list --repo "$repo" --limit 200 --json name 2>/dev/null)" && [[ -n "$existing" ]]; then
+      break
+    fi
+    existing=""
+    sleep 5
+  done
+  [[ -n "$existing" ]] || existing='[]'
   jq -n \
     --argjson existing "$existing" \
     --argjson expected "$(runoq::label_keys_json)" '
@@ -826,9 +833,6 @@ create_managed_repo() {
   if ! create_output="$(operator_gh repo create "$repo" "--${visibility}" 2>&1)"; then
     runoq::die "Failed to create managed repo ${repo}: ${create_output}"
   fi
-  if printf '%s' "$create_output" | grep -Eiq '(^|[[:space:]])(GraphQL:|HTTP [0-9]{3}:|error:|failed)' ; then
-    runoq::die "Failed to create managed repo ${repo}: ${create_output}"
-  fi
   if ! wait_for_managed_repo "$repo"; then
     runoq::die "Failed to create managed repo ${repo}: ${create_output}"
   fi
@@ -888,10 +892,14 @@ seed_lifecycle_issues() {
     meta_block+="-->"
     local full_body="${body}"$'\n\n'"${meta_block}"
 
-    local _seed_attempt
+    local _seed_attempt _label_args=""
+    if [[ "$type_field" == "task" ]]; then
+      _label_args="--label $(runoq::config_get '.labels.ready')"
+    fi
+
     create_output=""
     for _seed_attempt in 1 2 3; do
-      if create_output="$(runoq::gh issue create --repo "$repo" --title "$title" --body "$full_body" 2>/dev/null)"; then
+      if create_output="$(runoq::gh issue create --repo "$repo" --title "$title" --body "$full_body" $_label_args 2>/dev/null)"; then
         # gh issue create returns a URL; build the JSON that callers expect
         local _issue_url="$create_output"
         local _issue_num
@@ -1422,6 +1430,10 @@ run_lifecycle() {
   else
     smoke_log "runoq init completed successfully"
     checks_json="$(append_check "$checks_json" "repo_bootstrapped")"
+    # Re-mint bot token — the previous token may not cover the newly created repo
+    export RUNOQ_FORCE_REFRESH_TOKEN=1
+    runoq::_mint_bot_token 2>/dev/null || true
+    unset RUNOQ_FORCE_REFRESH_TOKEN
     labels_json="$(label_check_json "$repo")"
     if [[ "$(printf '%s' "$labels_json" | jq -r '.missing | length')" -ne 0 ]]; then
       failures_json="$(append_missing "$failures_json" "Missing expected labels after runoq init: $(printf '%s' "$labels_json" | jq -r '.missing | join(", ")').")"

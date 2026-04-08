@@ -36,6 +36,7 @@ type TickConfig struct {
 	BranchPrefix       string
 	WorktreePrefix     string
 	LastCompletedIssue int
+	DryRunImplementation bool // when true, implementation dispatch is dry-run only (no worktree/codex)
 	Env                []string
 	ExecCommand       shell.CommandExecutor
 	Stdout            io.Writer
@@ -364,6 +365,7 @@ func (t *tickRunner) handlePendingReview(ctx context.Context, pending *issue) in
 			PlanFile:          t.cfg.PlanFile,
 			RunoqRoot:         t.cfg.RunoqRoot,
 			PlanApprovedLabel: t.cfg.PlanApprovedLabel,
+			ClaudeBin:         envOrDefault(t.cfg.Env, "RUNOQ_CLAUDE_BIN", "claude"),
 			GH:                ghClient,
 			Invoker:           invoker,
 		}); err != nil {
@@ -484,9 +486,12 @@ func (t *tickRunner) handleApprovedAdjustment(ctx context.Context, reviewView st
 	json.Unmarshal([]byte(reviewView), &view)
 
 	adjustmentJSON := view.Body
-	// Try extracting structured JSON
+	// Try extracting from marked block first
 	if extracted, err := planning.ExtractMarkedJSONBlock(view.Body, "runoq:payload:milestone-reviewer"); err == nil {
 		adjustmentJSON = extracted
+	} else {
+		// Fall back to extracting JSON from code fence (used by FormatAdjustmentReviewBody)
+		adjustmentJSON = extractJSONFromCodeFence(view.Body)
 	}
 
 	var adjInput planning.AdjustmentReviewInput
@@ -647,7 +652,11 @@ func (t *tickRunner) dispatchTask(ctx context.Context, task *issue) int {
 
 	runApp := New(nil, t.cfg.Env, "", t.cfg.Stdout, t.cfg.Stderr)
 	runApp.SetCommandExecutor(t.cfg.ExecCommand)
-	stateJSON, err := runApp.RunIssue(ctx, t.cfg.Repo, task.Number, false, task.Title, metadata)
+	runApp.SetConfig(OrchestratorConfig{
+		BranchPrefix:   t.cfg.BranchPrefix,
+		WorktreePrefix: t.cfg.WorktreePrefix,
+	})
+	stateJSON, err := runApp.RunIssue(ctx, t.cfg.Repo, task.Number, t.cfg.DryRunImplementation, task.Title, metadata)
 	if err != nil {
 		return t.fail("issue #%d: %v", task.Number, err)
 	}
@@ -665,25 +674,43 @@ func (t *tickRunner) dispatchTask(ctx context.Context, task *issue) int {
 	return 0
 }
 
-func (t *tickRunner) handleMilestoneComplete(ctx context.Context, epicNumber int, epicTitle, epicType string) int {
-	// Call milestone-reviewer agent via captured_exec shell wrapper
-	// This will move to agents/ package in M6
+func (t *tickRunner) handleMilestoneComplete(ctx context.Context, epicNumber int, epicTitle, _ string) int {
 	t.step("Running milestone reviewer")
 	t.detail("milestone", fmt.Sprintf("#%d %s", epicNumber, epicTitle))
 
-	capturedExecScript := filepath.Join(t.cfg.RunoqRoot, "scripts", "tick.sh")
-	
-
-	// For now, delegate milestone-complete to tick.sh via a special env var
-	// TODO: M6 replaces this with direct agents/ package call
-	_ = capturedExecScript
-
-	// Create adjustment review body using planning package
-	adjustmentBody := planning.FormatAdjustmentReviewBody(planning.AdjustmentReviewInput{
-		ProposedAdjustments: []planning.Adjustment{
-			{Type: "discovery", Title: "Review completed milestone", Description: "Milestone completed — review for adjustments.", Reason: "milestone completed"},
-		},
+	claudeBin := envOrDefault(t.cfg.Env, "RUNOQ_CLAUDE_BIN", "claude")
+	invoker := agents.NewInvoker(agents.InvokerConfig{
+		LogRoot: filepath.Join(t.cfg.RunoqRoot, "log"),
 	})
+
+	payload, _ := json.Marshal(map[string]any{
+		"milestoneNumber": epicNumber,
+		"milestoneTitle":  epicTitle,
+		"repo":            t.cfg.Repo,
+	})
+	resp, err := invoker.Invoke(ctx, agents.InvokeOptions{
+		Backend: agents.Claude,
+		Agent:   "milestone-reviewer",
+		Bin:     claudeBin,
+		RawArgs: []string{"--agent", "milestone-reviewer", "--add-dir", t.cfg.RunoqRoot, "--", string(payload)},
+		WorkDir: t.cfg.RunoqRoot,
+		Payload: string(payload),
+	})
+	if err != nil {
+		return t.fail("milestone reviewer failed: %v", err)
+	}
+
+	// Parse adjustment output
+	var adjInput planning.AdjustmentReviewInput
+	adjText := resp.Text
+	if extracted, extractErr := planning.ExtractMarkedJSONBlock(adjText, "runoq:payload:milestone-reviewer"); extractErr == nil {
+		adjText = extracted
+	}
+	if err := json.Unmarshal([]byte(adjText), &adjInput); err != nil {
+		return t.fail("parse milestone review output: %v", err)
+	}
+
+	adjustmentBody := planning.FormatAdjustmentReviewBody(adjInput)
 
 	t.info("creating adjustment review issue")
 	adjNumber, err := t.issueCreate(ctx, t.cfg.Repo, "Review milestone adjustments", adjustmentBody, "--type", "adjustment", "--priority", "1", "--estimated-complexity", "low", "--parent-epic", fmt.Sprintf("%d", epicNumber))
@@ -711,7 +738,7 @@ func (t *tickRunner) firstOpenEpic() *issue {
 			continue
 		}
 		p := planning.MetadataPriority(iss.Body)
-		if p < bestPriority {
+		if p < bestPriority || (p == bestPriority && (best == nil || iss.Number < best.Number)) {
 			bestPriority = p
 			best = iss
 		}
@@ -836,6 +863,20 @@ func (t *tickRunner) issueNodeID(ctx context.Context, issueNum string) string {
 		return ""
 	}
 	return strings.TrimSpace(raw)
+}
+
+// extractJSONFromCodeFence pulls JSON out of a markdown ```json code fence.
+func extractJSONFromCodeFence(body string) string {
+	start := strings.Index(body, "```json\n")
+	if start < 0 {
+		return body
+	}
+	content := body[start+8:]
+	end := strings.Index(content, "\n```")
+	if end < 0 {
+		return body
+	}
+	return strings.TrimSpace(content[:end])
 }
 
 func (t *tickRunner) addBlockedBy(ctx context.Context, issueNodeID, blockingNodeID string) {
