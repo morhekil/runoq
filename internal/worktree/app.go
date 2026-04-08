@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/saruman/runoq/internal/gitops"
@@ -23,10 +24,25 @@ const usageText = `Usage:
   worktree.sh branch-name <issue-number> <title>
 `
 
+// Naming holds the config values the worktree package needs.
+type Naming struct {
+	BranchPrefix   string
+	WorktreePrefix string
+	AppSlug        string
+}
+
+// CreateResult holds the result of creating a worktree.
+type CreateResult struct {
+	Branch   string
+	Worktree string
+	BaseRef  string
+}
+
 type App struct {
 	args        []string
 	env         []string
 	cwd         string
+	naming      Naming
 	stdout      io.Writer
 	stderr      io.Writer
 	execCommand shell.CommandExecutor
@@ -382,3 +398,110 @@ func configPath(env []string, cwd string) string {
 	return filepath.Join(cwd, "config", "runoq.json")
 }
 
+// NewDirect creates an App for direct Go calls (not subprocess).
+// Config values are injected — no env vars or config file reads.
+func NewDirect(naming Naming, targetRoot string, logWriter io.Writer) *App {
+	stderr := io.Writer(io.Discard)
+	if logWriter != nil {
+		stderr = logWriter
+	}
+	return &App{
+		naming:      naming,
+		cwd:         targetRoot,
+		env:         []string{"TARGET_ROOT=" + targetRoot},
+		stdout:      io.Discard,
+		stderr:      stderr,
+		execCommand: shell.RunCommand,
+	}
+}
+
+// CreateWorktree creates a worktree for the given issue. Returns typed result, not JSON.
+func (a *App) CreateWorktree(ctx context.Context, issueNumber int, title string) (CreateResult, error) {
+	targetRoot := a.cwd
+	if v, ok := shell.EnvLookup(a.env, "TARGET_ROOT"); ok && v != "" {
+		targetRoot = v
+	}
+	a.repo = gitops.OpenCLI(ctx, targetRoot, a.execCommand)
+
+	cfg := a.naming
+	if cfg.BranchPrefix == "" {
+		// Fallback for script entry path
+		loaded, err := a.loadConfig()
+		if err != nil {
+			return CreateResult{}, err
+		}
+		cfg = Naming{
+			BranchPrefix:   loaded.BranchPrefix,
+			WorktreePrefix: loaded.WorktreePrefix,
+			AppSlug:        loaded.Identity.AppSlug,
+		}
+	}
+
+	issue := strconv.Itoa(issueNumber)
+	branch := branchName(cfg.BranchPrefix, issue, title)
+	path, err := worktreePath(cfg.WorktreePrefix, targetRoot, issue)
+	if err != nil {
+		return CreateResult{}, fmt.Errorf("resolve worktree path: %w", err)
+	}
+
+	baseRef := defaultBaseRef(a.env)
+	if baseRef == "" {
+		remoteBranch, err := a.repo.DefaultBranch("origin")
+		if err != nil {
+			return CreateResult{}, fmt.Errorf("detect default branch: %w", err)
+		}
+		baseRef = "origin/" + remoteBranch
+		if err := a.repo.Fetch("origin", remoteBranch); err != nil {
+			return CreateResult{}, fmt.Errorf("fetch origin %s: %w", remoteBranch, err)
+		}
+	}
+
+	if _, err := os.Lstat(path); err == nil {
+		return CreateResult{}, fmt.Errorf("worktree already exists: %s", path)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return CreateResult{}, fmt.Errorf("inspect worktree path %s: %w", path, err)
+	}
+
+	_ = a.repo.WorktreePrune()
+	_ = a.repo.DeleteBranch(branch)
+
+	if err := a.repo.WorktreeAdd(path, branch, baseRef); err != nil {
+		return CreateResult{}, fmt.Errorf("create worktree: %w", err)
+	}
+
+	_ = a.configureGitBotIdentity(ctx, path, cfg.AppSlug, targetRoot)
+
+	return CreateResult{Branch: branch, Worktree: path, BaseRef: baseRef}, nil
+}
+
+// RemoveWorktree removes the worktree for the given issue.
+func (a *App) RemoveWorktree(ctx context.Context, issueNumber int) error {
+	targetRoot := a.cwd
+	if v, ok := shell.EnvLookup(a.env, "TARGET_ROOT"); ok && v != "" {
+		targetRoot = v
+	}
+	a.repo = gitops.OpenCLI(ctx, targetRoot, a.execCommand)
+
+	cfg := a.naming
+	if cfg.WorktreePrefix == "" {
+		loaded, err := a.loadConfig()
+		if err != nil {
+			return err
+		}
+		cfg.WorktreePrefix = loaded.WorktreePrefix
+	}
+
+	issue := strconv.Itoa(issueNumber)
+	path, err := worktreePath(cfg.WorktreePrefix, targetRoot, issue)
+	if err != nil {
+		return fmt.Errorf("resolve worktree path: %w", err)
+	}
+
+	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+		return nil // already gone
+	} else if err != nil {
+		return fmt.Errorf("inspect worktree path %s: %w", path, err)
+	}
+
+	return a.repo.WorktreeRemove(path)
+}

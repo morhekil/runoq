@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/saruman/runoq/internal/shell"
 )
 
 func TestBranchName(t *testing.T) {
@@ -21,6 +23,43 @@ func TestBranchName(t *testing.T) {
 	}
 	if stdout != "runoq/42-implement-queue\n" {
 		t.Fatalf("unexpected branch name: %q", stdout)
+	}
+}
+
+func TestCreateWorktreeDirectCall(t *testing.T) {
+	t.Parallel()
+
+	remoteDir := filepath.Join(t.TempDir(), "remote.git")
+	localDir := filepath.Join(t.TempDir(), "local")
+	makeRemoteBackedRepo(t, remoteDir, localDir)
+
+	writeIdentityFile(t, localDir, `{"appId":123}`)
+
+	naming := Naming{
+		BranchPrefix:   "runoq/",
+		WorktreePrefix: "runoq-wt-",
+		AppSlug:        "runoq",
+	}
+	app := NewDirect(naming, localDir, nil)
+	app.SetCommandExecutor(shell.RunCommand)
+
+	result, err := app.CreateWorktree(t.Context(), 42, "Implement queue")
+	if err != nil {
+		t.Fatalf("CreateWorktree: %v", err)
+	}
+	if result.Branch != "runoq/42-implement-queue" {
+		t.Fatalf("expected branch runoq/42-implement-queue, got %q", result.Branch)
+	}
+	if _, err := os.Stat(result.Worktree); err != nil {
+		t.Fatalf("worktree dir should exist: %v", err)
+	}
+
+	// RemoveWorktree
+	if err := app.RemoveWorktree(t.Context(), 42); err != nil {
+		t.Fatalf("RemoveWorktree: %v", err)
+	}
+	if _, err := os.Stat(result.Worktree); !os.IsNotExist(err) {
+		t.Fatalf("worktree should be removed, got: %v", err)
 	}
 }
 
