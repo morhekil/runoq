@@ -173,13 +173,13 @@ func (a *App) phaseInit(ctx context.Context, root string, env []string, repo str
 		return "", a.handleInitFailure(ctx, root, env, repo, issueNumber, "failed to push the initial worktree branch", branch, worktree, nil)
 	}
 
-	prOut, prStderr, prErr := a.scriptOutputWithStderr(ctx, root, env, "gh-pr-lifecycle.sh", []string{"create", repo, branch, strconv.Itoa(issueNumber), title}, nil)
+	prResult, prErr := a.createDraftPR(ctx, repo, branch, issueNumber, title)
 	if prErr != nil {
-		return "", a.handleInitFailure(ctx, root, env, repo, issueNumber, fmt.Sprintf("draft PR creation failed: %s", stderrOrUnknown(prStderr)), branch, worktree, nil)
+		return "", a.handleInitFailure(ctx, root, env, repo, issueNumber, fmt.Sprintf("draft PR creation failed: %v", prErr), branch, worktree, nil)
 	}
 
-	prNumber, ok := parsePRNumber(prOut)
-	if !ok {
+	prNumber := prResult.Number
+	if prNumber == 0 {
 		return "", a.handleInitFailure(ctx, root, env, repo, issueNumber, "draft PR creation returned an invalid payload", branch, worktree, nil)
 	}
 
@@ -589,15 +589,13 @@ func (a *App) phaseFinalize(ctx context.Context, root string, env []string, repo
 		issueStatus,
 	)
 
-	finalizeArgs := []string{"finalize", repo, strconv.Itoa(state.PRNumber), finalizeVerdict}
+	reviewer := ""
 	if finalizeVerdict == "needs-review" {
-		if reviewer := firstReviewer(cfg.Reviewers); reviewer != "" {
-			finalizeArgs = append(finalizeArgs, "--reviewer", reviewer)
-		}
+		reviewer = firstReviewer(cfg.Reviewers)
 	}
 
 	a.logInfo("FINALIZE: calling pr-lifecycle finalize verdict=%s pr=#%d", finalizeVerdict, state.PRNumber)
-	if err := a.runScript(ctx, root, env, "gh-pr-lifecycle.sh", finalizeArgs, nil, io.Discard, io.Discard); err != nil {
+	if err := a.finalizePR(ctx, repo, state.PRNumber, finalizeVerdict, reviewer); err != nil {
 		a.logInfo("FINALIZE: pr-lifecycle finalize failed")
 	}
 
@@ -691,11 +689,8 @@ func (a *App) phaseDevelopNeedsReview(ctx context.Context, root string, env []st
 	}
 
 	cfg := a.cfg
-	finalizeArgs := []string{"finalize", repo, strconv.Itoa(state.PRNumber), "needs-review"}
-	if reviewer := firstReviewer(cfg.Reviewers); reviewer != "" {
-		finalizeArgs = append(finalizeArgs, "--reviewer", reviewer)
-	}
-	if err := a.runScript(ctx, root, env, "gh-pr-lifecycle.sh", finalizeArgs, nil, io.Discard, io.Discard); err != nil {
+	reviewer := firstReviewer(cfg.Reviewers)
+	if err := a.finalizePR(ctx, repo, state.PRNumber, "needs-review", reviewer); err != nil {
 		return "", err
 	}
 	if code := a.issueQueueApp.SetStatus(ctx, repo, strconv.Itoa(issueNumber), "needs-review"); code != 0 {

@@ -1,7 +1,6 @@
 package orchestrator
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -20,14 +19,9 @@ func (a *App) mentionTriageEntry(ctx context.Context, root string, env []string,
 	repo := args[0]
 	cfg := a.cfg
 
-	var stdout bytes.Buffer
-	if err := a.runScript(ctx, root, env, "gh-pr-lifecycle.sh", []string{"poll-mentions", repo, cfg.IdentityHandle}, nil, &stdout, a.stderr); err != nil {
+	mentions, err := a.pollMentions(ctx, repo, cfg.IdentityHandle)
+	if err != nil {
 		return commandExitCode(err)
-	}
-
-	var mentions []json.RawMessage
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &mentions); err != nil {
-		return shell.Failf(a.stderr, "poll-mentions returned invalid JSON: %v", err)
 	}
 	if len(mentions) == 0 {
 		return 0

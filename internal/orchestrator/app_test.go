@@ -212,6 +212,90 @@ func TestDeriveStateFromGitHubOldFormatComments(t *testing.T) {
 	}
 }
 
+func TestCreateDraftPR(t *testing.T) {
+	ctx := t.Context()
+	var calls []string
+	app := New(nil, []string{"RUNOQ_ROOT=/runoq", "TARGET_ROOT=/tmp"}, "/tmp", io.Discard, io.Discard)
+	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
+		cmd := req.Name + " " + strings.Join(req.Args, " ")
+		calls = append(calls, cmd)
+		if strings.Contains(cmd, "pr create") {
+			_, _ = io.WriteString(req.Stdout, "https://github.com/owner/repo/pull/87\n")
+		}
+		return nil
+	})
+
+	result, err := app.createDraftPR(ctx, "owner/repo", "runoq/42-test", 42, "Test PR")
+	if err != nil {
+		t.Fatalf("createDraftPR: %v", err)
+	}
+	if result.Number != 87 {
+		t.Fatalf("expected PR number 87, got %d", result.Number)
+	}
+	if result.URL != "https://github.com/owner/repo/pull/87" {
+		t.Fatalf("expected URL, got %q", result.URL)
+	}
+}
+
+func TestCommentPR(t *testing.T) {
+	ctx := t.Context()
+	var bodyContent string
+	app := New(nil, []string{}, "/tmp", io.Discard, io.Discard)
+	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
+		cmd := strings.Join(req.Args, " ")
+		if strings.Contains(cmd, "pr comment") {
+			// Extract --body-file content
+			for i, arg := range req.Args {
+				if arg == "--body-file" && i+1 < len(req.Args) {
+					data, _ := os.ReadFile(req.Args[i+1])
+					bodyContent = string(data)
+				}
+			}
+		}
+		return nil
+	})
+
+	err := app.commentPR(ctx, "owner/repo", 87, "Test comment body")
+	if err != nil {
+		t.Fatalf("commentPR: %v", err)
+	}
+	if !strings.Contains(bodyContent, "Test comment body") {
+		t.Fatalf("expected body in comment, got %q", bodyContent)
+	}
+}
+
+func TestFinalizePR(t *testing.T) {
+	ctx := t.Context()
+	var calls []string
+	app := New(nil, []string{}, "/tmp", io.Discard, io.Discard)
+	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
+		calls = append(calls, req.Name+" "+strings.Join(req.Args, " "))
+		return nil
+	})
+
+	err := app.finalizePR(ctx, "owner/repo", 87, "auto-merge", "")
+	if err != nil {
+		t.Fatalf("finalizePR: %v", err)
+	}
+	// Should call pr ready + pr merge
+	foundReady := false
+	foundMerge := false
+	for _, c := range calls {
+		if strings.Contains(c, "pr ready") {
+			foundReady = true
+		}
+		if strings.Contains(c, "pr merge") {
+			foundMerge = true
+		}
+	}
+	if !foundReady {
+		t.Fatalf("expected pr ready call, got %v", calls)
+	}
+	if !foundMerge {
+		t.Fatalf("expected pr merge call, got %v", calls)
+	}
+}
+
 func TestParseStateFromCommentsEmpty(t *testing.T) {
 	stateJSON, err := parseStateFromComments("[]")
 	if err != nil {
@@ -336,9 +420,8 @@ func TestPhaseInitPRCreateFailureRollsBackAndCleansUp(t *testing.T) {
 		calls:       &calls,
 		issueNumber: 42,
 		issueTitle:  "Implement queue",
-		customHandler: func(req shell.CommandRequest) (bool, error) {
-			if strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") && strings.Contains(strings.Join(req.Args, " "), "create") {
-				_, _ = io.WriteString(req.Stderr, "aborted: push first")
+		ghHandler: func(ghArgs string, req shell.CommandRequest) (bool, error) {
+			if strings.Contains(ghArgs, "pr create") {
 				return true, errors.New("pr create failed")
 			}
 			return false, nil
@@ -427,8 +510,8 @@ func TestRunLowComplexityDevelopFailureCompletesNeedsReviewHandoff(t *testing.T)
 	if !strings.Contains(result, `"finalize_verdict":"needs-review"`) {
 		t.Fatalf("expected needs-review finalize verdict, got %q", result)
 	}
-	if !containsCall(calls, "finalize owner/repo 87 needs-review") {
-		t.Fatalf("expected needs-review finalize call, got %v", calls)
+	if !containsCall(calls, "pr ready 87 --repo owner/repo") {
+		t.Fatalf("expected pr ready call, got %v", calls)
 	}
 	if !strings.Contains(stderr.String(), "DEVELOP: issue #42 requires deterministic needs-review handoff") {
 		t.Fatalf("expected develop handoff log, got %q", stderr.String())
@@ -458,8 +541,8 @@ func TestPhaseFinalizeAutoMergesAndCleansUp(t *testing.T) {
 	if !strings.Contains(result, `"finalize_verdict":"auto-merge"`) {
 		t.Fatalf("expected auto-merge, got %s", result)
 	}
-	if !containsCall(calls, "finalize owner/repo 87 auto-merge") {
-		t.Fatalf("expected auto-merge finalize call, got %v", calls)
+	if !containsCall(calls, "pr merge 87 --repo owner/repo --auto --squash") {
+		t.Fatalf("expected auto-merge call, got %v", calls)
 	}
 	if !strings.Contains(stderr.String(), "FINALIZE: removing worktree for issue #42 (auto-merged)") {
 		t.Fatalf("expected finalize cleanup log, got %q", stderr.String())
@@ -705,7 +788,7 @@ func TestMentionTriageReturnsEmptyStdoutWhenPollMentionsIsEmpty(t *testing.T) {
 		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
 			_, _ = io.WriteString(req.Stdout, "fail\n")
 			return nil
-		case strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") && strings.Join(req.Args, " ") == "poll-mentions owner/repo runoq":
+		case req.Name == "gh" && strings.Contains(strings.Join(req.Args, " "), "issues?state=open"):
 			_, _ = io.WriteString(req.Stdout, "[]\n")
 			return nil
 		default:
@@ -721,8 +804,8 @@ func TestMentionTriageReturnsEmptyStdoutWhenPollMentionsIsEmpty(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Fatalf("expected no stdout when no mentions are found, got %q", stdout.String())
 	}
-	if !containsCall(calls, "gh-pr-lifecycle.sh poll-mentions owner/repo runoq") {
-		t.Fatalf("expected poll-mentions call, got %v", calls)
+	if !containsCall(calls, "gh api repos/owner/repo/issues?state=open") {
+		t.Fatalf("expected poll-mentions API call, got %v", calls)
 	}
 	if !strings.Contains(stderr.String(), "Token mint failed or skipped") {
 		t.Fatalf("expected auth log on stderr, got %q", stderr.String())
@@ -745,8 +828,11 @@ func TestMentionTriageReturnsNotImplementedWhenMentionsExist(t *testing.T) {
 		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
 			_, _ = io.WriteString(req.Stdout, "fail\n")
 			return nil
-		case strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") && strings.Join(req.Args, " ") == "poll-mentions owner/repo runoq":
-			_, _ = io.WriteString(req.Stdout, "[{\"comment_id\":3001}]\n")
+		case req.Name == "gh" && strings.Contains(strings.Join(req.Args, " "), "issues?state=open"):
+			_, _ = io.WriteString(req.Stdout, `[{"number":10}]`)
+			return nil
+		case req.Name == "gh" && strings.Contains(strings.Join(req.Args, " "), "issues/10/comments"):
+			_, _ = io.WriteString(req.Stdout, `[{"id":3001,"body":"Hey @runoq please help","user":{"login":"alice"},"created_at":"2026-01-01T00:00:00Z"}]`)
 			return nil
 		default:
 			t.Fatalf("unexpected command: %s", commandLine(req))
@@ -782,8 +868,7 @@ func TestMentionTriagePropagatesScriptExitCodeAndStderr(t *testing.T) {
 		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
 			_, _ = io.WriteString(req.Stdout, "fail\n")
 			return nil
-		case strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") && strings.Join(req.Args, " ") == "poll-mentions owner/repo runoq":
-			_, _ = io.WriteString(req.Stderr, "poll failed\n")
+		case req.Name == "gh" && strings.Contains(strings.Join(req.Args, " "), "issues?state=open"):
 			return fakeExitError{code: 23}
 		default:
 			t.Fatalf("unexpected command: %s", commandLine(req))
@@ -797,9 +882,6 @@ func TestMentionTriagePropagatesScriptExitCodeAndStderr(t *testing.T) {
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("expected no stdout on error, got %q", stdout.String())
-	}
-	if !strings.Contains(stderr.String(), "poll failed") {
-		t.Fatalf("expected script stderr, got %q", stderr.String())
 	}
 }
 
@@ -943,7 +1025,7 @@ func TestRunIssueResumesFromDevelopState(t *testing.T) {
 	}
 	// Must NOT have called phaseInit
 	for _, call := range calls {
-		if strings.Contains(call, "gh-pr-lifecycle.sh create") {
+		if strings.Contains(call, "pr create") && strings.Contains(call, "--draft") {
 			t.Fatalf("should not have created PR on resume, got: %v", calls)
 		}
 	}
@@ -1100,7 +1182,19 @@ func buildMockExecutor(t *testing.T, mc mockConfig) shell.CommandExecutor {
 			case strings.Contains(ghArgs, "pr view") && strings.Contains(ghArgs, "comments"):
 				_, _ = io.WriteString(req.Stdout, `{"comments":[]}`)
 				return nil
+			case strings.Contains(ghArgs, "pr create") && strings.Contains(ghArgs, "--draft"):
+				_, _ = io.WriteString(req.Stdout, "https://example.test/pull/87\n")
+				return nil
+			case strings.Contains(ghArgs, "pr comment"):
+				return nil
+			case strings.Contains(ghArgs, "pr ready"):
+				return nil
+			case strings.Contains(ghArgs, "pr merge"):
+				return nil
 			case strings.Contains(ghArgs, "pr edit"):
+				return nil
+			case strings.Contains(ghArgs, "api") && strings.Contains(ghArgs, "issues?state=open"):
+				_, _ = io.WriteString(req.Stdout, `[]`)
 				return nil
 			default:
 				t.Fatalf("unexpected gh call: %s (from %s)", ghArgs, commandLine(req))
@@ -1108,7 +1202,7 @@ func buildMockExecutor(t *testing.T, mc mockConfig) shell.CommandExecutor {
 			}
 		}
 
-		// pr-lifecycle script calls
+		// pr-lifecycle script calls (legacy fallback)
 		if strings.HasSuffix(req.Name, "/gh-pr-lifecycle.sh") {
 			switch {
 			case strings.Contains(args, "create"):

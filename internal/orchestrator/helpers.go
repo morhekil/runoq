@@ -277,24 +277,8 @@ func formatAuditComment(event string, stateJSON string, body string) string {
 }
 
 func (a *App) postAuditCommentWithState(ctx context.Context, root string, env []string, repo string, prNumber int, event string, stateJSON string, body string) error {
-	commentFile, err := os.CreateTemp("", "runoq-audit.*")
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = os.Remove(commentFile.Name())
-	}()
-
 	content := formatAuditComment(event, stateJSON, body)
-	if _, err := io.WriteString(commentFile, content); err != nil {
-		_ = commentFile.Close()
-		return err
-	}
-	if err := commentFile.Close(); err != nil {
-		return err
-	}
-
-	return a.runScript(ctx, root, env, "gh-pr-lifecycle.sh", []string{"comment", repo, strconv.Itoa(prNumber), commentFile.Name()}, nil, io.Discard, io.Discard)
+	return a.commentPR(ctx, repo, prNumber, content)
 }
 
 func (a *App) ghOutput(ctx context.Context, env []string, args ...string) (string, error) {

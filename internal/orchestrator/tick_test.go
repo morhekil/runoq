@@ -378,8 +378,11 @@ func TestTickSelectsTaskAndCallsRunIssue(t *testing.T) {
 			{contains: "commit --allow-empty", stdout: ""},
 			{contains: "push", stdout: ""},
 			{contains: "config user.", stdout: ""},
-			// PR lifecycle
-			{contains: "gh-pr-lifecycle.sh", stdout: `{"url":"u","number":87}`},
+			// PR lifecycle (now via gh directly)
+			{contains: "pr create", stdout: "https://example.test/pull/87\n"},
+			{contains: "pr comment", stdout: ""},
+			{contains: "pr ready", stdout: ""},
+			{contains: "pr merge", stdout: ""},
 			// issue view (orchestrator calls)
 			{contains: "issue view", stdout: `{"number":11,"title":"First task","body":"## AC","labels":[],"url":"u"}`},
 		},
