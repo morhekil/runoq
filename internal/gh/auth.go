@@ -16,10 +16,12 @@ import (
 	"time"
 )
 
-func MintBotToken(client *http.Client, appID int64, installationID int64, privateKey *rsa.PrivateKey) (string, error) {
-	now := time.Now().Unix()
+// MintJWT creates a signed JWT for the given GitHub App, suitable for
+// authenticating as the app (not an installation).
+func MintJWT(appID int64, privateKey *rsa.PrivateKey) (string, error) {
+	now := time.Now().Unix() - 60
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
-	payloadJSON := fmt.Sprintf(`{"iat":%d,"exp":%d,"iss":"%d"}`, now, now+540, appID)
+	payloadJSON := fmt.Sprintf(`{"iat":%d,"exp":%d,"iss":"%d"}`, now, now+600, appID)
 	payload := base64.RawURLEncoding.EncodeToString([]byte(payloadJSON))
 	unsigned := header + "." + payload
 
@@ -28,7 +30,14 @@ func MintBotToken(client *http.Client, appID int64, installationID int64, privat
 	if err != nil {
 		return "", err
 	}
-	jwt := unsigned + "." + base64.RawURLEncoding.EncodeToString(signature)
+	return unsigned + "." + base64.RawURLEncoding.EncodeToString(signature), nil
+}
+
+func MintBotToken(client *http.Client, appID int64, installationID int64, privateKey *rsa.PrivateKey) (string, error) {
+	jwt, err := MintJWT(appID, privateKey)
+	if err != nil {
+		return "", err
+	}
 
 	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("https://api.github.com/app/installations/%d/access_tokens", installationID), nil)
 	if err != nil {

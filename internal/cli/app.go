@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 	"github.com/saruman/runoq/internal/runlog"
 	"github.com/saruman/runoq/internal/orchestrator"
 	"github.com/saruman/runoq/internal/report"
+	"github.com/saruman/runoq/internal/setup"
 	"github.com/saruman/runoq/internal/shell"
 )
 
@@ -190,7 +192,7 @@ func (a *App) Run(ctx context.Context) int {
 		if code != 0 {
 			return code
 		}
-		return a.runScript(ctx, targetEnv, runoqRoot, "setup.sh", args)
+		return a.runSetup(ctx, targetEnv, runoqRoot, args)
 	case "plan":
 		fmt.Fprintln(a.stderr, "runoq plan is removed; use `runoq tick` for the iterative planning workflow.")
 		return 1
@@ -431,17 +433,65 @@ func readProjectPlanFile(targetRoot string) (string, error) {
 	return cfg.Plan, nil
 }
 
-func (a *App) runScript(ctx context.Context, env []string, runoqRoot string, script string, args []string) int {
-	req := shell.CommandRequest{
-		Name:   filepath.Join(runoqRoot, "scripts", script),
-		Args:   append([]string(nil), args...),
-		Dir:    a.cwd,
-		Env:    env,
-		Stdout: a.stdout,
-		Stderr: a.stderr,
+func (a *App) runSetup(ctx context.Context, env []string, runoqRoot string, args []string) int {
+	var planPath string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--plan":
+			if i+1 >= len(args) {
+				return shell.Fail(a.stderr, "Missing value for --plan.")
+			}
+			planPath = args[i+1]
+			i++
+		default:
+			return shell.Failf(a.stderr, "Unknown option: %s", args[i])
+		}
 	}
-	if err := a.execCommand(ctx, req); err != nil {
-		return shell.ExitCodeFromError(err)
+
+	targetRoot, _ := shell.EnvLookup(env, "TARGET_ROOT")
+	repo, _ := shell.EnvLookup(env, "REPO")
+	configPath, _ := shell.EnvLookup(env, "RUNOQ_CONFIG")
+	homeDir, _ := shell.EnvLookup(env, "HOME")
+	appKeyPath, _ := shell.EnvLookup(env, "RUNOQ_APP_KEY")
+	symlinkDir, _ := shell.EnvLookup(env, "RUNOQ_SYMLINK_DIR")
+
+	var appID int64
+	if v, ok := shell.EnvLookup(env, "RUNOQ_APP_ID"); ok {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err == nil {
+			appID = n
+		}
+	}
+
+	// Read appSlug from config.
+	var appSlug string
+	if a.configRaw != nil {
+		if v, ok := a.configRaw["identity"]; ok {
+			var id struct {
+				AppSlug string `json:"appSlug"`
+			}
+			if json.Unmarshal(v, &id) == nil {
+				appSlug = id.AppSlug
+			}
+		}
+	}
+
+	cfg := setup.Config{
+		TargetRoot: targetRoot,
+		RunoqRoot:  runoqRoot,
+		Repo:       repo,
+		PlanPath:   planPath,
+		AppSlug:    appSlug,
+		AppKeyPath: appKeyPath,
+		AppID:      appID,
+		SymlinkDir: symlinkDir,
+		HomeDir:    homeDir,
+		ConfigPath: configPath,
+		Env:        env,
+	}
+
+	if err := setup.Run(ctx, cfg, http.DefaultClient, a.execCommand, a.stderr); err != nil {
+		return shell.Fail(a.stderr, err.Error())
 	}
 	return 0
 }
