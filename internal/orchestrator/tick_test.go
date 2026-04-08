@@ -103,92 +103,85 @@ func TestRunTickAllClosedReturnsComplete(t *testing.T) {
 	}
 }
 
-func TestSelectNextTaskPrioritySortAndDependencyFiltering(t *testing.T) {
+func TestGraphPrioritySortAndDependencyFiltering(t *testing.T) {
 	t.Parallel()
 
-	runner := &tickRunner{
-		issues: []issue{
-			{Number: 9, Title: "Epic", State: "OPEN", Body: "<!-- runoq:meta\ntype: epic\npriority: 1\n-->"},
-			// Task #11: priority 2, no deps — should be selected
-			{Number: 11, Title: "Second task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 2\n-->"},
-			// Task #10: priority 1, depends on #12 which is OPEN — blocked
-			{Number: 10, Title: "First task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 1\ndepends_on: [12]\n-->"},
-			// Task #12: priority 3, no deps
-			{Number: 12, Title: "Third task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 3\n-->"},
-		},
+	issues := []issue{
+		{Number: 9, Title: "Epic", State: "OPEN", Body: "<!-- runoq:meta\ntype: epic\npriority: 1\n-->"},
+		// Task #11: priority 2, no deps
+		{Number: 11, Title: "Second task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 2\n-->"},
+		// Task #10: priority 1, depends on #12 which is OPEN — blocked
+		{Number: 10, Title: "First task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 1\ndepends_on: [12]\n-->"},
+		// Task #12: priority 3, no deps — should be selected (deeper chain: #10 depends on it)
+		{Number: 12, Title: "Third task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 3\n-->"},
 	}
-
-	task := runner.selectNextTask(9)
+	g := BuildDepGraph(issues, 9, "")
+	task := g.Next()
 	if task == nil {
-		t.Fatal("selectNextTask returned nil, expected #11")
+		t.Fatal("Next returned nil")
 	}
-	if task.Number != 11 {
-		t.Errorf("selectNextTask selected #%d, expected #11 (highest unblocked priority)", task.Number)
+	// #12 has effective priority 1 (from #10 which depends on it) and deeper chain
+	// #11 has effective priority 2
+	// So #12 should be selected
+	if task.Number != 12 {
+		t.Errorf("Next selected #%d, expected #12 (effective pri=1 from #10)", task.Number)
 	}
 }
 
-func TestSelectNextTaskSkipsNonReadyLabels(t *testing.T) {
+func TestGraphSkipsNonReadyLabels(t *testing.T) {
 	t.Parallel()
 
-	runner := &tickRunner{
-		cfg: TickConfig{ReadyLabel: "runoq:ready"},
-		issues: []issue{
-			{Number: 9, Title: "Epic", State: "OPEN", Body: "<!-- runoq:meta\ntype: epic\npriority: 1\n-->"},
-			// Task #10: has needs-human-review label — skip
-			{Number: 10, Title: "Needs review", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 1\n-->", Labels: []label{{Name: "runoq:needs-human-review"}}},
-			// Task #11: has ready label — should be selected
-			{Number: 11, Title: "Ready task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 2\n-->", Labels: []label{{Name: "runoq:ready"}}},
-		},
+	issues := []issue{
+		{Number: 9, Title: "Epic", State: "OPEN", Body: "<!-- runoq:meta\ntype: epic\npriority: 1\n-->"},
+		// Task #10: no ready label — skip
+		{Number: 10, Title: "Needs review", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 1\n-->", Labels: []label{{Name: "runoq:needs-human-review"}}},
+		// Task #11: has ready label
+		{Number: 11, Title: "Ready task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 2\n-->", Labels: []label{{Name: "runoq:ready"}}},
 	}
-
-	task := runner.selectNextTask(9)
+	g := BuildDepGraph(issues, 9, "runoq:ready")
+	task := g.Next()
 	if task == nil {
-		t.Fatal("selectNextTask returned nil, expected #11")
+		t.Fatal("Next returned nil, expected #11")
 	}
 	if task.Number != 11 {
-		t.Errorf("selectNextTask selected #%d, expected #11 (only ready task)", task.Number)
+		t.Errorf("Next selected #%d, expected #11 (only ready task)", task.Number)
 	}
 }
 
-func TestSelectNextTaskAllBlocked(t *testing.T) {
+func TestGraphAllBlockedCycle(t *testing.T) {
 	t.Parallel()
 
-	runner := &tickRunner{
-		issues: []issue{
-			{Number: 9, Title: "Epic", State: "OPEN", Body: "<!-- runoq:meta\ntype: epic\npriority: 1\n-->"},
-			// Task #10 depends on #11 which is OPEN
-			{Number: 10, Title: "Task A", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 1\ndepends_on: [11]\n-->"},
-			{Number: 11, Title: "Task B", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 2\ndepends_on: [10]\n-->"},
-		},
+	issues := []issue{
+		{Number: 9, Title: "Epic", State: "OPEN", Body: "<!-- runoq:meta\ntype: epic\npriority: 1\n-->"},
+		{Number: 10, Title: "Task A", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 1\ndepends_on: [11]\n-->"},
+		{Number: 11, Title: "Task B", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 2\ndepends_on: [10]\n-->"},
 	}
-
-	task := runner.selectNextTask(9)
+	g := BuildDepGraph(issues, 9, "")
+	task := g.Next()
 	if task != nil {
-		t.Errorf("selectNextTask returned #%d, expected nil (all blocked)", task.Number)
+		t.Errorf("Next returned #%d, expected nil (cycle)", task.Number)
+	}
+	if !g.HasCycle() {
+		t.Error("expected HasCycle() true")
 	}
 }
 
-func TestSelectNextTaskSkipsClosedAndNonTaskTypes(t *testing.T) {
+func TestGraphSkipsClosedAndNonTaskTypes(t *testing.T) {
 	t.Parallel()
 
-	runner := &tickRunner{
-		issues: []issue{
-			{Number: 9, Title: "Epic", State: "OPEN", Body: "<!-- runoq:meta\ntype: epic\npriority: 1\n-->"},
-			// Closed task — skip
-			{Number: 10, Title: "Done task", State: "CLOSED", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 1\n-->"},
-			// Planning type — skip
-			{Number: 11, Title: "Planning", State: "OPEN", Body: "<!-- runoq:meta\ntype: planning\nparent_epic: 9\npriority: 1\n-->"},
-			// Open task with met dependency (#10 is CLOSED)
-			{Number: 12, Title: "Ready task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 2\ndepends_on: [10]\n-->"},
-		},
+	issues := []issue{
+		{Number: 9, Title: "Epic", State: "OPEN", Body: "<!-- runoq:meta\ntype: epic\npriority: 1\n-->"},
+		{Number: 10, Title: "Done task", State: "CLOSED", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 1\n-->"},
+		{Number: 11, Title: "Planning", State: "OPEN", Body: "<!-- runoq:meta\ntype: planning\nparent_epic: 9\npriority: 1\n-->"},
+		{Number: 12, Title: "Ready task", State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 9\npriority: 2\ndepends_on: [10]\n-->"},
 	}
-
-	task := runner.selectNextTask(9)
+	g := BuildDepGraph(issues, 9, "")
+	task := g.Next()
 	if task == nil {
-		t.Fatal("selectNextTask returned nil, expected #12")
+		t.Fatal("Next returned nil, expected #12")
 	}
 	if task.Number != 12 {
-		t.Errorf("selectNextTask selected #%d, expected #12", task.Number)
+		t.Errorf("Next selected #%d, expected #12", task.Number)
 	}
 }
 
