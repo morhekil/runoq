@@ -390,14 +390,14 @@ func finalizeDecision(state struct {
 	Round    int      `json:"round"`
 	Caveats  []string `json:"caveats"`
 	Summary  string   `json:"summary"`
-}, cfg queueConfig) (finalizeVerdict string, issueStatus string, finalizeReason string, complexityOK bool) {
+}, cfg OrchestratorConfig) (finalizeVerdict string, issueStatus string, finalizeReason string, complexityOK bool) {
 	if state.Verdict != "PASS" {
 		return "needs-review", "needs-review", fmt.Sprintf("Review verdict was %s (not PASS).", defaultString(state.Verdict, "FAIL")), false
 	}
 	if len(state.Caveats) > 0 {
 		return "needs-review", "needs-review", "Caveats present: " + strings.Join(state.Caveats, ", "), false
 	}
-	if !cfg.AutoMerge.Enabled {
+	if !cfg.AutoMergeEnabled {
 		return "needs-review", "needs-review", "Auto-merge is disabled in config.", false
 	}
 

@@ -13,6 +13,17 @@ const usageText = `Usage:
   orchestrator.sh mention-triage <repo> <pr-number>
 `
 
+// OrchestratorConfig holds the config values the orchestrator needs.
+// Populated by the CLI from the config file — the orchestrator never reads config files.
+type OrchestratorConfig struct {
+	MaxRounds        int
+	MaxTokenBudget   int
+	AutoMergeEnabled bool
+	Reviewers        []string
+	IdentityHandle   string
+	ReadyLabel       string
+}
+
 type App struct {
 	args        []string
 	env         []string
@@ -21,6 +32,7 @@ type App struct {
 	stderr      io.Writer
 	logWriter   io.Writer
 	execCommand shell.CommandExecutor
+	cfg         OrchestratorConfig
 }
 
 func New(args []string, env []string, cwd string, stdout io.Writer, stderr io.Writer) *App {
@@ -32,6 +44,10 @@ func New(args []string, env []string, cwd string, stdout io.Writer, stderr io.Wr
 		stderr:      stderr,
 		execCommand: shell.RunCommand,
 	}
+}
+
+func (a *App) SetConfig(cfg OrchestratorConfig) {
+	a.cfg = cfg
 }
 
 func (a *App) SetLogWriter(w io.Writer) {

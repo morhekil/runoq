@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -98,13 +97,13 @@ func TestAuditCommentRoundTrip(t *testing.T) {
 func TestDeriveStateFromGitHubFindsLinkedPR(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
-	writeRuntimeConfig(t, root)
 
 	var stdout, stderr bytes.Buffer
 	app := New(nil, []string{
 		"RUNOQ_ROOT=" + root,
 		"TARGET_ROOT=" + root,
 	}, root, &stdout, &stderr)
+	app.SetConfig(OrchestratorConfig{MaxRounds: 5, MaxTokenBudget: 500000, AutoMergeEnabled: true, Reviewers: []string{"username"}, IdentityHandle: "runoq", ReadyLabel: "runoq:ready"})
 
 	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
 		args := strings.Join(req.Args, " ")
@@ -142,13 +141,13 @@ func TestDeriveStateFromGitHubFindsLinkedPR(t *testing.T) {
 func TestDeriveStateFromGitHubNoPR(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
-	writeRuntimeConfig(t, root)
 
 	var stdout, stderr bytes.Buffer
 	app := New(nil, []string{
 		"RUNOQ_ROOT=" + root,
 		"TARGET_ROOT=" + root,
 	}, root, &stdout, &stderr)
+	app.SetConfig(OrchestratorConfig{MaxRounds: 5, MaxTokenBudget: 500000, AutoMergeEnabled: true, Reviewers: []string{"username"}, IdentityHandle: "runoq", ReadyLabel: "runoq:ready"})
 
 	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
 		args := strings.Join(req.Args, " ")
@@ -174,13 +173,13 @@ func TestDeriveStateFromGitHubNoPR(t *testing.T) {
 func TestDeriveStateFromGitHubOldFormatComments(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
-	writeRuntimeConfig(t, root)
 
 	var stdout, stderr bytes.Buffer
 	app := New(nil, []string{
 		"RUNOQ_ROOT=" + root,
 		"TARGET_ROOT=" + root,
 	}, root, &stdout, &stderr)
+	app.SetConfig(OrchestratorConfig{MaxRounds: 5, MaxTokenBudget: 500000, AutoMergeEnabled: true, Reviewers: []string{"username"}, IdentityHandle: "runoq", ReadyLabel: "runoq:ready"})
 
 	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
 		args := strings.Join(req.Args, " ")
@@ -304,14 +303,13 @@ type: epic
 func TestRunIssueDryRunDoesNotForceShellForMigratedHelpers(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
-	writeRuntimeConfig(t, root)
 
 	var stdout bytes.Buffer
 	app := New([]string{"run", "owner/repo", "--issue", "42", "--dry-run"}, []string{
 		"RUNOQ_ROOT=" + root,
-		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 		"TARGET_ROOT=" + root,
 	}, root, &stdout, io.Discard)
+	app.SetConfig(OrchestratorConfig{MaxRounds: 5, MaxTokenBudget: 500000, AutoMergeEnabled: true, Reviewers: []string{"username"}, IdentityHandle: "runoq", ReadyLabel: "runoq:ready"})
 	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
 		switch {
 		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
@@ -356,14 +354,13 @@ func TestRunIssueDryRunDoesNotForceShellForMigratedHelpers(t *testing.T) {
 func TestPhaseInitPRCreateFailureRollsBackAndCleansUp(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
-	writeRuntimeConfig(t, root)
 
 	var calls []string
 
 	app := New(nil, []string{
 		"RUNOQ_ROOT=" + root,
-		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 	}, root, io.Discard, io.Discard)
+	app.SetConfig(OrchestratorConfig{MaxRounds: 5, MaxTokenBudget: 500000, AutoMergeEnabled: true, Reviewers: []string{"username"}, IdentityHandle: "runoq", ReadyLabel: "runoq:ready"})
 	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
 		calls = append(calls, commandLine(req))
 		switch {
@@ -409,7 +406,6 @@ func TestPhaseInitPRCreateFailureRollsBackAndCleansUp(t *testing.T) {
 func TestRunLowComplexityDevelopFailureCompletesNeedsReviewHandoff(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
-	writeRuntimeConfig(t, root)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -417,9 +413,9 @@ func TestRunLowComplexityDevelopFailureCompletesNeedsReviewHandoff(t *testing.T)
 
 	app := New([]string{"run", "owner/repo", "--issue", "42"}, []string{
 		"RUNOQ_ROOT=" + root,
-		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 		"TARGET_ROOT=" + root,
 	}, root, &stdout, &stderr)
+	app.SetConfig(OrchestratorConfig{MaxRounds: 5, MaxTokenBudget: 500000, AutoMergeEnabled: true, Reviewers: []string{"username"}, IdentityHandle: "runoq", ReadyLabel: "runoq:ready"})
 	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
 		calls = append(calls, commandLine(req))
 		switch {
@@ -513,7 +509,6 @@ func TestRunLowComplexityDevelopFailureCompletesNeedsReviewHandoff(t *testing.T)
 func TestRunLowComplexityReviewReadyAutoMergesAndCleansUp(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
-	writeRuntimeConfig(t, root)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -523,9 +518,9 @@ func TestRunLowComplexityReviewReadyAutoMergesAndCleansUp(t *testing.T) {
 
 	app := New([]string{"run", "owner/repo", "--issue", "42"}, []string{
 		"RUNOQ_ROOT=" + root,
-		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 		"TARGET_ROOT=" + root,
 	}, root, &stdout, &stderr)
+	app.SetConfig(OrchestratorConfig{MaxRounds: 5, MaxTokenBudget: 500000, AutoMergeEnabled: true, Reviewers: []string{"username"}, IdentityHandle: "runoq", ReadyLabel: "runoq:ready"})
 	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
 		calls = append(calls, commandLine(req))
 		switch {
@@ -674,7 +669,6 @@ func TestRunLowComplexityReviewReadyAutoMergesAndCleansUp(t *testing.T) {
 func TestRunLowComplexityIterateReentersDevelopWithChecklist(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
-	writeRuntimeConfig(t, root)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -684,9 +678,9 @@ func TestRunLowComplexityIterateReentersDevelopWithChecklist(t *testing.T) {
 
 	app := New([]string{"run", "owner/repo", "--issue", "42"}, []string{
 		"RUNOQ_ROOT=" + root,
-		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 		"TARGET_ROOT=" + root,
 	}, root, &stdout, &stderr)
+	app.SetConfig(OrchestratorConfig{MaxRounds: 5, MaxTokenBudget: 500000, AutoMergeEnabled: true, Reviewers: []string{"username"}, IdentityHandle: "runoq", ReadyLabel: "runoq:ready"})
 	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
 		calls = append(calls, commandLine(req))
 		switch {
@@ -808,7 +802,6 @@ func TestRunLowComplexityIterateReentersDevelopWithChecklist(t *testing.T) {
 func TestRunMediumComplexityGoesToDevelopAndAutoMerges(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
-	writeRuntimeConfig(t, root)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -816,9 +809,9 @@ func TestRunMediumComplexityGoesToDevelopAndAutoMerges(t *testing.T) {
 
 	app := New([]string{"run", "owner/repo", "--issue", "42"}, []string{
 		"RUNOQ_ROOT=" + root,
-		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 		"TARGET_ROOT=" + root,
 	}, root, &stdout, &stderr)
+	app.SetConfig(OrchestratorConfig{MaxRounds: 5, MaxTokenBudget: 500000, AutoMergeEnabled: true, Reviewers: []string{"username"}, IdentityHandle: "runoq", ReadyLabel: "runoq:ready"})
 	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
 		calls = append(calls, commandLine(req))
 		args := strings.Join(req.Args, " ")
@@ -908,14 +901,13 @@ func TestRunMediumComplexityGoesToDevelopAndAutoMerges(t *testing.T) {
 func TestRunCommandEntryRequiresIssueFlag(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
-	writeRuntimeConfig(t, root)
 
 	var stderr bytes.Buffer
 	app := New([]string{"run", "owner/repo"}, []string{
 		"RUNOQ_ROOT=" + root,
-		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 		"TARGET_ROOT=" + root,
 	}, root, io.Discard, &stderr)
+	app.SetConfig(OrchestratorConfig{MaxRounds: 5, MaxTokenBudget: 500000, AutoMergeEnabled: true, Reviewers: []string{"username"}, IdentityHandle: "runoq", ReadyLabel: "runoq:ready"})
 	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
 		switch {
 		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
@@ -942,14 +934,13 @@ func TestRunCommandEntryRequiresIssueFlag(t *testing.T) {
 func TestPhaseIntegratePendingPersistsIntegratePendingDecision(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
-	writeRuntimeConfig(t, root)
 
 	var calls []string
 
 	app := New(nil, []string{
 		"RUNOQ_ROOT=" + root,
-		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 	}, root, io.Discard, io.Discard)
+	app.SetConfig(OrchestratorConfig{MaxRounds: 5, MaxTokenBudget: 500000, AutoMergeEnabled: true, Reviewers: []string{"username"}, IdentityHandle: "runoq", ReadyLabel: "runoq:ready"})
 	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
 		calls = append(calls, commandLine(req))
 		switch {
@@ -980,14 +971,13 @@ func TestPhaseIntegratePendingPersistsIntegratePendingDecision(t *testing.T) {
 func TestPhaseIntegrateSuccessWithCriteriaCommitMarksDone(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
-	writeRuntimeConfig(t, root)
 
 	var calls []string
 
 	app := New(nil, []string{
 		"RUNOQ_ROOT=" + root,
-		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 	}, root, io.Discard, io.Discard)
+	app.SetConfig(OrchestratorConfig{MaxRounds: 5, MaxTokenBudget: 500000, AutoMergeEnabled: true, Reviewers: []string{"username"}, IdentityHandle: "runoq", ReadyLabel: "runoq:ready"})
 	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
 		calls = append(calls, commandLine(req))
 		switch {
@@ -1029,14 +1019,13 @@ func TestPhaseIntegrateSuccessWithCriteriaCommitMarksDone(t *testing.T) {
 func TestPhaseIntegrateFailureMarksNeedsReviewAndFailed(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
-	writeRuntimeConfig(t, root)
 
 	var calls []string
 
 	app := New(nil, []string{
 		"RUNOQ_ROOT=" + root,
-		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 	}, root, io.Discard, io.Discard)
+	app.SetConfig(OrchestratorConfig{MaxRounds: 5, MaxTokenBudget: 500000, AutoMergeEnabled: true, Reviewers: []string{"username"}, IdentityHandle: "runoq", ReadyLabel: "runoq:ready"})
 	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
 		calls = append(calls, commandLine(req))
 		switch {
@@ -1075,7 +1064,6 @@ func TestPhaseIntegrateFailureMarksNeedsReviewAndFailed(t *testing.T) {
 func TestMentionTriageReturnsEmptyStdoutWhenPollMentionsIsEmpty(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
-	writeRuntimeConfig(t, root)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -1083,8 +1071,8 @@ func TestMentionTriageReturnsEmptyStdoutWhenPollMentionsIsEmpty(t *testing.T) {
 
 	app := New([]string{"mention-triage", "owner/repo", "87"}, []string{
 		"RUNOQ_ROOT=" + root,
-		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 	}, root, &stdout, &stderr)
+	app.SetConfig(OrchestratorConfig{IdentityHandle: "runoq"})
 	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
 		calls = append(calls, commandLine(req))
 		switch {
@@ -1118,15 +1106,14 @@ func TestMentionTriageReturnsEmptyStdoutWhenPollMentionsIsEmpty(t *testing.T) {
 func TestMentionTriageReturnsNotImplementedWhenMentionsExist(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
-	writeRuntimeConfig(t, root)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
 	app := New([]string{"mention-triage", "owner/repo", "87"}, []string{
 		"RUNOQ_ROOT=" + root,
-		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 	}, root, &stdout, &stderr)
+	app.SetConfig(OrchestratorConfig{IdentityHandle: "runoq"})
 	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
 		switch {
 		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
@@ -1156,15 +1143,14 @@ func TestMentionTriageReturnsNotImplementedWhenMentionsExist(t *testing.T) {
 func TestMentionTriagePropagatesScriptExitCodeAndStderr(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
-	writeRuntimeConfig(t, root)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
 	app := New([]string{"mention-triage", "owner/repo", "87"}, []string{
 		"RUNOQ_ROOT=" + root,
-		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 	}, root, &stdout, &stderr)
+	app.SetConfig(OrchestratorConfig{IdentityHandle: "runoq"})
 	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
 		switch {
 		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
@@ -1194,13 +1180,13 @@ func TestMentionTriagePropagatesScriptExitCodeAndStderr(t *testing.T) {
 func TestSetupReturnsAuthedEnvAndConfiguresIdentity(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
-	writeRuntimeConfig(t, root)
 
 	var identityCalled, remoteCalled bool
 	app := New(nil, []string{
 		"RUNOQ_ROOT=" + root,
 		"TARGET_ROOT=" + root,
 	}, root, io.Discard, io.Discard)
+	app.SetConfig(OrchestratorConfig{MaxRounds: 5, MaxTokenBudget: 500000, AutoMergeEnabled: true, Reviewers: []string{"username"}, IdentityHandle: "runoq", ReadyLabel: "runoq:ready"})
 	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
 		cmd := commandLine(req)
 		switch {
@@ -1240,14 +1226,13 @@ func TestSetupReturnsAuthedEnvAndConfiguresIdentity(t *testing.T) {
 func TestRunIssueExportedMethodSkipsQueueSelection(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
-	writeRuntimeConfig(t, root)
 
 	var stdout bytes.Buffer
 	app := New(nil, []string{
 		"RUNOQ_ROOT=" + root,
-		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 		"TARGET_ROOT=" + root,
 	}, root, &stdout, io.Discard)
+	app.SetConfig(OrchestratorConfig{MaxRounds: 5, MaxTokenBudget: 500000, AutoMergeEnabled: true, Reviewers: []string{"username"}, IdentityHandle: "runoq", ReadyLabel: "runoq:ready"})
 	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
 		switch {
 		case strings.HasSuffix(req.Name, "/dispatch-safety.sh") && strings.Contains(commandLine(req), "eligibility"):
@@ -1277,16 +1262,15 @@ func TestRunIssueDoesNotCallStateSave(t *testing.T) {
 	// After M6, state.sh save should never be called — state is on GitHub
 	ctx := t.Context()
 	root := t.TempDir()
-	writeRuntimeConfig(t, root)
 
 	var stdout, stderr bytes.Buffer
 	var calls []string
 
 	app := New([]string{"run", "owner/repo", "--issue", "42"}, []string{
 		"RUNOQ_ROOT=" + root,
-		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 		"TARGET_ROOT=" + root,
 	}, root, &stdout, &stderr)
+	app.SetConfig(OrchestratorConfig{MaxRounds: 5, MaxTokenBudget: 500000, AutoMergeEnabled: true, Reviewers: []string{"username"}, IdentityHandle: "runoq", ReadyLabel: "runoq:ready"})
 	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
 		calls = append(calls, commandLine(req))
 		args := strings.Join(req.Args, " ")
@@ -1369,7 +1353,6 @@ func TestRunIssueDoesNotCallStateSave(t *testing.T) {
 func TestRunIssueResumesFromDevelopState(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
-	writeRuntimeConfig(t, root)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -1380,9 +1363,9 @@ func TestRunIssueResumesFromDevelopState(t *testing.T) {
 
 	app := New(nil, []string{
 		"RUNOQ_ROOT=" + root,
-		"RUNOQ_CONFIG=" + filepath.Join(root, "config", "runoq.json"),
 		"TARGET_ROOT=" + root,
 	}, root, &stdout, &stderr)
+	app.SetConfig(OrchestratorConfig{MaxRounds: 5, MaxTokenBudget: 500000, AutoMergeEnabled: true, Reviewers: []string{"username"}, IdentityHandle: "runoq", ReadyLabel: "runoq:ready"})
 	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
 		calls = append(calls, commandLine(req))
 		args := strings.Join(req.Args, " ")
@@ -1452,17 +1435,6 @@ func TestRunIssueResumesFromDevelopState(t *testing.T) {
 	// Should have gone through REVIEW phase
 	if !strings.Contains(stderr.String(), "REVIEW:") {
 		t.Fatalf("expected REVIEW phase log on resume, got %q", stderr.String())
-	}
-}
-
-func writeRuntimeConfig(t *testing.T, root string) {
-	t.Helper()
-	configDir := filepath.Join(root, "config")
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		t.Fatalf("mkdir config: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(configDir, "runoq.json"), []byte(`{"labels":{"ready":"runoq:ready"},"identity":{"handle":"runoq"},"autoMerge":{"enabled":true,"maxComplexity":"low"},"reviewers":["username"],"maxRounds":5,"maxTokenBudget":500000}`), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
 	}
 }
 

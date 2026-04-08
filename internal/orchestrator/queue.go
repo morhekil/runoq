@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -21,13 +19,10 @@ func (a *App) mentionTriageEntry(ctx context.Context, root string, env []string,
 	}
 
 	repo := args[0]
-	cfg, err := a.loadConfig(root, env)
-	if err != nil {
-		return shell.Fail(a.stderr, err.Error())
-	}
+	cfg := a.cfg
 
 	var stdout bytes.Buffer
-	if err := a.runScript(ctx, root, env, "gh-pr-lifecycle.sh", []string{"poll-mentions", repo, cfg.Identity.Handle}, nil, &stdout, a.stderr); err != nil {
+	if err := a.runScript(ctx, root, env, "gh-pr-lifecycle.sh", []string{"poll-mentions", repo, cfg.IdentityHandle}, nil, &stdout, a.stderr); err != nil {
 		return commandExitCode(err)
 	}
 
@@ -352,12 +347,9 @@ func (a *App) getIssueMetadata(ctx context.Context, root string, env []string, r
 		return IssueMetadata{}, fmt.Errorf("failed to parse issue metadata: %v", err)
 	}
 
-	cfg, err := a.loadConfig(root, env)
-	if err != nil {
-		return IssueMetadata{}, err
-	}
+	cfg := a.cfg
 
-	queueOut, err := a.scriptOutput(ctx, root, env, "gh-issue-queue.sh", []string{"list", repo, cfg.Labels.Ready}, nil)
+	queueOut, err := a.scriptOutput(ctx, root, env, "gh-issue-queue.sh", []string{"list", repo, cfg.ReadyLabel}, nil)
 	if err != nil {
 		queueOut = "[]"
 	}
@@ -388,18 +380,3 @@ func (a *App) issueTitle(ctx context.Context, env []string, repo string, issueNu
 	return payload.Title, nil
 }
 
-func (a *App) loadConfig(root string, env []string) (queueConfig, error) {
-	configPath, ok := shell.EnvLookup(env, "RUNOQ_CONFIG")
-	if !ok || strings.TrimSpace(configPath) == "" {
-		configPath = filepath.Join(root, "config", "runoq.json")
-	}
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return queueConfig{}, fmt.Errorf("failed to read config: %v", err)
-	}
-	var cfg queueConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return queueConfig{}, fmt.Errorf("failed to parse config: %v", err)
-	}
-	return cfg, nil
-}

@@ -18,22 +18,6 @@ type issueView struct {
 	URL    string `json:"url"`
 }
 
-type queueConfig struct {
-	Labels struct {
-		Ready string `json:"ready"`
-	} `json:"labels"`
-	Identity struct {
-		Handle string `json:"handle"`
-	} `json:"identity"`
-	AutoMerge struct {
-		Enabled       bool   `json:"enabled"`
-		MaxComplexity string `json:"maxComplexity"`
-	} `json:"autoMerge"`
-	Reviewers      []string `json:"reviewers"`
-	MaxRounds      int      `json:"maxRounds"`
-	MaxTokenBudget int      `json:"maxTokenBudget"`
-}
-
 type eligibilityResult struct {
 	Allowed bool     `json:"allowed"`
 	Issue   int      `json:"issue"`

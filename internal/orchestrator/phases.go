@@ -243,10 +243,7 @@ func (a *App) phaseCriteria(ctx context.Context, root string, env []string, repo
 func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string) (string, issueRunnerResult, error) {
 	a.logInfo("DEVELOP: issue #%d", issueNumber)
 
-	cfg, err := a.loadConfig(root, env)
-	if err != nil {
-		return "", issueRunnerResult{}, err
-	}
+	cfg := a.cfg
 
 	var state struct {
 		Worktree          string `json:"worktree"`
@@ -503,10 +500,7 @@ func (a *App) phaseReview(ctx context.Context, root string, env []string, repo s
 	reviewChecklist := verdictResult.Checklist
 	a.logInfo("REVIEW: verdict=%s score=%s", verdict, score)
 
-	cfg, err := a.loadConfig(root, env)
-	if err != nil {
-		return "", err
-	}
+	cfg := a.cfg
 	changedFilesDisplay := "[]"
 	if len(changedFiles) > 0 {
 		if b, err := json.Marshal(changedFiles); err == nil {
@@ -542,10 +536,7 @@ func (a *App) phaseDecide(ctx context.Context, root string, env []string, issueN
 		return "", fmt.Errorf("failed to parse state for decide: %v", err)
 	}
 
-	cfg, err := a.loadConfig(root, env)
-	if err != nil {
-		return "", err
-	}
+	cfg := a.cfg
 
 	verdict := strings.TrimSpace(state.Verdict)
 	if verdict == "" {
@@ -592,17 +583,14 @@ func (a *App) phaseFinalize(ctx context.Context, root string, env []string, repo
 		return "", errors.New("DECIDE state is missing pr_number")
 	}
 
-	cfg, err := a.loadConfig(root, env)
-	if err != nil {
-		return "", err
-	}
+	cfg := a.cfg
 
 	a.logInfo("FINALIZE: issue #%d decision=%s", issueNumber, defaultString(state.Decision, "finalize-needs-review"))
 
 	finalizeVerdict, issueStatus, finalizeReason, _ := finalizeDecision(state, cfg)
 	a.logInfo(
 		"FINALIZE: decision table: auto_merge_enabled=%t finalize_verdict=%s finalize_reason=%s issue_status=%s",
-		cfg.AutoMerge.Enabled,
+		cfg.AutoMergeEnabled,
 		finalizeVerdict,
 		defaultString(finalizeReason, "none"),
 		issueStatus,
@@ -643,7 +631,7 @@ func (a *App) phaseFinalize(ctx context.Context, root string, env []string, repo
 		issueStatus,
 		defaultString(strings.TrimSpace(state.Verdict), "FAIL"),
 		defaultString(strings.TrimSpace(state.Score), "0"),
-		cfg.AutoMerge.Enabled,
+		cfg.AutoMergeEnabled,
 		max(state.Round, 1),
 		cfg.MaxRounds,
 	)
@@ -708,10 +696,7 @@ func (a *App) phaseDevelopNeedsReview(ctx context.Context, root string, env []st
 		return "", err
 	}
 
-	cfg, err := a.loadConfig(root, env)
-	if err != nil {
-		return "", err
-	}
+	cfg := a.cfg
 	finalizeArgs := []string{"finalize", repo, strconv.Itoa(state.PRNumber), "needs-review"}
 	if reviewer := firstReviewer(cfg.Reviewers); reviewer != "" {
 		finalizeArgs = append(finalizeArgs, "--reviewer", reviewer)
