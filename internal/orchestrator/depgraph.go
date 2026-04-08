@@ -1,0 +1,323 @@
+package orchestrator
+
+import (
+	"encoding/json"
+	"fmt"
+	"slices"
+	"strings"
+
+	"github.com/saruman/runoq/planning"
+)
+
+// DepGraph is a dependency DAG built from GitHub issues under an epic.
+// It supports depth-first task selection, cycle detection, and blocked diagnostics.
+type DepGraph struct {
+	nodes      map[int]*depNode
+	readyLabel string
+}
+
+type depNode struct {
+	issue     *issue
+	priority  int
+	dependsOn []int // upstream issue numbers
+	blockedBy []int // subset of dependsOn that are not CLOSED
+	inCycle   bool
+}
+
+// BuildDepGraph constructs a dependency graph from the issue list.
+// Only OPEN task children of the given epic with the ready label are included as candidates.
+// CLOSED issues are tracked for dependency resolution.
+func BuildDepGraph(issues []issue, epicNumber int, readyLabel string) *DepGraph {
+	epicStr := fmt.Sprintf("%d", epicNumber)
+	g := &DepGraph{
+		nodes:      make(map[int]*depNode),
+		readyLabel: readyLabel,
+	}
+
+	// Index all issues for dependency resolution
+	issueByNumber := make(map[int]*issue)
+	for i := range issues {
+		issueByNumber[issues[i].Number] = &issues[i]
+	}
+
+	// Build nodes for open task children of the epic
+	for i := range issues {
+		iss := &issues[i]
+		if iss.State != "OPEN" {
+			continue
+		}
+		if planning.MetadataValue(iss.Body, "parent_epic") != epicStr {
+			continue
+		}
+		if planning.MetadataValue(iss.Body, "type") != "task" {
+			continue
+		}
+		if readyLabel != "" && !hasLabel(iss, readyLabel) {
+			continue
+		}
+
+		var deps []int
+		depsRaw := planning.MetadataValue(iss.Body, "depends_on")
+		if depsRaw != "" {
+			_ = json.Unmarshal([]byte(depsRaw), &deps)
+		}
+
+		var blockedBy []int
+		for _, dep := range deps {
+			depIssue := issueByNumber[dep]
+			if depIssue == nil || depIssue.State != "CLOSED" {
+				blockedBy = append(blockedBy, dep)
+			}
+		}
+
+		g.nodes[iss.Number] = &depNode{
+			issue:     iss,
+			priority:  planning.MetadataPriority(iss.Body),
+			dependsOn: deps,
+			blockedBy: blockedBy,
+		}
+	}
+
+	g.detectCycles()
+	return g
+}
+
+// Next returns the best task to work on, considering:
+// 1. Only unblocked, non-cycle tasks
+// 2. Effective priority (bubbles up from downstream)
+// 3. Deepest remaining chain
+// 4. Issue number tiebreak
+func (g *DepGraph) Next() *issue {
+	return g.NextAfter(0)
+}
+
+// NextAfter returns the best task, preferring downstream dependents of lastCompleted.
+func (g *DepGraph) NextAfter(lastCompleted int) *issue {
+	candidates := g.readyCandidates()
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	// Prefer continuing the started subtree
+	if lastCompleted > 0 {
+		var continuations []*depNode
+		for _, c := range candidates {
+			if slices.Contains(c.dependsOn, lastCompleted) {
+				continuations = append(continuations, c)
+			}
+		}
+		if len(continuations) > 0 {
+			g.sortCandidates(continuations)
+			return continuations[0].issue
+		}
+	}
+
+	g.sortCandidates(candidates)
+	return candidates[0].issue
+}
+
+// HasCycle reports whether any cycle was detected in the graph.
+func (g *DepGraph) HasCycle() bool {
+	for _, n := range g.nodes {
+		if n.inCycle {
+			return true
+		}
+	}
+	return false
+}
+
+// CycleMembers returns the issue numbers involved in cycles.
+func (g *DepGraph) CycleMembers() []int {
+	var members []int
+	for num, n := range g.nodes {
+		if n.inCycle {
+			members = append(members, num)
+		}
+	}
+	slices.Sort(members)
+	return members
+}
+
+// BlockedReason returns a human-readable description of why a task is blocked.
+func (g *DepGraph) BlockedReason(issueNumber int) string {
+	n, ok := g.nodes[issueNumber]
+	if !ok {
+		return ""
+	}
+	if len(n.blockedBy) == 0 && !n.inCycle {
+		return ""
+	}
+	if n.inCycle {
+		return "in a dependency cycle"
+	}
+	var parts []string
+	for _, dep := range n.blockedBy {
+		if _, exists := g.nodes[dep]; exists {
+			parts = append(parts, fmt.Sprintf("#%d (OPEN)", dep))
+		} else {
+			parts = append(parts, fmt.Sprintf("#%d (unknown issue)", dep))
+		}
+	}
+	return "blocked by " + strings.Join(parts, ", ")
+}
+
+// --- internal ---
+
+func (g *DepGraph) readyCandidates() []*depNode {
+	var ready []*depNode
+	for _, n := range g.nodes {
+		if len(n.blockedBy) == 0 && !n.inCycle {
+			ready = append(ready, n)
+		}
+	}
+	return ready
+}
+
+func (g *DepGraph) sortCandidates(candidates []*depNode) {
+	slices.SortFunc(candidates, func(a, b *depNode) int {
+		// 1. Effective priority (lower wins)
+		aPri := g.effectivePriority(a.issue.Number)
+		bPri := g.effectivePriority(b.issue.Number)
+		if aPri != bPri {
+			if aPri < bPri {
+				return -1
+			}
+			return 1
+		}
+		// 2. Deepest remaining chain (longer wins)
+		aDepth := g.chainDepth(a.issue.Number)
+		bDepth := g.chainDepth(b.issue.Number)
+		if aDepth != bDepth {
+			if aDepth > bDepth {
+				return -1 // deeper chain first
+			}
+			return 1
+		}
+		// 3. Issue number tiebreak
+		if a.issue.Number < b.issue.Number {
+			return -1
+		}
+		if a.issue.Number > b.issue.Number {
+			return 1
+		}
+		return 0
+	})
+}
+
+// effectivePriority returns the minimum priority in the subtree rooted at this node
+// (i.e., the node itself + all transitive dependents).
+func (g *DepGraph) effectivePriority(num int) int {
+	visited := make(map[int]bool)
+	return g.effectivePriorityRec(num, visited)
+}
+
+func (g *DepGraph) effectivePriorityRec(num int, visited map[int]bool) int {
+	if visited[num] {
+		return 999999
+	}
+	visited[num] = true
+
+	n, ok := g.nodes[num]
+	if !ok {
+		return 999999
+	}
+	minPri := n.priority
+
+	// Check all nodes that depend on this one
+	for otherNum, other := range g.nodes {
+		if slices.Contains(other.dependsOn, num) {
+			childPri := g.effectivePriorityRec(otherNum, visited)
+			if childPri < minPri {
+				minPri = childPri
+			}
+		}
+	}
+	return minPri
+}
+
+// chainDepth returns the length of the longest dependency chain starting from this node
+// (counting downstream dependents).
+func (g *DepGraph) chainDepth(num int) int {
+	visited := make(map[int]bool)
+	return g.chainDepthRec(num, visited)
+}
+
+func (g *DepGraph) chainDepthRec(num int, visited map[int]bool) int {
+	if visited[num] {
+		return 0
+	}
+	visited[num] = true
+
+	maxChild := 0
+	for otherNum, other := range g.nodes {
+		if slices.Contains(other.dependsOn, num) {
+			d := g.chainDepthRec(otherNum, visited)
+			if d > maxChild {
+				maxChild = d
+			}
+		}
+	}
+	return 1 + maxChild
+}
+
+// detectCycles uses DFS coloring to find cycles.
+func (g *DepGraph) detectCycles() {
+	const (
+		white = 0 // unvisited
+		gray  = 1 // in progress
+		black = 2 // done
+	)
+	color := make(map[int]int)
+	var cycleNodes []int
+
+	var dfs func(num int) bool
+	dfs = func(num int) bool {
+		color[num] = gray
+		n, ok := g.nodes[num]
+		if !ok {
+			color[num] = black
+			return false
+		}
+		hasCycle := false
+		for _, dep := range n.dependsOn {
+			if _, exists := g.nodes[dep]; !exists {
+				continue
+			}
+			switch color[dep] {
+			case gray:
+				hasCycle = true
+				cycleNodes = append(cycleNodes, dep)
+			case white:
+				if dfs(dep) {
+					hasCycle = true
+				}
+			}
+		}
+		if hasCycle {
+			cycleNodes = append(cycleNodes, num)
+		}
+		color[num] = black
+		return hasCycle
+	}
+
+	for num := range g.nodes {
+		if color[num] == white {
+			dfs(num)
+		}
+	}
+
+	for _, num := range cycleNodes {
+		if n, ok := g.nodes[num]; ok {
+			n.inCycle = true
+		}
+	}
+}
+
+func hasLabel(iss *issue, name string) bool {
+	for _, l := range iss.Labels {
+		if l.Name == name {
+			return true
+		}
+	}
+	return false
+}
