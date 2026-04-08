@@ -323,12 +323,8 @@ func (t *tickRunner) handleApprovedPlanning(ctx context.Context, reviewView stri
 		keyToNumber := make(map[string]string)
 		for _, item := range filtered.Items {
 			body := item.Body
-			priority := "1"
-			if item.Priority != nil {
-				priority = fmt.Sprintf("%d", *item.Priority)
-			}
 			complexity := cmp.Or(item.EstimatedComplexity, "medium")
-			createOpts := []string{"--type", "task", "--priority", priority, "--estimated-complexity", complexity, "--complexity-rationale", item.ComplexityRationale, "--parent-epic", reviewParent}
+			createOpts := []string{"--type", "task", "--priority", "1", "--estimated-complexity", complexity, "--complexity-rationale", item.ComplexityRationale, "--parent-epic", reviewParent}
 
 			if deps := resolveDependsOn(item.DependsOnKeys, keyToNumber); deps != "" {
 				createOpts = append(createOpts, "--depends-on", deps)

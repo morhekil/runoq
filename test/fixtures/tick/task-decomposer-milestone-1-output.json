@@ -15,7 +15,7 @@
       "type": "task",
       "title": "Clamp overflow values",
       "body": "## Context\n\nExtend the formatter so completion never exceeds total and add regression coverage.\n\n## Acceptance Criteria\n\n- [ ] Values above total clamp to 100 percent\n- [ ] Formatted output shows clamped totals\n- [ ] Tests cover overflow cases\n",
-      "priority": 2,
+      "priority": 1,
       "estimated_complexity": "medium",
       "complexity_rationale": "Builds on the formatter contract and adds edge-case behavior plus regression tests across the same modules.",
       "depends_on_keys": [

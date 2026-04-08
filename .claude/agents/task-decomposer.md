@@ -41,7 +41,6 @@ Output ONLY this marked JSON payload:
       "type": "task",
       "title": "Task title",
       "body": "## Context\n\n...\n\n## Acceptance Criteria\n\n- [ ] ...",
-      "priority": 1,
       "estimated_complexity": "medium",
       "complexity_rationale": "Touches multiple modules and carries integration risk.",
       "depends_on_keys": []

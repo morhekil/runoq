@@ -32,7 +32,7 @@
         "docs/findings"
       ],
       "sequencing_rationale": "The project has explicit uncertainty around caching, so humans should review findings before more scope is committed.",
-      "priority": 2
+      "priority": 1
     },
     {
       "key": "cli-wrapper",
@@ -49,7 +49,7 @@
         "test/cli.test.js"
       ],
       "sequencing_rationale": "The CLI depends on the core formatter and should wait until the caching uncertainty is resolved.",
-      "priority": 3
+      "priority": 1
     }
   ]
 }
