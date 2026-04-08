@@ -57,6 +57,10 @@ func BuildDepGraph(issues []issue, epicNumber int, readyLabel string) *DepGraph 
 		}
 
 		deps := iss.BlockedBy
+		// Fall back to body metadata if GitHub API didn't populate dependencies
+		if len(deps) == 0 {
+			deps = metadataDependsOn(iss.Body)
+		}
 
 		var blockedBy []int
 		for _, dep := range deps {
@@ -441,6 +445,23 @@ func fetchIssueTypes(issues []issue, graphqlResponse string) {
 // and falling back to the metadata block for backward compatibility.
 // issueParentEpic returns the parent epic number, preferring the native ParentEpic field
 // and falling back to the metadata block for backward compatibility.
+// metadataDependsOn extracts dependency issue numbers from body metadata.
+// Format: "depends_on: 5,8,12"
+func metadataDependsOn(body string) []int {
+	raw := planning.MetadataValue(body, "depends_on")
+	if raw == "" {
+		return nil
+	}
+	var result []int
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if n, err := strconv.Atoi(part); err == nil && n > 0 {
+			result = append(result, n)
+		}
+	}
+	return result
+}
+
 func issueParentEpic(iss *issue) int {
 	if iss.ParentEpic != 0 {
 		return iss.ParentEpic

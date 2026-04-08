@@ -332,3 +332,45 @@ func containsStr(s, sub string) bool {
 	}
 	return false
 }
+
+func TestMetadataDependsOn(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		body string
+		want []int
+	}{
+		{"<!-- runoq:meta\ndepends_on: 5,8\n-->", []int{5, 8}},
+		{"<!-- runoq:meta\ndepends_on: 12\n-->", []int{12}},
+		{"<!-- runoq:meta\ntype: task\n-->", nil},
+		{"no metadata", nil},
+	}
+	for _, tt := range tests {
+		got := metadataDependsOn(tt.body)
+		if len(got) != len(tt.want) {
+			t.Errorf("metadataDependsOn(%q) = %v, want %v", tt.body, got, tt.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tt.want[i] {
+				t.Errorf("metadataDependsOn(%q)[%d] = %d, want %d", tt.body, i, got[i], tt.want[i])
+			}
+		}
+	}
+}
+
+func TestBuildDepGraphMetadataFallback(t *testing.T) {
+	t.Parallel()
+	issues := []issue{
+		{Number: 1, State: "OPEN", Body: "<!-- runoq:meta\ntype: epic\npriority: 1\n-->"},
+		{Number: 2, State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 1\npriority: 1\n-->"},
+		{Number: 3, State: "OPEN", Body: "<!-- runoq:meta\ntype: task\nparent_epic: 1\npriority: 1\ndepends_on: 2\n-->"},
+	}
+	g := BuildDepGraph(issues, 1, "")
+	next := g.Next()
+	if next == nil {
+		t.Fatal("expected a task, got nil")
+	}
+	if next.Number != 2 {
+		t.Errorf("expected task #2 (no deps), got #%d", next.Number)
+	}
+}

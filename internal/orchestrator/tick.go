@@ -669,6 +669,11 @@ func (t *tickRunner) dispatchTask(ctx context.Context, task *issue) int {
 		}
 	}
 
+	// If the issue reached a terminal phase, ensure GitHub issue is closed
+	if phase == "DONE" || phase == "FINALIZE" {
+		t.issueSetStatus(ctx, t.cfg.Repo, fmt.Sprintf("%d", task.Number), "done")
+	}
+
 	t.success(fmt.Sprintf("Issue #%d — phase: %s", task.Number, phase))
 	fmt.Fprintf(t.cfg.Stdout, "Issue #%d — phase: %s\n", task.Number, phase)
 	return 0
