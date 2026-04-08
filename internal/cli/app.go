@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/saruman/runoq/internal/claude"
 	"github.com/saruman/runoq/internal/config"
 	"github.com/saruman/runoq/internal/gitops"
 	"github.com/saruman/runoq/internal/runlog"
@@ -497,20 +498,14 @@ func (a *App) runSetup(ctx context.Context, env []string, runoqRoot string, args
 }
 
 func (a *App) runMaintenance(ctx context.Context, env []string, runoqRoot string) int {
-	req := shell.CommandRequest{
-		Name: "bash",
-		Args: []string{
-			"-lc",
-			`source "$1/scripts/lib/common.sh"; claude_bin="${RUNOQ_CLAUDE_BIN:-claude}"; runoq::captured_exec claude "$TARGET_ROOT" "$claude_bin" --agent maintenance-reviewer --add-dir "$1"`,
-			"bash",
-			runoqRoot,
-		},
-		Dir:    a.cwd,
-		Env:    env,
-		Stdout: a.stdout,
-		Stderr: a.stderr,
-	}
-	if err := a.execCommand(ctx, req); err != nil {
+	targetRoot, _ := shell.EnvLookup(env, "TARGET_ROOT")
+	if err := claude.CapturedExec(ctx, a.execCommand, claude.CaptureConfig{
+		WorkDir: targetRoot,
+		Args:    []string{"--agent", "maintenance-reviewer", "--add-dir", runoqRoot},
+		Env:     env,
+		Stdout:  a.stdout,
+		Stderr:  a.stderr,
+	}); err != nil {
 		return shell.ExitCodeFromError(err)
 	}
 	return 0

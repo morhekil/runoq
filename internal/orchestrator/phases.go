@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/saruman/runoq/internal/claude"
 	"github.com/saruman/runoq/internal/gitops"
 	"github.com/saruman/runoq/internal/shell"
 )
@@ -158,7 +159,7 @@ func (a *App) phaseInit(ctx context.Context, root string, env []string, repo str
 	branch = worktreeInfo.Branch
 	a.logInfo("INIT: worktree=%s branch=%s", worktree, branch)
 
-	if err := a.configureGitBotRemote(ctx, root, env, worktree, repo); err == nil {
+	if err := a.configureGitBotRemote(ctx, env, worktree, repo); err == nil {
 		a.logInfo("INIT: bot remote configured for worktree")
 	} else {
 		a.logInfo("INIT: bot remote configuration failed or skipped for worktree")
@@ -440,15 +441,13 @@ func (a *App) phaseReview(ctx context.Context, root string, env []string, repo s
 	}
 
 	var reviewStderr bytes.Buffer
-	if err := a.runProgram(ctx, env, "bash", []string{
-		"-lc",
-		`source "$1"; runoq::claude_stream "$2" --permission-mode bypassPermissions --agent diff-reviewer --add-dir "$3" -- "$4"`,
-		"bash",
-		filepath.Join(root, "scripts", "lib", "common.sh"),
-		reviewOutputPath,
-		root,
-		reviewPayload,
-	}, nil, io.Discard, &reviewStderr); err != nil {
+	if err := claude.Stream(ctx, a.execCommand, claude.StreamConfig{
+		OutputFile: reviewOutputPath,
+		WorkDir:    state.Worktree,
+		Args:       []string{"--permission-mode", "bypassPermissions", "--agent", "diff-reviewer", "--add-dir", root, "--", reviewPayload},
+		Env:        env,
+		Stderr:     &reviewStderr,
+	}); err != nil {
 		a.logInfo("REVIEW: claude_stream error: %v stderr: %s", err, reviewStderr.String())
 		return "", err
 	}

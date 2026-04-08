@@ -693,16 +693,13 @@ func (a *App) runGh(ctx context.Context, stdout io.Writer, args ...string) error
 }
 
 func (a *App) runGhWithStderr(ctx context.Context, stdout io.Writer, stderr io.Writer, args ...string) error {
-	root, err := a.runoqRoot()
-	if err != nil {
-		return err
+	ghBin := "gh"
+	if v, ok := shell.EnvLookup(a.env, "GH_BIN"); ok && v != "" {
+		ghBin = v
 	}
-
-	script := `source "$1/scripts/lib/common.sh"; shift; runoq::gh "$@"`
-	commandArgs := append([]string{"-lc", script, "bash", root}, args...)
 	return a.execCommand(ctx, shell.CommandRequest{
-		Name:   "bash",
-		Args:   commandArgs,
+		Name:   ghBin,
+		Args:   args,
 		Dir:    a.cwd,
 		Env:    a.env,
 		Stdout: stdout,

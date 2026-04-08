@@ -3,7 +3,9 @@ package orchestrator
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strconv"
@@ -893,12 +895,12 @@ func TestSetupReturnsAuthedEnvAndConfiguresIdentity(t *testing.T) {
 	}, root, io.Discard, io.Discard)
 	app.SetConfig(OrchestratorConfig{MaxRounds: 5, MaxTokenBudget: 500000, AutoMergeEnabled: true, Reviewers: []string{"username"}, IdentityHandle: "runoq", ReadyLabel: "runoq:ready"})
 	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
-		cmd := commandLine(req)
+		args := strings.Join(req.Args, " ")
 		switch {
-		case req.Name == "bash" && strings.Contains(cmd, "configure_git_bot_identity"):
+		case req.Name == "git" && strings.Contains(args, "config user.name"):
 			identityCalled = true
 			return nil
-		case req.Name == "bash" && strings.Contains(cmd, "configure_git_bot_remote"):
+		case req.Name == "git" && strings.Contains(args, "remote set-url"):
 			remoteCalled = true
 			return nil
 		default:
@@ -1094,20 +1096,23 @@ func buildMockExecutor(t *testing.T, mc mockConfig) shell.CommandExecutor {
 		case req.Name == "bash" && strings.Contains(args, "gh-auth.sh"):
 			_, _ = io.WriteString(req.Stdout, "fail\n")
 			return nil
-		case req.Name == "bash" && strings.Contains(args, "configure_git_bot_identity"):
+		case req.Name == "git" && strings.Contains(args, "config user.name"):
 			return nil
-		case req.Name == "bash" && strings.Contains(args, "configure_git_bot_remote"):
+		case req.Name == "git" && strings.Contains(args, "config user.email"):
 			return nil
-		case req.Name == "bash" && strings.Contains(args, "runoq::claude_stream"):
+		case req.Name == "git" && strings.Contains(args, "remote set-url"):
+			return nil
+		case (req.Name == "claude" || strings.HasSuffix(req.Name, "/claude")) && strings.Contains(args, "stream-json"):
 			if mc.customHandler != nil {
 				handled, err := mc.customHandler(req)
 				if handled {
 					return err
 				}
 			}
-			if len(req.Args) >= 5 {
-				_ = os.WriteFile(req.Args[4], []byte("REVIEW-TYPE: diff-review\nVERDICT: PASS\nSCORE: 42\nCHECKLIST:\n- OK.\n"), 0o644)
-			}
+			// Write stream-json result to stdout so claude.Stream extracts it.
+			reviewContent := "REVIEW-TYPE: diff-review\nVERDICT: PASS\nSCORE: 42\nCHECKLIST:\n- OK.\n"
+			resultLine, _ := json.Marshal(map[string]any{"type": "result", "result": reviewContent})
+			_, _ = fmt.Fprintf(req.Stdout, "%s\n", resultLine)
 			return nil
 		}
 

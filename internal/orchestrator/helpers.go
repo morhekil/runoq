@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -218,25 +219,78 @@ func (a *App) targetRoot(ctx context.Context, env []string) (string, error) {
 	return root, nil
 }
 
-func (a *App) configureGitBotIdentity(ctx context.Context, root string, env []string, dir string) error {
-	return a.runProgram(ctx, env, "bash", []string{
-		"-lc",
-		`source "$1"; runoq::configure_git_bot_identity "$2"`,
-		"bash",
-		filepath.Join(root, "scripts", "lib", "common.sh"),
-		dir,
-	}, nil, io.Discard, io.Discard)
+func (a *App) configureGitBotIdentity(ctx context.Context, env []string, dir string) error {
+	slug := a.cfg.IdentityHandle
+	if slug == "" {
+		return nil
+	}
+
+	repo := gitops.OpenCLI(ctx, dir, a.execCommand)
+	if err := repo.SetConfig("user.name", slug+"[bot]"); err != nil {
+		return err
+	}
+
+	appID := a.resolveAppID(env, dir)
+	if appID == "" {
+		return nil
+	}
+
+	return repo.SetConfig("user.email", fmt.Sprintf("%s+%s[bot]@users.noreply.github.com", appID, slug))
 }
 
-func (a *App) configureGitBotRemote(ctx context.Context, root string, env []string, dir string, repo string) error {
-	return a.runProgram(ctx, env, "bash", []string{
-		"-lc",
-		`source "$1"; runoq::configure_git_bot_remote "$2" "$3"`,
-		"bash",
-		filepath.Join(root, "scripts", "lib", "common.sh"),
-		dir,
-		repo,
-	}, nil, io.Discard, io.Discard)
+// resolveAppID returns the GitHub App ID from RUNOQ_APP_ID env or identity.json.
+func (a *App) resolveAppID(env []string, dir string) string {
+	if appID, ok := shell.EnvLookup(env, "RUNOQ_APP_ID"); ok && appID != "" {
+		return appID
+	}
+
+	// identity.json lives at {TARGET_ROOT}/.runoq/identity.json, not in the worktree.
+	targetRoot := dir
+	if tr, ok := shell.EnvLookup(env, "TARGET_ROOT"); ok && tr != "" {
+		targetRoot = tr
+	}
+
+	data, err := os.ReadFile(filepath.Join(targetRoot, ".runoq", "identity.json"))
+	if err != nil {
+		return ""
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+
+	var payload map[string]any
+	if err := decoder.Decode(&payload); err != nil {
+		return ""
+	}
+
+	value, ok := payload["appId"]
+	if !ok || value == nil {
+		return ""
+	}
+
+	switch typed := value.(type) {
+	case json.Number:
+		return typed.String()
+	case string:
+		return typed
+	default:
+		return fmt.Sprint(typed)
+	}
+}
+
+func (a *App) configureGitBotRemote(ctx context.Context, env []string, dir string, ghRepo string) error {
+	token, _ := shell.EnvLookup(env, "GH_TOKEN")
+	if token == "" {
+		return nil
+	}
+
+	url := fmt.Sprintf("https://x-access-token:%s@github.com/%s.git", token, ghRepo)
+	return a.execCommand(ctx, shell.CommandRequest{
+		Name: "git",
+		Args: []string{"-C", dir, "remote", "set-url", "origin", url},
+		Dir:  a.cwd,
+		Env:  env,
+	})
 }
 
 // formatAuditComment builds the comment body with event marker, optional state block, and human-readable content.

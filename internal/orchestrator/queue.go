@@ -69,13 +69,13 @@ func (a *App) runCommandEntry(ctx context.Context, root string, env []string, ar
 	}
 
 	a.logInfo("Configuring bot identity for target root: %s", targetRoot)
-	if err := a.configureGitBotIdentity(ctx, root, env, targetRoot); err == nil {
+	if err := a.configureGitBotIdentity(ctx, env, targetRoot); err == nil {
 		a.logInfo("Bot identity configured successfully")
 	} else {
 		a.logInfo("Bot identity configuration failed or skipped")
 	}
 
-	if err := a.configureGitBotRemote(ctx, root, env, targetRoot, repo); err == nil {
+	if err := a.configureGitBotRemote(ctx, env, targetRoot, repo); err == nil {
 		a.logInfo("Bot remote configured successfully for repo=%s", repo)
 	} else {
 		a.logInfo("Bot remote configuration failed or skipped")
@@ -129,10 +129,10 @@ func (a *App) Setup(ctx context.Context, repo string) []string {
 		return env
 	}
 
-	if err := a.configureGitBotIdentity(ctx, root, env, targetRoot); err != nil {
+	if err := a.configureGitBotIdentity(ctx, env, targetRoot); err != nil {
 		a.logInfo("Setup: bot identity configuration failed or skipped")
 	}
-	if err := a.configureGitBotRemote(ctx, root, env, targetRoot, repo); err != nil {
+	if err := a.configureGitBotRemote(ctx, env, targetRoot, repo); err != nil {
 		a.logInfo("Setup: bot remote configuration failed or skipped")
 	}
 
