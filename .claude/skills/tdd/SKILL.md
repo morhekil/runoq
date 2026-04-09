@@ -6,6 +6,7 @@ description: Code writing skill enforcing red/green/refactor TDD workflow with c
 # TDD Code Writing Workflow
 
 When writing code, follow the red/green/refactor cycle strictly. Every feature or change begins with a failing test.
+A TDD cycle is not complete until refactoring has been done and green state is committed.
 
 ## Workflow
 
