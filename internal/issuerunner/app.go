@@ -141,13 +141,11 @@ func (a *App) developmentLoop(ctx context.Context, input *inputPayload, state *r
 		if input.MaxTokenBudget > 0 && state.cumulativeTokens >= input.MaxTokenBudget {
 			a.logAgent("issue-runner", input, "budget exhausted before round %d", round)
 			return a.emitResult("budget_exhausted", input, state, specRequirements,
+				nil,
 				false, nil, nil, nil,
 				fmt.Sprintf("Token budget exhausted before round %d", round),
 				[]string{"Token budget exhausted"})
 		}
-
-		// Record per-round baseline for commit tracking.
-		roundBaseline, _ := repo.ResolveHEAD()
 
 		// Build prompt and invoke codex.
 		a.logAgent("codex", input, "round %d/%d — starting", round, input.MaxRounds)
@@ -163,6 +161,7 @@ func (a *App) developmentLoop(ctx context.Context, input *inputPayload, state *r
 		if isTransient, reason := a.classifyTransientError(eventLog, codexErr); isTransient {
 			a.logAgent("codex", input, "round %d — transient error: %s", round, reason)
 			return a.emitResult("transient_error", input, state, specRequirements,
+				nil,
 				false, nil, nil, nil,
 				reason, []string{reason})
 		}
@@ -202,12 +201,14 @@ func (a *App) developmentLoop(ctx context.Context, input *inputPayload, state *r
 		// Post-round budget check.
 		if input.MaxTokenBudget > 0 && state.cumulativeTokens >= input.MaxTokenBudget {
 			return a.emitResult("budget_exhausted", input, state, specRequirements,
+				nil,
 				false, nil, nil, nil,
 				fmt.Sprintf("Token budget exhausted after round %d", round),
 				[]string{"Token budget exhausted"})
 		}
 
 		// Verification.
+		var verificationPayload map[string]any
 		var vr verifyResult
 		if !payloadValid {
 			reason := "codex payload schema invalid"
@@ -221,16 +222,17 @@ func (a *App) developmentLoop(ctx context.Context, input *inputPayload, state *r
 				Failures:      []string{reason},
 			}
 		} else {
+			verificationPayload, _ = a.readPayload(payloadFile)
 			vr, _ = a.runVerification(ctx, input.Worktree, input.Branch, state.baseline, payloadFile)
 		}
 
 		if !vr.ReviewAllowed {
 			// Verification failed.
 			a.logAgent("verifier", input, "round %d — failed: %v", round, vr.Failures)
-			a.postVerificationComment(ctx, input, state, round, roundBaseline, vr.Failures)
 
 			if round >= input.MaxRounds {
 				return a.emitResult("fail", input, state, specRequirements,
+					verificationPayload,
 					false, vr.Failures, nil, nil,
 					fmt.Sprintf("Verification failed after %d rounds", round),
 					vr.Failures)
@@ -247,11 +249,11 @@ func (a *App) developmentLoop(ctx context.Context, input *inputPayload, state *r
 
 		// Verification passed — expand review scope.
 		a.logAgent("verifier", input, "round %d — passed, ready for review", round)
-		a.postVerificationSuccessComment(ctx, input, state, round, roundBaseline)
 		changedFiles := a.mergeChangedFiles(vr)
 		relatedFiles := a.expandReviewScope(ctx, input.Worktree, changedFiles)
 
 		return a.emitResult("review_ready", input, state, specRequirements,
+			verificationPayload,
 			true, nil, changedFiles, relatedFiles,
 			fmt.Sprintf("Verification passed on round %d; ready for review", round),
 			nil)
@@ -259,6 +261,7 @@ func (a *App) developmentLoop(ctx context.Context, input *inputPayload, state *r
 
 	// Exhausted all rounds.
 	return a.emitResult("fail", input, state, specRequirements,
+		nil,
 		false, nil, nil, nil,
 		fmt.Sprintf("Failed to converge after %d rounds", input.MaxRounds),
 		nil)
@@ -574,6 +577,18 @@ func (a *App) validatePayload(ctx context.Context, worktree, baseline, lastMsgFi
 	return false
 }
 
+func (a *App) readPayload(payloadFile string) (map[string]any, error) {
+	data, err := os.ReadFile(payloadFile)
+	if err != nil {
+		return nil, err
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
+}
+
 // extractCommits updates state with commit info from baseline..HEAD.
 func (a *App) extractCommits(ctx context.Context, input *inputPayload, state *roundState, repo gitops.Repo) {
 	commits, err := repo.CommitLog(state.baseline, "HEAD")
@@ -778,6 +793,7 @@ func isTestFile(rel string) bool {
 
 // emitResult constructs an outputPayload with the given parameters.
 func (a *App) emitResult(status string, input *inputPayload, state *roundState, specRequirements string,
+	verificationPayload map[string]any,
 	verificationPassed bool, verificationFailures []string,
 	changedFiles []string, relatedFiles []string,
 	summary string, caveats []string) *outputPayload {
@@ -795,6 +811,7 @@ func (a *App) emitResult(status string, input *inputPayload, state *roundState, 
 		ChangedFiles:         changedFiles,
 		RelatedFiles:         relatedFiles,
 		CumulativeTokens:     state.cumulativeTokens,
+		VerificationPayload:  verificationPayload,
 		VerificationPassed:   verificationPassed,
 		VerificationFailures: verificationFailures,
 		Caveats:              caveats,

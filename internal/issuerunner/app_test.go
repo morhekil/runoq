@@ -337,7 +337,7 @@ func TestDevelopmentLoop_SingleRoundSuccess(t *testing.T) {
 	}
 }
 
-func TestDevelopmentLoop_PostsVerificationSuccessComment(t *testing.T) {
+func TestDevelopmentLoop_PersistsVerificationPayload(t *testing.T) {
 	dir := t.TempDir()
 	worktree := filepath.Join(dir, "wt")
 	mustMkdirAll(t, worktree)
@@ -349,7 +349,6 @@ func TestDevelopmentLoop_PostsVerificationSuccessComment(t *testing.T) {
 	specFile := filepath.Join(dir, "spec.md")
 	mustWriteFile(t, specFile, []byte("implement X"))
 
-	var lifecycleCalls []string
 	fe := &fakeExecutor{t: t, handlers: map[string]func(shell.CommandRequest) error{
 		"git": func(req shell.CommandRequest) error {
 			if req.Stdout != nil {
@@ -382,10 +381,6 @@ func TestDevelopmentLoop_PostsVerificationSuccessComment(t *testing.T) {
 			}
 			return nil
 		},
-		"gh-pr-lifecycle.sh": func(req shell.CommandRequest) error {
-			lifecycleCalls = append(lifecycleCalls, strings.Join(req.Args, " "))
-			return nil
-		},
 	}}
 
 	payloadFile := writePayloadFile(t, dir, inputPayload{
@@ -411,24 +406,15 @@ func TestDevelopmentLoop_PostsVerificationSuccessComment(t *testing.T) {
 		t.Fatalf("exit code = %d, want 0; stderr=%s", code, stderr.String())
 	}
 
-	// Verify that a PR comment call was made for verification success.
-	found := false
-	for _, call := range lifecycleCalls {
-		if strings.Contains(call, "comment") {
-			// Read the comment file to check content.
-			parts := strings.Fields(call)
-			for _, p := range parts {
-				if strings.HasSuffix(p, ".md") {
-					content, err := os.ReadFile(p)
-					if err == nil && strings.Contains(string(content), "Verification passed") {
-						found = true
-					}
-				}
-			}
-		}
+	var out outputPayload
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("parse output: %v; raw=%s", err, stdout.String())
 	}
-	if !found {
-		t.Fatalf("expected verification success PR comment, got lifecycle calls: %v", lifecycleCalls)
+	if out.VerificationPayload == nil {
+		t.Fatal("expected verification payload to be persisted in output")
+	}
+	if got, _ := out.VerificationPayload["payload_schema_valid"].(bool); !got {
+		t.Fatalf("expected payload_schema_valid=true in verification payload, got %+v", out.VerificationPayload)
 	}
 }
 

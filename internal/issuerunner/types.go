@@ -21,22 +21,23 @@ type inputPayload struct {
 
 // outputPayload is the JSON structure emitted to stdout.
 type outputPayload struct {
-	Status               string   `json:"status"`
-	Round                int      `json:"round"`
-	TotalRounds          int      `json:"total_rounds"`
-	LogDir               string   `json:"logDir"`
-	BaselineHash         string   `json:"baselineHash"`
-	HeadHash             string   `json:"headHash"`
-	CommitRange          string   `json:"commitRange"`
-	ReviewLogPath        string   `json:"reviewLogPath,omitempty"`
-	SpecRequirements     string   `json:"specRequirements"`
-	ChangedFiles         []string `json:"changedFiles,omitempty"`
-	RelatedFiles         []string `json:"relatedFiles,omitempty"`
-	CumulativeTokens     int      `json:"cumulativeTokens"`
-	VerificationPassed   bool     `json:"verificationPassed"`
-	VerificationFailures []string `json:"verificationFailures,omitempty"`
-	Caveats              []string `json:"caveats,omitempty"`
-	Summary              string   `json:"summary,omitempty"`
+	Status               string         `json:"status"`
+	Round                int            `json:"round"`
+	TotalRounds          int            `json:"total_rounds"`
+	LogDir               string         `json:"logDir"`
+	BaselineHash         string         `json:"baselineHash"`
+	HeadHash             string         `json:"headHash"`
+	CommitRange          string         `json:"commitRange"`
+	ReviewLogPath        string         `json:"reviewLogPath,omitempty"`
+	SpecRequirements     string         `json:"specRequirements"`
+	ChangedFiles         []string       `json:"changedFiles,omitempty"`
+	RelatedFiles         []string       `json:"relatedFiles,omitempty"`
+	CumulativeTokens     int            `json:"cumulativeTokens"`
+	VerificationPayload  map[string]any `json:"verificationPayload,omitzero"`
+	VerificationPassed   bool           `json:"verificationPassed"`
+	VerificationFailures []string       `json:"verificationFailures,omitempty"`
+	Caveats              []string       `json:"caveats,omitempty"`
+	Summary              string         `json:"summary,omitempty"`
 }
 
 // roundState tracks state across the round loop.

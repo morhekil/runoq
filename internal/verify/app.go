@@ -38,12 +38,14 @@ type groundTruth struct {
 	FilesDeleted  []string `json:"files_deleted"`
 }
 
-type roundResult struct {
+type RoundResult struct {
 	OK            bool        `json:"ok"`
 	ReviewAllowed bool        `json:"review_allowed"`
 	Failures      []string    `json:"failures"`
 	Actual        groundTruth `json:"actual"`
 }
+
+type roundResult = RoundResult
 
 type integrateResult struct {
 	OK       bool     `json:"ok"`
@@ -118,14 +120,23 @@ func (a *App) Run(ctx context.Context) int {
 }
 
 func (a *App) runRound(ctx context.Context, worktree string, branch string, baseSHA string, payloadFile string) int {
+	res, err := a.RoundVerify(ctx, worktree, branch, baseSHA, payloadFile)
+	if err != nil {
+		return shell.Failf(a.stderr, "%v", err)
+	}
+	return shell.WriteJSON(a.stdout, a.stderr, res)
+}
+
+// RoundVerify runs the round verification directly (no subprocess).
+func (a *App) RoundVerify(ctx context.Context, worktree string, branch string, baseSHA string, payloadFile string) (RoundResult, error) {
 	truth, err := a.groundTruth(ctx, worktree, baseSHA)
 	if err != nil {
-		return shell.Failf(a.stderr, "Failed to compute ground truth: %v", err)
+		return RoundResult{}, fmt.Errorf("failed to compute ground truth: %w", err)
 	}
 
 	payload, err := a.readPayload(payloadFile)
 	if err != nil {
-		return shell.Failf(a.stderr, "%v", err)
+		return RoundResult{}, err
 	}
 
 	failures := make([]string, 0, 8)
@@ -150,7 +161,7 @@ func (a *App) runRound(ctx context.Context, worktree string, branch string, base
 
 	localSHA, err := repo.ResolveHEAD()
 	if err != nil {
-		return shell.Failf(a.stderr, "Failed to resolve local HEAD: %v", err)
+		return RoundResult{}, fmt.Errorf("failed to resolve local HEAD: %w", err)
 	}
 
 	remoteSHA, remoteExists, _ := repo.RemoteRefExists("origin", branch)
@@ -160,7 +171,7 @@ func (a *App) runRound(ctx context.Context, worktree string, branch string, base
 
 	testCommand, buildCommand, err := a.verificationCommands()
 	if err != nil {
-		return shell.Fail(a.stderr, err.Error())
+		return RoundResult{}, err
 	}
 
 	if output, err := a.runCheckCommand(ctx, worktree, testCommand); err != nil {
@@ -194,13 +205,12 @@ func (a *App) runRound(ctx context.Context, worktree string, branch string, base
 		}
 	}
 
-	res := roundResult{
+	return RoundResult{
 		OK:            len(failures) == 0,
 		ReviewAllowed: len(failures) == 0,
 		Failures:      failures,
 		Actual:        truth,
-	}
-	return shell.WriteJSON(a.stdout, a.stderr, res)
+	}, nil
 }
 
 func (a *App) runIntegrate(ctx context.Context, worktree string, criteriaCommit string) int {
