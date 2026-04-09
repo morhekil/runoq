@@ -855,9 +855,19 @@ func TestResumeFromStateBoundaries(t *testing.T) {
 		wantCallAbsent string // substring that must NOT appear
 	}{
 		{
-			name:         "OPEN-PR resume is rejected",
+			name:         "OPEN-PR resume fails as unknown phase",
 			inputState:   `{"issue":42,"phase":"OPEN-PR","branch":"runoq/42-x","worktree":"/tmp/wt","pr_number":87,"round":1,"baseline_hash":"b","head_hash":"h","commit_range":"b..h","changed_files":["a.go"],"related_files":[],"spec_requirements":"## AC","verification_passed":true}`,
-			wantErrMatch: "OPEN-PR state is no longer supported",
+			wantErrMatch: `unsupported resume phase "OPEN-PR"`,
+		},
+		{
+			name:         "arbitrary unknown phase is rejected",
+			inputState:   `{"issue":42,"phase":"WHATEVER","pr_number":87}`,
+			wantErrMatch: `unsupported resume phase "WHATEVER"`,
+		},
+		{
+			name:         "RESPOND without supported resume target is rejected",
+			inputState:   `{"issue":42,"phase":"RESPOND","resume_phase":"WHATEVER","pr_number":87}`,
+			wantErrMatch: `unsupported RESPOND resume target "WHATEVER"`,
 		},
 		{
 			name:           "VERIFY failure resumes to DECIDE boundary",

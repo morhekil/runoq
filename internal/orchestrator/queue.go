@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -235,8 +234,7 @@ func (a *App) resumeFromState(ctx context.Context, root string, env []string, re
 		case "FINALIZE":
 			return a.runFromFinalize(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 		default:
-			a.logInfo("RESUME: RESPOND state missing resume target, continuing from criteria")
-			return a.runFromCriteria(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+			return "", fmt.Errorf("unsupported RESPOND resume target %q", state.ResumePhase)
 		}
 	case "INIT":
 		return a.runFromCriteria(ctx, root, env, repo, issueNumber, stateJSON, metadata)
@@ -244,8 +242,6 @@ func (a *App) resumeFromState(ctx context.Context, root string, env []string, re
 		return a.runFromDevelop(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 	case "DEVELOP":
 		return a.runFromVerify(ctx, root, env, repo, issueNumber, stateJSON, metadata)
-	case "OPEN-PR":
-		return "", errors.New("OPEN-PR state is no longer supported; re-run from a current PR-backed phase")
 	case "VERIFY":
 		var verifyState struct {
 			VerificationPassed bool `json:"verification_passed"`
@@ -279,8 +275,7 @@ func (a *App) resumeFromState(ctx context.Context, root string, env []string, re
 		}
 		return a.runFromFinalize(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 	default:
-		a.logInfo("RESUME: unknown phase %q, starting from criteria", state.Phase)
-		return a.runFromCriteria(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+		return "", fmt.Errorf("unsupported resume phase %q", state.Phase)
 	}
 }
 
