@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -534,4 +535,88 @@ func TestDevelopmentLoop_MaxRoundsExhausted(t *testing.T) {
 	if len(out.VerificationFailures) == 0 {
 		t.Error("verificationFailures should not be empty")
 	}
+}
+
+func TestClassifyTransientError(t *testing.T) {
+	app := newTestApp(t, nil)
+	dir := t.TempDir()
+
+	t.Run("capacity error in event log", func(t *testing.T) {
+		eventsPath := filepath.Join(dir, "capacity-events.jsonl")
+		os.WriteFile(eventsPath, []byte(`{"type":"turn.failed","error":"Selected model is at capacity"}`+"\n"), 0o644)
+
+		isTransient, reason := app.classifyTransientError(eventsPath, nil)
+		if !isTransient {
+			t.Fatal("expected transient=true for capacity error")
+		}
+		if !strings.Contains(reason, "capacity") && !strings.Contains(reason, "at capacity") {
+			t.Errorf("reason should mention capacity, got %q", reason)
+		}
+	})
+
+	t.Run("rate limit error in event log", func(t *testing.T) {
+		eventsPath := filepath.Join(dir, "ratelimit-events.jsonl")
+		os.WriteFile(eventsPath, []byte(`{"type":"turn.failed","error":"Rate limit exceeded, status 429"}`+"\n"), 0o644)
+
+		isTransient, reason := app.classifyTransientError(eventsPath, nil)
+		if !isTransient {
+			t.Fatal("expected transient=true for rate limit error")
+		}
+		if reason == "" {
+			t.Error("reason should not be empty")
+		}
+	})
+
+	t.Run("normal event log", func(t *testing.T) {
+		eventsPath := filepath.Join(dir, "normal-events.jsonl")
+		os.WriteFile(eventsPath, []byte(`{"type":"thread.started","thread_id":"t1"}`+"\n"+`{"type":"turn.completed"}`+"\n"), 0o644)
+
+		isTransient, reason := app.classifyTransientError(eventsPath, nil)
+		if isTransient {
+			t.Fatalf("expected transient=false for normal log, got reason=%q", reason)
+		}
+	})
+
+	t.Run("exec error with empty log", func(t *testing.T) {
+		eventsPath := filepath.Join(dir, "empty-events.jsonl")
+		os.WriteFile(eventsPath, []byte{}, 0o644)
+
+		isTransient, reason := app.classifyTransientError(eventsPath, fmt.Errorf("exit status 1"))
+		if !isTransient {
+			t.Fatal("expected transient=true for exec error + empty log")
+		}
+		if reason == "" {
+			t.Error("reason should not be empty")
+		}
+	})
+
+	t.Run("exec error with valid output", func(t *testing.T) {
+		eventsPath := filepath.Join(dir, "valid-events.jsonl")
+		os.WriteFile(eventsPath, []byte(`{"type":"thread.started","thread_id":"t1"}`+"\n"+`{"type":"turn.completed"}`+"\n"), 0o644)
+
+		isTransient, _ := app.classifyTransientError(eventsPath, fmt.Errorf("exit status 1"))
+		if isTransient {
+			t.Fatal("expected transient=false when log has valid output despite exec error")
+		}
+	})
+
+	t.Run("503 error in event log", func(t *testing.T) {
+		eventsPath := filepath.Join(dir, "503-events.jsonl")
+		os.WriteFile(eventsPath, []byte(`{"type":"turn.failed","error":"Service unavailable (503)"}`+"\n"), 0o644)
+
+		isTransient, _ := app.classifyTransientError(eventsPath, nil)
+		if !isTransient {
+			t.Fatal("expected transient=true for 503 error")
+		}
+	})
+
+	t.Run("missing event log file", func(t *testing.T) {
+		isTransient, reason := app.classifyTransientError(filepath.Join(dir, "nonexistent.jsonl"), fmt.Errorf("exit status 1"))
+		if !isTransient {
+			t.Fatal("expected transient=true for missing log + exec error")
+		}
+		if reason == "" {
+			t.Error("reason should not be empty")
+		}
+	})
 }

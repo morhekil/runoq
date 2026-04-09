@@ -426,6 +426,74 @@ func (a *App) extractThreadID(eventsPath string) string {
 	return lastThreadID
 }
 
+// transientPatterns matches known transient error substrings from codex event logs.
+var transientPatterns = []string{
+	"at capacity",
+	"rate limit",
+	"rate_limit",
+	"overloaded",
+	"429",
+	"503",
+}
+
+// classifyTransientError inspects a codex event log for transient failures.
+// It returns true with a reason when the failure is transient (capacity, rate
+// limit, network) and should be retried rather than escalated.
+func (a *App) classifyTransientError(eventsPath string, execErr error) (bool, string) {
+	f, err := os.Open(eventsPath)
+	if err != nil {
+		// Can't read log at all — if codex also failed, treat as transient.
+		if execErr != nil {
+			return true, fmt.Sprintf("codex failed (%v) and event log unreadable", execErr)
+		}
+		return false, ""
+	}
+	defer f.Close()
+
+	hasOutput := false
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		var event map[string]any
+		if json.Unmarshal(line, &event) != nil {
+			continue
+		}
+		eventType := ""
+		if t, ok := event["type"].(string); ok {
+			eventType = t
+		} else if t, ok := event["event"].(string); ok {
+			eventType = t
+		}
+
+		// Any successful thread or turn means codex did produce work.
+		if eventType == "thread.started" || eventType == "turn.completed" {
+			hasOutput = true
+		}
+
+		// Check for transient error events.
+		if eventType == "turn.failed" {
+			errMsg := ""
+			if e, ok := event["error"].(string); ok {
+				errMsg = strings.ToLower(e)
+			} else if e, ok := event["message"].(string); ok {
+				errMsg = strings.ToLower(e)
+			}
+			for _, pattern := range transientPatterns {
+				if strings.Contains(errMsg, pattern) {
+					return true, fmt.Sprintf("transient codex error: %s", event["error"])
+				}
+			}
+		}
+	}
+
+	// Codex exited with error and produced no useful output.
+	if execErr != nil && !hasOutput {
+		return true, fmt.Sprintf("codex failed (%v) with no output", execErr)
+	}
+
+	return false, ""
+}
+
 // tokenPattern matches lines like "tokens: 12345" or "token_usage: 12345".
 var tokenPattern = regexp.MustCompile(`(?i)tokens?[_ ]*(?:used|usage|count)?\s*[:=]\s*(\d+)`)
 
