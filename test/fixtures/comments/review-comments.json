@@ -1,9 +1,0 @@
-[
-  {
-    "id": 2001,
-    "body": "This branch changed the retry logic.",
-    "user": { "login": "reviewer1" },
-    "html_url": "https://github.com/owner/repo/pull/87#discussion_r1",
-    "path": "src/retry.ts"
-  }
-]

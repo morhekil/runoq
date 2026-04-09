@@ -1,9 +1,0 @@
-{
-  "task": "Implement the queue selector and add tests.",
-  "checklist": [
-    "Address failing dependency handling"
-  ],
-  "branch": "runoq/42-fix-auth-refresh",
-  "worktree": "../runoq-wt-42",
-  "round": 2
-}

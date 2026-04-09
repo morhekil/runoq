@@ -48,6 +48,5 @@ Each package has `app.go` (implementation) and `app_test.go` (unit tests). Run `
 
 ## Testing
 
-- **Go unit tests** (`go test ./internal/...`): primary coverage for runtime logic.
-- **Bats integration tests** (`test/`): cover shell entrypoints, end-to-end flows, and issue-runner behavior.
+- **Go unit tests** (`go test ./...`): primary coverage for runtime logic.
 - **Live smoke tests** (`docs/live-smoke.md`): opt-in GitHub integration validation.

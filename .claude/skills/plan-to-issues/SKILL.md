@@ -34,12 +34,9 @@ Use this skill to slice a local plan document into GitHub issues, organized into
    - Standalone issues that do not belong to any epic are still allowed; treat them as tasks with no parent.
 5. Flag bad granularity before creating issues:
    - Too broad: more than 5 acceptance criteria, multiple subsystems, or a plan that obviously needs further decomposition. **Suggest splitting into an epic with child tasks.**
-     See `"$RUNOQ_ROOT/test/fixtures/plans/broad-example.md"`.
    - Too narrow: trivial rename or formatting-only work with no behavioral impact. **Suggest as a `low`-complexity task (bar-setter will be skipped).**
-     See `"$RUNOQ_ROOT/test/fixtures/plans/narrow-example.md"`.
    - Right-sized but part of a larger feature: **suggest as a `medium`-complexity task under an epic.**
    - Missing testability: no verifiable acceptance criteria or no observable outcome.
-     See `"$RUNOQ_ROOT/test/fixtures/plans/untestable-example.md"`.
 6. Present the proposed issue queue to the user for confirmation before creating anything. The confirmation step must clearly show:
    - The epic/task tree (epics first, child tasks indented beneath).
    - Complexity assignments for every task, each with a 1-2 sentence rationale explaining *why* (e.g., "medium — touches two modules and introduces a new public API surface").

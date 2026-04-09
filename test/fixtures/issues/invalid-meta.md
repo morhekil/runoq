@@ -1,3 +1,0 @@
-## Context
-
-Broken metadata fixture.

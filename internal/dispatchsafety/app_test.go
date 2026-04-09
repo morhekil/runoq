@@ -470,7 +470,7 @@ func dispatchTestEnv(repoRoot string, configPath string, targetRoot string, stat
 	env = envSet(env, "RUNOQ_CONFIG", configPath)
 	env = envSet(env, "TARGET_ROOT", targetRoot)
 	env = envSet(env, "RUNOQ_STATE_DIR", stateDir)
-	env = envSet(env, "GH_BIN", filepath.Join(repoRoot, "test", "helpers", "gh"))
+	env = envSet(env, "GH_BIN", filepath.Join(repoRoot, "internal", "dispatchsafety", "testdata", "fake-gh"))
 	env = envSet(env, "GH_TOKEN", "existing-token")
 	env = envSet(env, "FAKE_GH_SCENARIO", scenarioPath)
 	env = envSet(env, "FAKE_GH_STATE", filepath.Join(filepath.Dir(logPath), "fake-gh.state"))

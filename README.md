@@ -66,10 +66,8 @@ export RUNOQ_SYMLINK_DIR="$HOME/.local/bin"
 
 - [`bin/`](./bin): user-facing CLI entrypoint.
 - [`internal/`](./internal): Go runtime packages (`runtime*`, `common`, `gh`).
-- [`scripts/`](./scripts): shell entrypoints that dispatch to the Go runtime.
 - [`config/`](./config): runtime configuration and label/auth defaults.
 - [`templates/`](./templates): issue and PR body templates.
-- [`test/`](./test): Bats suites, helpers, and fake `gh` fixtures.
 - [`docs/`](./docs): product, operations, architecture, and contributor documentation.
 - [`.claude/`](./.claude): agent prompts and skills used by the runtime.
 

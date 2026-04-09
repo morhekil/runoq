@@ -1,8 +1,0 @@
-<!-- runoq:payload:codex-return -->
-```json
-{
-  "status": "completed",
-  "commits_pushed": ["abc1234"],
-  "commit_range":
-}
-```

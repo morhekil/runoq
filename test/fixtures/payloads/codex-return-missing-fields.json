@@ -1,8 +1,0 @@
-{
-  "status": "completed",
-  "commits_pushed": [
-    "abc1234"
-  ],
-  "tests_run": true,
-  "unknown_field": "ignored"
-}
