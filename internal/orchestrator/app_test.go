@@ -391,26 +391,6 @@ CHECKLIST:
 	}
 }
 
-func TestParseScoreNumber(t *testing.T) {
-	tests := []struct {
-		input string
-		want  int
-	}{
-		{"38/40", 38},
-		{"40/40", 40},
-		{"0", 0},
-		{"38", 38},
-		{"", 0},
-		{"abc", 0},
-	}
-	for _, tt := range tests {
-		got := parseScoreNumber(tt.input)
-		if got != tt.want {
-			t.Errorf("parseScoreNumber(%q) = %d, want %d", tt.input, got, tt.want)
-		}
-	}
-}
-
 func TestReplaceMarkerContent(t *testing.T) {
 	body := "## Summary\n<!-- runoq:summary:start -->\nPending.\n<!-- runoq:summary:end -->\n\n## Linked Issue\nCloses #42\n"
 	updated := replaceMarkerContent(body, "<!-- runoq:summary:start -->", "<!-- runoq:summary:end -->", "Implemented queue processing.")
@@ -945,88 +925,6 @@ func TestPhaseFinalizeNeedsReviewWhenAutoMergeDisabled(t *testing.T) {
 	}
 }
 
-func TestFinalizeDecisionScoreBelowThresholdNeedsReview(t *testing.T) {
-	state := struct {
-		PRNumber int      `json:"pr_number"`
-		Worktree string   `json:"worktree"`
-		Verdict  string   `json:"verdict"`
-		Decision string   `json:"decision"`
-		Score    string   `json:"score"`
-		Round    int      `json:"round"`
-		Caveats  []string `json:"caveats"`
-		Summary  string   `json:"summary"`
-	}{
-		PRNumber: 87,
-		Verdict:  "PASS",
-		Score:    "30/40",
-		Round:    1,
-	}
-
-	cfg := defaultOrchestratorConfig()
-	cfg.AutoMergeMinScore = 35
-
-	verdict, issueStatus, reason := finalizeDecision(state, cfg)
-	if verdict != "needs-review" {
-		t.Fatalf("expected needs-review for low score, got %q", verdict)
-	}
-	if issueStatus != "needs-review" {
-		t.Fatalf("expected needs-review status, got %q", issueStatus)
-	}
-	if !strings.Contains(reason, "Score 30 below auto-merge threshold 35") {
-		t.Fatalf("expected score threshold reason, got %q", reason)
-	}
-}
-
-func TestFinalizeDecisionScoreAboveThresholdAutoMerges(t *testing.T) {
-	state := struct {
-		PRNumber int      `json:"pr_number"`
-		Worktree string   `json:"worktree"`
-		Verdict  string   `json:"verdict"`
-		Decision string   `json:"decision"`
-		Score    string   `json:"score"`
-		Round    int      `json:"round"`
-		Caveats  []string `json:"caveats"`
-		Summary  string   `json:"summary"`
-	}{
-		PRNumber: 87,
-		Verdict:  "PASS",
-		Score:    "38/40",
-		Round:    1,
-	}
-
-	cfg := defaultOrchestratorConfig()
-	cfg.AutoMergeMinScore = 35
-
-	verdict, _, _ := finalizeDecision(state, cfg)
-	if verdict != "auto-merge" {
-		t.Fatalf("expected auto-merge for score above threshold, got %q", verdict)
-	}
-}
-
-func TestFinalizeDecisionZeroThresholdIgnoresScore(t *testing.T) {
-	state := struct {
-		PRNumber int      `json:"pr_number"`
-		Worktree string   `json:"worktree"`
-		Verdict  string   `json:"verdict"`
-		Decision string   `json:"decision"`
-		Score    string   `json:"score"`
-		Round    int      `json:"round"`
-		Caveats  []string `json:"caveats"`
-		Summary  string   `json:"summary"`
-	}{
-		PRNumber: 87,
-		Verdict:  "PASS",
-		Score:    "10/40",
-		Round:    1,
-	}
-
-	cfg := defaultOrchestratorConfig()
-	// AutoMergeMinScore defaults to 0, which means no threshold
-	verdict, _, _ := finalizeDecision(state, cfg)
-	if verdict != "auto-merge" {
-		t.Fatalf("expected auto-merge when threshold is 0, got %q", verdict)
-	}
-}
 
 func TestRunCommandEntryRequiresIssueFlag(t *testing.T) {
 	ctx := t.Context()

@@ -137,16 +137,6 @@ func parseReviewVerdict(path string) (reviewVerdictResult, error) {
 	return result, nil
 }
 
-// parseScoreNumber extracts the numeric score from a string like "38/40" or "38".
-func parseScoreNumber(score string) int {
-	s := strings.TrimSpace(score)
-	if idx := strings.Index(s, "/"); idx >= 0 {
-		s = s[:idx]
-	}
-	n, _ := strconv.Atoi(s)
-	return n
-}
-
 func (a *App) prepareAuth(ctx context.Context, root string, env []string) []string {
 	homeDir := ""
 	if h, err := os.UserHomeDir(); err == nil {
@@ -350,12 +340,6 @@ func finalizeDecision(state struct {
 	}
 	if !cfg.AutoMergeEnabled {
 		return "needs-review", "needs-review", "Auto-merge is disabled in config."
-	}
-	if cfg.AutoMergeMinScore > 0 {
-		score := parseScoreNumber(state.Score)
-		if score < cfg.AutoMergeMinScore {
-			return "needs-review", "needs-review", fmt.Sprintf("Score %d below auto-merge threshold %d.", score, cfg.AutoMergeMinScore)
-		}
 	}
 
 	return "auto-merge", "done", ""
