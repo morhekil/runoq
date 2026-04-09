@@ -1728,8 +1728,8 @@ func TestPhaseOpenPRCreatesPRAndSetsState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("phaseOpenPR: %v", err)
 	}
-	if !strings.Contains(result, `"phase":"OPEN-PR"`) {
-		t.Fatalf("expected OPEN-PR phase, got %s", result)
+	if !strings.Contains(result, `"phase":"DEVELOP"`) {
+		t.Fatalf("expected existing phase to be preserved, got %s", result)
 	}
 	if !strings.Contains(result, `"pr_number":87`) {
 		t.Fatalf("expected pr_number 87, got %s", result)

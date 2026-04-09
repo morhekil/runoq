@@ -217,6 +217,7 @@ func (a *App) phaseOpenPR(ctx context.Context, root string, env []string, repo s
 	a.logInfo("OPEN-PR: creating PR for issue #%d", issueNumber)
 
 	var state struct {
+		Phase    string `json:"phase"`
 		Branch   string `json:"branch"`
 		Worktree string `json:"worktree"`
 	}
@@ -240,7 +241,6 @@ func (a *App) phaseOpenPR(ctx context.Context, root string, env []string, repo s
 	a.logInfo("OPEN-PR: created draft PR #%d for branch=%s", prNumber, state.Branch)
 
 	nextState, err := updateStateJSON(stateJSON, func(state map[string]any) {
-		state["phase"] = "OPEN-PR"
 		state["pr_number"] = prNumber
 	})
 	if err != nil {

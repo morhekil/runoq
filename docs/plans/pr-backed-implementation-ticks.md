@@ -14,11 +14,11 @@ Completed so far:
 - [x] `DEVELOP`, `VERIFY`, and `REVIEW` rehydrate disposable worktrees from the pushed branch instead of trusting prior local paths
 - [x] `RESPOND` preempts every PR-backed phase when the PR has unprocessed non-audit comments
 - [x] `DEVELOP` now runs exactly one codex round and leaves deterministic verification to `VERIFY`
+- [x] `OPEN-PR` no longer appears in newly written runtime state and only remains as a resume-compatibility path
 - [x] Orchestrator tests and full `go test ./...` are green after the boundary refactor
 
 Still to do:
 
-- [ ] Remove `OPEN-PR` as a meaningful runtime phase and treat it as compatibility-only until old state/comments are gone
 - [ ] Remove the issue-runner as a top-level orchestration concept and keep only reusable helpers
 - [ ] Change phase comments from "next-state carriers" toward phase-result records and centralize routing logic fully in the orchestrator
 - [ ] Update smoke specs and fixture smoke coverage to the new tick cadence
@@ -150,7 +150,7 @@ Local workspace state is disposable. Each tick may create a worktree, use it, th
 - [x] Add tests for `VERIFY(fail) -> DECIDE`
 - [x] Route resumed `DEVELOP` into `VERIFY`
 - [x] Route pending PR comments into `RESPOND` before every PR-backed phase
-- [ ] Remove legacy routing assumptions that still treat `OPEN-PR` as a primary phase
+- [x] Remove legacy routing assumptions that still treat `OPEN-PR` as a primary phase
 
 ### B. Verification Extraction
 
