@@ -620,3 +620,83 @@ func TestClassifyTransientError(t *testing.T) {
 		}
 	})
 }
+
+func TestDevelopmentLoop_TransientErrorShortCircuits(t *testing.T) {
+	dir := t.TempDir()
+	worktree := filepath.Join(dir, "wt")
+	os.MkdirAll(worktree, 0o755)
+	logDir := filepath.Join(dir, "logs")
+	os.MkdirAll(logDir, 0o755)
+	runoqRoot := filepath.Join(dir, "runoq")
+	os.MkdirAll(filepath.Join(runoqRoot, "scripts"), 0o755)
+
+	specFile := filepath.Join(dir, "spec.md")
+	os.WriteFile(specFile, []byte("implement X"), 0o644)
+
+	verifyCount := 0
+	fe := &fakeExecutor{t: t, handlers: map[string]func(shell.CommandRequest) error{
+		"git": func(req shell.CommandRequest) error {
+			if req.Stdout != nil {
+				req.Stdout.Write([]byte("abc123\n"))
+			}
+			return nil
+		},
+		"codex": func(req shell.CommandRequest) error {
+			// Simulate a transient capacity error.
+			if req.Stdout != nil {
+				req.Stdout.Write([]byte(`{"type":"turn.failed","error":"Selected model is at capacity"}` + "\n"))
+			}
+			return fmt.Errorf("exit status 1")
+		},
+		"state.sh": func(req shell.CommandRequest) error {
+			t.Error("state.sh should not be called on transient error")
+			return nil
+		},
+		"verify.sh": func(req shell.CommandRequest) error {
+			verifyCount++
+			t.Error("verify.sh should not be called on transient error")
+			return nil
+		},
+	}}
+
+	payloadFile := writePayloadFile(t, dir, inputPayload{
+		IssueNumber:    1,
+		PRNumber:       10,
+		Worktree:       worktree,
+		Branch:         "feat-x",
+		SpecPath:       specFile,
+		Repo:           "owner/repo",
+		MaxRounds:      3,
+		MaxTokenBudget: 100000,
+		LogDir:         logDir,
+	})
+
+	var stdout, stderr bytes.Buffer
+	app := New([]string{"run", payloadFile},
+		[]string{"RUNOQ_ROOT=" + runoqRoot, "RUNOQ_CODEX_BIN=codex"},
+		dir, &stdout, &stderr)
+	app.SetCommandExecutor(fe.exec)
+
+	code := app.Run(t.Context())
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr=%s", code, stderr.String())
+	}
+
+	var out outputPayload
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("parse output: %v; raw=%s", err, stdout.String())
+	}
+
+	if out.Status != "transient_error" {
+		t.Errorf("status = %q, want %q", out.Status, "transient_error")
+	}
+	if out.Round != 1 {
+		t.Errorf("round = %d, want 1 (should not burn rounds)", out.Round)
+	}
+	if verifyCount != 0 {
+		t.Errorf("verify.sh called %d times, want 0", verifyCount)
+	}
+	if out.Summary == "" {
+		t.Error("summary should describe the transient error")
+	}
+}

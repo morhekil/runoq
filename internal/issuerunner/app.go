@@ -155,9 +155,18 @@ func (a *App) developmentLoop(ctx context.Context, input *inputPayload, state *r
 		eventLog, lastMsgFile := a.roundPaths(state, round, "")
 		payloadFile := filepath.Join(state.logDir, fmt.Sprintf("round-%d-payload.json", round))
 
-		a.invokeCodex(ctx, input, state, prompt, eventLog, lastMsgFile)
+		codexErr := a.invokeCodex(ctx, input, state, prompt, eventLog, lastMsgFile)
 
 		a.logAgent("codex", input, "round %d — finished", round)
+
+		// Short-circuit on transient errors — don't burn the round.
+		if isTransient, reason := a.classifyTransientError(eventLog, codexErr); isTransient {
+			a.logAgent("codex", input, "round %d — transient error: %s", round, reason)
+			return a.emitResult("transient_error", input, state, specRequirements,
+				false, nil, nil, nil,
+				reason, []string{reason})
+		}
+
 		threadID := a.extractThreadID(eventLog)
 		state.threadID = threadID
 
@@ -173,7 +182,7 @@ func (a *App) developmentLoop(ctx context.Context, input *inputPayload, state *r
 			retryEventLog, retryLastMsg := a.roundPaths(state, round, fmt.Sprintf("schema-retry-%d", schemaRetryCount))
 			retryPrompt := a.buildSchemaRetryPrompt()
 
-			a.resumeCodex(ctx, input, state, threadID, retryPrompt, retryEventLog, retryLastMsg)
+			_ = a.resumeCodex(ctx, input, state, threadID, retryPrompt, retryEventLog, retryLastMsg)
 
 			if tid := a.extractThreadID(retryEventLog); tid != "" {
 				threadID = tid
@@ -337,7 +346,7 @@ Do not run additional commands. Re-emit only the corrected final payload block w
 }
 
 // invokeCodex runs the codex binary with the given prompt.
-func (a *App) invokeCodex(ctx context.Context, input *inputPayload, state *roundState, prompt, eventLogPath, lastMsgPath string) {
+func (a *App) invokeCodex(ctx context.Context, input *inputPayload, state *roundState, prompt, eventLogPath, lastMsgPath string) error {
 	codexBin := "codex"
 	if bin, ok := shell.EnvLookup(a.env, "RUNOQ_CODEX_BIN"); ok && bin != "" {
 		codexBin = bin
@@ -355,7 +364,7 @@ func (a *App) invokeCodex(ctx context.Context, input *inputPayload, state *round
 	captureDir := filepath.Join(state.logDir, fmt.Sprintf("codex-round-%d", state.round))
 	env := shell.EnvSet(a.env, "RUNOQ_CODEX_CAPTURE_DIR", captureDir)
 
-	_ = a.execCommand(ctx, shell.CommandRequest{
+	return a.execCommand(ctx, shell.CommandRequest{
 		Name:   codexBin,
 		Args:   []string{"exec", "--dangerously-bypass-approvals-and-sandbox", "--json", "-o", absLastMsg, prompt},
 		Dir:    input.Worktree,
@@ -366,7 +375,7 @@ func (a *App) invokeCodex(ctx context.Context, input *inputPayload, state *round
 }
 
 // resumeCodex resumes a codex thread with a retry prompt.
-func (a *App) resumeCodex(ctx context.Context, input *inputPayload, state *roundState, threadID, prompt, eventLogPath, lastMsgPath string) {
+func (a *App) resumeCodex(ctx context.Context, input *inputPayload, state *roundState, threadID, prompt, eventLogPath, lastMsgPath string) error {
 	codexBin := "codex"
 	if bin, ok := shell.EnvLookup(a.env, "RUNOQ_CODEX_BIN"); ok && bin != "" {
 		codexBin = bin
@@ -380,7 +389,7 @@ func (a *App) resumeCodex(ctx context.Context, input *inputPayload, state *round
 	eventFile, _ := os.Create(eventLogPath)
 	defer eventFile.Close()
 
-	_ = a.execCommand(ctx, shell.CommandRequest{
+	return a.execCommand(ctx, shell.CommandRequest{
 		Name:   codexBin,
 		Args:   []string{"exec", "resume", threadID, "--json", "-o", absLastMsg, prompt},
 		Dir:    input.Worktree,
