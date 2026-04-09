@@ -312,6 +312,90 @@ func TestDevelopmentLoop_SingleRoundSuccess(t *testing.T) {
 	}
 }
 
+func TestDevelopmentLoop_LogsProgressToStderr(t *testing.T) {
+	dir := t.TempDir()
+	worktree := filepath.Join(dir, "wt")
+	os.MkdirAll(worktree, 0o755)
+	logDir := filepath.Join(dir, "logs")
+	os.MkdirAll(logDir, 0o755)
+	runoqRoot := filepath.Join(dir, "runoq")
+	os.MkdirAll(filepath.Join(runoqRoot, "scripts"), 0o755)
+
+	specFile := filepath.Join(dir, "spec.md")
+	os.WriteFile(specFile, []byte("implement X"), 0o644)
+
+	fe := &fakeExecutor{t: t, handlers: map[string]func(shell.CommandRequest) error{
+		"git": func(req shell.CommandRequest) error {
+			if req.Stdout != nil {
+				req.Stdout.Write([]byte("abc123\n"))
+			}
+			return nil
+		},
+		"codex": func(req shell.CommandRequest) error {
+			if req.Stdout != nil {
+				req.Stdout.Write([]byte(`{"type":"thread.started","thread_id":"thread-42"}` + "\n"))
+				req.Stdout.Write([]byte(`{"tokens": 500}` + "\n"))
+			}
+			for i, arg := range req.Args {
+				if arg == "-o" && i+1 < len(req.Args) {
+					os.WriteFile(req.Args[i+1], []byte("fake codex output"), 0o644)
+					break
+				}
+			}
+			return nil
+		},
+		"state.sh": func(req shell.CommandRequest) error {
+			if req.Stdout != nil {
+				req.Stdout.Write([]byte(`{"payload_schema_valid":true}`))
+			}
+			return nil
+		},
+		"verify.sh": func(req shell.CommandRequest) error {
+			if req.Stdout != nil {
+				req.Stdout.Write([]byte(`{"review_allowed":true,"failures":[],"actual":{"files_changed":["main.go"],"files_added":[],"files_deleted":[]}}`))
+			}
+			return nil
+		},
+	}}
+
+	payloadFile := writePayloadFile(t, dir, inputPayload{
+		IssueNumber:    42,
+		PRNumber:       10,
+		Worktree:       worktree,
+		Branch:         "feat-x",
+		SpecPath:       specFile,
+		Repo:           "owner/repo",
+		MaxRounds:      3,
+		MaxTokenBudget: 100000,
+		LogDir:         logDir,
+	})
+
+	var stdout, stderr bytes.Buffer
+	app := New([]string{"run", payloadFile},
+		[]string{"RUNOQ_ROOT=" + runoqRoot, "RUNOQ_CODEX_BIN=codex"},
+		dir, &stdout, &stderr)
+	app.SetCommandExecutor(fe.exec)
+
+	code := app.Run(t.Context())
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr=%s", code, stderr.String())
+	}
+
+	stderrOutput := stderr.String()
+
+	// Should include issue number and round in progress output
+	if !strings.Contains(stderrOutput, "#42") {
+		t.Errorf("stderr should mention issue #42, got:\n%s", stderrOutput)
+	}
+	if !strings.Contains(stderrOutput, "round 1") {
+		t.Errorf("stderr should mention round number, got:\n%s", stderrOutput)
+	}
+	// Should indicate agent is starting
+	if !strings.Contains(stderrOutput, "codex") {
+		t.Errorf("stderr should mention codex agent, got:\n%s", stderrOutput)
+	}
+}
+
 func TestDevelopmentLoop_BudgetExhausted(t *testing.T) {
 	dir := t.TempDir()
 	worktree := filepath.Join(dir, "wt")

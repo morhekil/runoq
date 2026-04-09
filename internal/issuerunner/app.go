@@ -40,6 +40,12 @@ func New(args []string, env []string, cwd string, stdout io.Writer, stderr io.Wr
 	}
 }
 
+// logProgress writes a progress line to stderr, tagged with the issue number.
+func (a *App) logProgress(input *inputPayload, format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	fmt.Fprintf(a.stderr, "[issue-runner] #%d: %s\n", input.IssueNumber, msg)
+}
+
 func (a *App) SetCommandExecutor(execFn shell.CommandExecutor) {
 	if execFn == nil {
 		a.execCommand = shell.RunCommand
@@ -133,6 +139,7 @@ func (a *App) developmentLoop(ctx context.Context, input *inputPayload, state *r
 
 		// Budget check before starting a round.
 		if input.MaxTokenBudget > 0 && state.cumulativeTokens >= input.MaxTokenBudget {
+			a.logProgress(input, "budget exhausted before round %d", round)
 			return a.emitResult("budget_exhausted", input, state, specRequirements,
 				false, nil, nil, nil,
 				fmt.Sprintf("Token budget exhausted before round %d", round),
@@ -143,12 +150,14 @@ func (a *App) developmentLoop(ctx context.Context, input *inputPayload, state *r
 		roundBaseline, _ := repo.ResolveHEAD()
 
 		// Build prompt and invoke codex.
+		a.logProgress(input, "round %d/%d — invoking codex", round, input.MaxRounds)
 		prompt := a.buildCodexPrompt(input, state, specRequirements)
 		eventLog, lastMsgFile := a.roundPaths(state, round, "")
 		payloadFile := filepath.Join(state.logDir, fmt.Sprintf("round-%d-payload.json", round))
 
 		a.invokeCodex(ctx, input, state, prompt, eventLog, lastMsgFile)
 
+		a.logProgress(input, "round %d — codex finished, validating", round)
 		threadID := a.extractThreadID(eventLog)
 		state.threadID = threadID
 
@@ -208,6 +217,7 @@ func (a *App) developmentLoop(ctx context.Context, input *inputPayload, state *r
 
 		if !vr.ReviewAllowed {
 			// Verification failed.
+			a.logProgress(input, "round %d — verification failed: %v", round, vr.Failures)
 			a.postVerificationComment(ctx, input, state, round, roundBaseline, vr.Failures)
 
 			if round >= input.MaxRounds {
@@ -227,6 +237,7 @@ func (a *App) developmentLoop(ctx context.Context, input *inputPayload, state *r
 		}
 
 		// Verification passed — expand review scope.
+		a.logProgress(input, "round %d — verification passed, ready for review", round)
 		changedFiles := a.mergeChangedFiles(vr)
 		relatedFiles := a.expandReviewScope(ctx, input.Worktree, changedFiles)
 
