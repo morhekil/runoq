@@ -63,6 +63,70 @@ func TestCreateWorktreeDirectCall(t *testing.T) {
 	}
 }
 
+func TestRehydrateWorktreeFromBranch(t *testing.T) {
+	t.Parallel()
+
+	remoteDir := filepath.Join(t.TempDir(), "remote.git")
+	localDir := filepath.Join(t.TempDir(), "local")
+	makeRemoteBackedRepo(t, remoteDir, localDir)
+
+	writeIdentityFile(t, localDir, `{"appId":123}`)
+
+	naming := Naming{
+		BranchPrefix:   "runoq/",
+		WorktreePrefix: "runoq-wt-",
+		AppSlug:        "runoq",
+	}
+	app := NewDirect(naming, localDir, nil)
+	app.SetCommandExecutor(shell.RunCommand)
+
+	branch := "runoq/42-implement-queue"
+	mustRun(t, localDir, "git", "checkout", "-b", branch)
+	if err := os.WriteFile(filepath.Join(localDir, "feature.txt"), []byte("first version\n"), 0o644); err != nil {
+		t.Fatalf("write feature.txt: %v", err)
+	}
+	mustRun(t, localDir, "git", "add", "feature.txt")
+	mustRun(t, localDir, "git", "commit", "-m", "Add feature")
+	mustRun(t, localDir, "git", "push", "-u", "origin", branch)
+	mustRun(t, localDir, "git", "checkout", "main")
+
+	first, err := app.RehydrateWorktree(t.Context(), 42, branch)
+	if err != nil {
+		t.Fatalf("RehydrateWorktree first: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(first.Worktree, "feature.txt"))
+	if err != nil {
+		t.Fatalf("read rehydrated feature.txt: %v", err)
+	}
+	if string(content) != "first version\n" {
+		t.Fatalf("unexpected first worktree content: %q", string(content))
+	}
+
+	updaterDir := filepath.Join(t.TempDir(), "updater")
+	mustRun(t, ".", "git", "clone", remoteDir, updaterDir)
+	mustRun(t, updaterDir, "git", "config", "user.name", "Test User")
+	mustRun(t, updaterDir, "git", "config", "user.email", "test@example.com")
+	mustRun(t, updaterDir, "git", "checkout", branch)
+	if err := os.WriteFile(filepath.Join(updaterDir, "feature.txt"), []byte("second version\n"), 0o644); err != nil {
+		t.Fatalf("rewrite feature.txt: %v", err)
+	}
+	mustRun(t, updaterDir, "git", "add", "feature.txt")
+	mustRun(t, updaterDir, "git", "commit", "-m", "Update feature")
+	mustRun(t, updaterDir, "git", "push", "origin", branch)
+
+	second, err := app.RehydrateWorktree(t.Context(), 42, branch)
+	if err != nil {
+		t.Fatalf("RehydrateWorktree second: %v", err)
+	}
+	content, err = os.ReadFile(filepath.Join(second.Worktree, "feature.txt"))
+	if err != nil {
+		t.Fatalf("read refreshed feature.txt: %v", err)
+	}
+	if string(content) != "second version\n" {
+		t.Fatalf("unexpected refreshed worktree content: %q", string(content))
+	}
+}
+
 func TestCreateInspectAndRemove(t *testing.T) {
 	t.Parallel()
 

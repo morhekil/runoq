@@ -387,7 +387,6 @@ func defaultBaseRef(env []string) string {
 	return "" // auto-detect from remote
 }
 
-
 func configPath(env []string, cwd string) string {
 	if path, ok := shell.EnvLookup(env, "RUNOQ_CONFIG"); ok && path != "" {
 		return path
@@ -504,4 +503,56 @@ func (a *App) RemoveWorktree(ctx context.Context, issueNumber int) error {
 	}
 
 	return a.repo.WorktreeRemove(path)
+}
+
+// RehydrateWorktree recreates the issue worktree from an existing pushed branch.
+// Any prior disposable worktree at the issue path is removed first.
+func (a *App) RehydrateWorktree(ctx context.Context, issueNumber int, branch string) (CreateResult, error) {
+	targetRoot := a.cwd
+	if v, ok := shell.EnvLookup(a.env, "TARGET_ROOT"); ok && v != "" {
+		targetRoot = v
+	}
+	a.repo = gitops.OpenCLI(ctx, targetRoot, a.execCommand)
+
+	cfg := a.naming
+	if cfg.WorktreePrefix == "" {
+		loaded, err := a.loadConfig()
+		if err != nil {
+			return CreateResult{}, err
+		}
+		cfg.WorktreePrefix = loaded.WorktreePrefix
+		if cfg.AppSlug == "" {
+			cfg.AppSlug = loaded.Identity.AppSlug
+		}
+	}
+
+	issue := strconv.Itoa(issueNumber)
+	path, err := worktreePath(cfg.WorktreePrefix, targetRoot, issue)
+	if err != nil {
+		return CreateResult{}, fmt.Errorf("resolve worktree path: %w", err)
+	}
+
+	if err := a.repo.Fetch("origin", branch); err != nil {
+		return CreateResult{}, fmt.Errorf("fetch origin %s: %w", branch, err)
+	}
+
+	if _, err := os.Lstat(path); err == nil {
+		if err := a.repo.WorktreeRemove(path); err != nil {
+			return CreateResult{}, fmt.Errorf("remove stale worktree: %w", err)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return CreateResult{}, fmt.Errorf("inspect worktree path %s: %w", path, err)
+	}
+
+	_ = a.repo.WorktreePrune()
+	_ = a.repo.DeleteBranch(branch)
+
+	baseRef := "origin/" + branch
+	if err := a.repo.WorktreeAdd(path, branch, baseRef); err != nil {
+		return CreateResult{}, fmt.Errorf("create worktree from %s: %w", baseRef, err)
+	}
+
+	_ = a.configureGitBotIdentity(ctx, path, cfg.AppSlug, targetRoot)
+
+	return CreateResult{Branch: branch, Worktree: path, BaseRef: baseRef}, nil
 }
