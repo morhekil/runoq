@@ -903,6 +903,24 @@ seed_lifecycle_issues() {
     issue_url="$(printf '%s' "$create_output" | jq -r '.url')"
     issue_number="$(issue_number_from_url "$issue_url")"
     [[ -n "$issue_number" ]] || runoq::die "Failed to parse seeded lifecycle issue number for ${key}."
+
+    # Set GitHub issue type via GraphQL so the tick runner recognizes epics/tasks
+    local _gh_type="task"
+    [[ "$type_field" == "epic" ]] && _gh_type="epic"
+    local _type_ids_file="${TARGET_ROOT:-.}/.runoq/issue-types.json"
+    if [[ -f "$_type_ids_file" ]]; then
+      local _type_id
+      _type_id="$(jq -r --arg t "$_gh_type" '.[$t] // empty' "$_type_ids_file")"
+      if [[ -n "$_type_id" ]]; then
+        local _node_id
+        _node_id="$(runoq::gh api "repos/${repo}/issues/${issue_number}" --jq '.node_id' 2>/dev/null || true)"
+        if [[ -n "$_node_id" ]]; then
+          runoq::gh api graphql -f "query=mutation { updateIssueIssueType(input: {issueId: \"${_node_id}\", issueTypeId: \"${_type_id}\"}) { issue { id } } }" >/dev/null 2>&1 || true
+          smoke_log "set issue type ${_gh_type} on #${issue_number}"
+        fi
+      fi
+    fi
+
     issue_map="$(printf '%s' "$issue_map" | jq --arg key "$key" --argjson number "$issue_number" '. + {($key): $number}')"
     issues="$(jq -n \
       --argjson issues "$issues" \
@@ -933,6 +951,29 @@ seed_lifecycle_issues() {
     child_id="$(runoq::gh api "repos/${repo}/issues/${child_number}" --jq '.id')"
     smoke_log "linking child #${child_number} as sub-issue of epic #${parent_number}"
     runoq::gh api "repos/${repo}/issues/${parent_number}/sub_issues" --method POST -F "sub_issue_id=${child_id}" >/dev/null 2>&1 || true
+  done < <(jq -c '.[]' "$fixture_file")
+
+  # Set blockedBy dependencies via GitHub GraphQL API
+  local dep_key dep_number dep_node_id blocking_key blocking_number blocking_node_id
+  while IFS= read -r template; do
+    [[ -n "$template" ]] || continue
+    local _dep_keys
+    _dep_keys="$(printf '%s' "$template" | jq -r '.depends_on_keys // [] | .[]')"
+    [[ -n "$_dep_keys" ]] || continue
+    dep_key="$(printf '%s' "$template" | jq -r '.key')"
+    dep_number="$(printf '%s' "$issue_map" | jq -r --arg k "$dep_key" '.[$k] // empty')"
+    [[ -n "$dep_number" ]] || continue
+    dep_node_id="$(runoq::gh api "repos/${repo}/issues/${dep_number}" --jq '.node_id' 2>/dev/null || true)"
+    [[ -n "$dep_node_id" ]] || continue
+    while IFS= read -r blocking_key; do
+      [[ -n "$blocking_key" ]] || continue
+      blocking_number="$(printf '%s' "$issue_map" | jq -r --arg k "$blocking_key" '.[$k] // empty')"
+      [[ -n "$blocking_number" ]] || continue
+      blocking_node_id="$(runoq::gh api "repos/${repo}/issues/${blocking_number}" --jq '.node_id' 2>/dev/null || true)"
+      [[ -n "$blocking_node_id" ]] || continue
+      smoke_log "setting #${dep_number} blockedBy #${blocking_number}"
+      runoq::gh api graphql -f "query=mutation { addBlockedBy(input: {issueId: \"${dep_node_id}\", blockingIssueId: \"${blocking_node_id}\"}) { blockedIssue { number } } }" >/dev/null 2>&1 || true
+    done <<< "$_dep_keys"
   done < <(jq -c '.[]' "$fixture_file")
 
   printf '%s\n' "$issues" | jq --argjson issue_map "$issue_map" '

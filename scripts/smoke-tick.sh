@@ -348,7 +348,7 @@ run_tick_smoke() {
     "approved_milestones_materialized" \
     "Approved planning review did not materialize the expected two milestones."
 
-  milestone1_plan="$(find_open_child_by_type "$issues_json" "$milestone1_number" planning || true)"
+  milestone1_plan="$(find_open_child_by_type "$repo" "$milestone1_number" planning || true)"
   milestone1_plan_number="$(printf '%s' "$milestone1_plan" | jq -r '.number // empty')"
   add_check_or_failure \
     "$( [[ -n "$milestone1_plan_number" ]] && printf true || printf false )" \
@@ -363,14 +363,21 @@ run_tick_smoke() {
       "$(issue_assigned_to "$planning_view" "$operator_login_value" && printf true || printf false)" \
       "milestone_planning_issue_assigned" \
       "Milestone planning issue #${milestone1_plan_number} is not assigned to @${operator_login_value}."
+
+    local milestone1_plan_view
+    milestone1_plan_view="$(issue_view_json "$repo" "$milestone1_plan_number")"
+    add_check_or_failure \
+      "$(printf '%s' "$milestone1_plan_view" | jq -r '.body // ""' | grep -q 'runoq:payload:plan-proposal' && printf true || printf false)" \
+      "milestone_task_proposal_posted" \
+      "Task proposal for milestone 1 was not posted."
   fi
 
-  local milestone1_plan_view
-  milestone1_plan_view="$(issue_view_json "$repo" "$milestone1_plan_number")"
-  add_check_or_failure \
-    "$(printf '%s' "$milestone1_plan_view" | jq -r '.body // ""' | grep -q 'runoq:payload:plan-proposal' && printf true || printf false)" \
-    "milestone_task_proposal_posted" \
-    "Task proposal for milestone 1 was not posted."
+  if [[ -z "$milestone1_plan_number" ]]; then
+    FAILURES_JSON="$(append_missing "$FAILURES_JSON" "Cannot continue: milestone planning issue not found.")"
+    # Emit partial summary and exit
+    printf '%s\n' "$(jq -n --arg status failed --argjson failures "$FAILURES_JSON" --argjson checks "$CHECKS_JSON" '{status:$status,failures:$failures,checks:$checks}')"
+    return 0
+  fi
 
   operator_gh issue comment "$milestone1_plan_number" --repo "$repo" --body "Approved, create the tasks" >/dev/null
   comment_interactions=$((comment_interactions + 1))
@@ -405,7 +412,7 @@ run_tick_smoke() {
   output="$(tick_once "$root")"
   add_step "milestone1_adjustment_review" "$output"
   issues_json="$(list_issues_json "$repo")"
-  adjustment_issue="$(find_open_child_by_type "$issues_json" "$milestone1_number" adjustment || true)"
+  adjustment_issue="$(find_open_child_by_type "$repo" "$milestone1_number" adjustment || true)"
   adjustment_number="$(printf '%s' "$adjustment_issue" | jq -r '.number // empty')"
   add_check_or_failure \
     "$( [[ -n "$adjustment_number" ]] && printf true || printf false )" \
@@ -428,7 +435,7 @@ run_tick_smoke() {
   output="$(tick_once "$root")"
   add_step "apply_adjustments" "$output"
   issues_json="$(list_issues_json "$repo")"
-  milestone2_plan="$(find_open_child_by_type "$issues_json" "$milestone2_number" planning || true)"
+  milestone2_plan="$(find_open_child_by_type "$repo" "$milestone2_number" planning || true)"
   milestone2_plan_number="$(printf '%s' "$milestone2_plan" | jq -r '.number // empty')"
   add_check_or_failure \
     "$( [[ -n "$milestone2_plan_number" ]] && printf true || printf false )" \
@@ -464,7 +471,7 @@ run_tick_smoke() {
   output="$(tick_once "$root")"
   add_step "discovery_forced_adjustment" "$output"
   issues_json="$(list_issues_json "$repo")"
-  discovery_adjustment="$(find_open_child_by_type "$issues_json" "$milestone2_number" adjustment || true)"
+  discovery_adjustment="$(find_open_child_by_type "$repo" "$milestone2_number" adjustment || true)"
   discovery_adjustment_number="$(printf '%s' "$discovery_adjustment" | jq -r '.number // empty')"
   if [[ -n "$discovery_adjustment_number" ]]; then
     discovery_forced_adjustment=true
