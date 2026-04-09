@@ -247,6 +247,7 @@ func (a *App) developmentLoop(ctx context.Context, input *inputPayload, state *r
 
 		// Verification passed — expand review scope.
 		a.logAgent("verifier", input, "round %d — passed, ready for review", round)
+		a.postVerificationSuccessComment(ctx, input, state, round, roundBaseline)
 		changedFiles := a.mergeChangedFiles(vr)
 		relatedFiles := a.expandReviewScope(ctx, input.Worktree, changedFiles)
 
@@ -624,6 +625,31 @@ func (a *App) postVerificationComment(ctx context.Context, input *inputPayload, 
 
 	// Write to temp file and invoke lifecycle script.
 	tmpFile := filepath.Join(state.logDir, fmt.Sprintf("round-%d-verify-comment.md", round))
+	os.WriteFile(tmpFile, []byte(b.String()), 0o644)
+
+	_ = a.execCommand(ctx, shell.CommandRequest{
+		Name: lifecycleScript,
+		Args: []string{"comment", input.Repo, fmt.Sprintf("%d", input.PRNumber), tmpFile},
+		Dir:  a.cwd,
+		Env:  a.env,
+	})
+}
+
+// postVerificationSuccessComment posts a verification-passed PR comment.
+func (a *App) postVerificationSuccessComment(ctx context.Context, input *inputPayload, state *roundState, round int, roundBaseline string) {
+	root := a.runoqRoot()
+	if root == "" || input.PRNumber == 0 {
+		return
+	}
+	lifecycleScript := filepath.Join(root, "scripts", "gh-pr-lifecycle.sh")
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "<!-- runoq:bot:verifier -->\n")
+	fmt.Fprintf(&b, "## Verification passed — round %d\n\n", round)
+	fmt.Fprintf(&b, "> Posted by `issue-runner` / `verify.sh` — round %d of %d, branch `%s`\n\n", round, input.MaxRounds, input.Branch)
+	fmt.Fprintf(&b, "**Commit range**: `%s..%s`\n", short(roundBaseline), short(state.headHash))
+
+	tmpFile := filepath.Join(state.logDir, fmt.Sprintf("round-%d-verify-success-comment.md", round))
 	os.WriteFile(tmpFile, []byte(b.String()), 0o644)
 
 	_ = a.execCommand(ctx, shell.CommandRequest{
