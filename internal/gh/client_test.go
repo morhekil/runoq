@@ -94,7 +94,6 @@ func TestEnsureToken_OnlyOnce(t *testing.T) {
 
 	identity := map[string]any{
 		"appId":          12345,
-		"installationId": 67890,
 		"privateKeyPath": keyPath,
 	}
 	identityJSON, _ := json.Marshal(identity)
@@ -106,19 +105,28 @@ func TestEnsureToken_OnlyOnce(t *testing.T) {
 		return nil
 	}
 
-	// Use a fake HTTP server to return a token.
+	// Fake HTTP server: handle installation listing + token minting.
 	httpClient := &http.Client{
 		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-			resp := &http.Response{
-				StatusCode: 201,
-				Header:     http.Header{"Content-Type": []string{"application/json"}},
-				Body:       makeBody(`{"token":"minted-tok"}`),
+			switch {
+			case r.URL.Path == "/app/installations":
+				return &http.Response{
+					StatusCode: 200,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       makeBody(`[{"id":67890,"account":{"login":"test-owner"}}]`),
+				}, nil
+			default:
+				return &http.Response{
+					StatusCode: 201,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       makeBody(`{"token":"minted-tok"}`),
+				}, nil
 			}
-			return resp, nil
 		}),
 	}
 
-	c := gh.NewClient(exec, httpClient, nil, tmpDir, "")
+	env := []string{"REPO=test-owner/test-repo"}
+	c := gh.NewClient(exec, httpClient, env, tmpDir, "")
 
 	// Call twice.
 	if err := c.EnsureToken(context.Background()); err != nil {

@@ -53,10 +53,16 @@ func RunCommand(ctx context.Context, req CommandRequest) error {
 func CommandOutput(ctx context.Context, exec CommandExecutor, req CommandRequest) (string, error) {
 	var stdout bytes.Buffer
 	req.Stdout = &stdout
+	// When the caller doesn't provide a stderr writer, capture it so we can
+	// include the command's diagnostic output in the returned error.
+	var stderrBuf bytes.Buffer
 	if req.Stderr == nil {
-		req.Stderr = io.Discard
+		req.Stderr = &stderrBuf
 	}
 	if err := exec(ctx, req); err != nil {
+		if detail := strings.TrimSpace(stderrBuf.String()); detail != "" {
+			return "", fmt.Errorf("%w: %s", err, detail)
+		}
 		return "", err
 	}
 	return strings.TrimSpace(stdout.String()), nil

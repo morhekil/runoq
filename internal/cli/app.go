@@ -299,6 +299,7 @@ func (a *App) prepareTargetContext(ctx context.Context, runoqRoot string, env []
 	if logErr == nil {
 		a.stderr = logWriter
 		a.logCloser = logWriter
+		fmt.Fprintf(a.stderr, "  log: %s\n", logWriter.Path())
 	}
 
 	repo, err := a.resolveRepo(ctx, env, targetRoot)

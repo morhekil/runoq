@@ -12,7 +12,6 @@ done
 RUNOQ_ROOT="$(cd "$(dirname "$SELF_PATH")/.." && pwd)"
 export RUNOQ_ROOT
 export RUNOQ_CONFIG="${RUNOQ_CONFIG:-$RUNOQ_ROOT/config/runoq.json}"
-export RUNOQ_CWD="${RUNOQ_CWD:-$PWD}"
 
 implementation="${RUNOQ_IMPLEMENTATION:-runtime}"
 if [[ -n "$implementation" && "$implementation" != "runtime" ]]; then
@@ -31,5 +30,6 @@ command -v "$go_bin" >/dev/null 2>&1 || {
   exit 1
 }
 
-cd "$RUNOQ_ROOT"
-exec "$go_bin" run "$RUNOQ_ROOT/cmd/runoq-runtime" "$@"
+bin="$RUNOQ_ROOT/.cache/runoq-runtime"
+(cd "$RUNOQ_ROOT" && "$go_bin" build -o "$bin" ./cmd/runoq-runtime)
+exec "$bin" "$@"

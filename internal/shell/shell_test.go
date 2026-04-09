@@ -64,28 +64,11 @@ func TestCommandOutput(t *testing.T) {
 		}
 	})
 
-	t.Run("error propagates", func(t *testing.T) {
-		ctx := t.Context()
-		fakeExec := func(_ context.Context, _ CommandRequest) error {
-			return errors.New("boom")
-		}
-		_, err := CommandOutput(ctx, fakeExec, CommandRequest{Name: "x"})
-		if err == nil || err.Error() != "boom" {
-			t.Fatalf("expected boom error, got %v", err)
-		}
-	})
-
-	t.Run("stderr discarded by default", func(t *testing.T) {
+	t.Run("caller-provided stderr preserved", func(t *testing.T) {
 		ctx := t.Context()
 		var captured bytes.Buffer
 		fakeExec := func(_ context.Context, req CommandRequest) error {
-			// stderr should be set to io.Discard, not nil
-			if req.Stderr == nil {
-				t.Error("stderr should not be nil")
-			}
-			// stdout should be the capture buffer
 			_, _ = req.Stdout.Write([]byte("ok\n"))
-			// Write to stderr — should not panic
 			_, _ = req.Stderr.Write([]byte("noise"))
 			return nil
 		}
@@ -99,9 +82,35 @@ func TestCommandOutput(t *testing.T) {
 		if out != "ok" {
 			t.Errorf("output = %q, want %q", out, "ok")
 		}
-		// When caller provides stderr, it should be preserved
 		if captured.String() != "noise" {
 			t.Errorf("stderr = %q, want %q", captured.String(), "noise")
+		}
+	})
+
+	t.Run("stderr included in error on failure", func(t *testing.T) {
+		ctx := t.Context()
+		fakeExec := func(_ context.Context, req CommandRequest) error {
+			_, _ = req.Stderr.Write([]byte("gh: Not Found (HTTP 404)\n"))
+			return errors.New("exit status 1")
+		}
+		_, err := CommandOutput(ctx, fakeExec, CommandRequest{Name: "gh"})
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		want := "exit status 1: gh: Not Found (HTTP 404)"
+		if err.Error() != want {
+			t.Errorf("error = %q, want %q", err.Error(), want)
+		}
+	})
+
+	t.Run("error without stderr unchanged", func(t *testing.T) {
+		ctx := t.Context()
+		fakeExec := func(_ context.Context, req CommandRequest) error {
+			return errors.New("boom")
+		}
+		_, err := CommandOutput(ctx, fakeExec, CommandRequest{Name: "x"})
+		if err == nil || err.Error() != "boom" {
+			t.Fatalf("expected boom error, got %v", err)
 		}
 	})
 }

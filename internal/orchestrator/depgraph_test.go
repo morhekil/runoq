@@ -281,7 +281,7 @@ func TestRenderMermaidLinearChain(t *testing.T) {
 	g := BuildDepGraph(issues, 1, "runoq:ready")
 	mermaid := g.RenderMermaid("runoq:in-progress", "runoq:done")
 
-	if !strings.Contains(mermaid, "graph LR") {
+	if !strings.Contains(mermaid, "graph TD") {
 		t.Fatalf("expected mermaid graph header, got %q", mermaid)
 	}
 	if !strings.Contains(mermaid, "10[") && !strings.Contains(mermaid, "10(") {
@@ -313,7 +313,10 @@ func TestRenderMermaidDoneAndBlocked(t *testing.T) {
 	g := BuildDepGraph(issues, 1, "runoq:ready")
 	mermaid := g.RenderMermaid("runoq:in-progress", "runoq:done")
 
-	if !strings.Contains(mermaid, "⏳") {
+	if !strings.Contains(mermaid, "✅") {
+		t.Fatalf("expected done icon for #10, got %q", mermaid)
+	}
+	if !strings.Contains(mermaid, "🟢") {
 		t.Fatalf("expected ready icon for #11, got %q", mermaid)
 	}
 	if !strings.Contains(mermaid, "🚫") {

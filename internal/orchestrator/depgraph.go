@@ -37,19 +37,18 @@ func BuildDepGraph(issues []issue, epicNumber int, readyLabel string) *DepGraph 
 		issueByNumber[issues[i].Number] = &issues[i]
 	}
 
-	// Build nodes for open task children of the epic
+	// Build nodes for task children of the epic (both open and closed).
 	for i := range issues {
 		iss := &issues[i]
-		if iss.State != "OPEN" {
-			continue
-		}
 		if issueParentEpic(iss) != epicNumber {
 			continue
 		}
 		if issueTypeOf(*iss) != "task" {
 			continue
 		}
-		if readyLabel != "" && !hasLabel(iss, readyLabel) {
+		// For candidate selection, only open+ready issues matter.
+		// But we add all tasks to the graph so the DAG visualization is complete.
+		if iss.State == "OPEN" && readyLabel != "" && !hasLabel(iss, readyLabel) {
 			continue
 		}
 
@@ -159,6 +158,9 @@ func (g *DepGraph) BlockedReason(issueNumber int) string {
 func (g *DepGraph) readyCandidates() []*depNode {
 	var ready []*depNode
 	for _, n := range g.nodes {
+		if n.issue.State != "OPEN" {
+			continue
+		}
 		if len(n.blockedBy) == 0 && !n.inCycle {
 			ready = append(ready, n)
 		}
@@ -311,7 +313,7 @@ func (g *DepGraph) detectCycles() {
 // Also includes CLOSED issues that are dependencies (to show the full picture).
 func (g *DepGraph) RenderMermaid(inProgressLabel, doneLabel string) string {
 	var b strings.Builder
-	b.WriteString("```mermaid\ngraph LR\n")
+	b.WriteString("```mermaid\ngraph TD\n")
 
 	// Collect all issue numbers referenced (nodes + their dependencies)
 	allIssues := make(map[int]*depNode)
@@ -352,7 +354,8 @@ func (g *DepGraph) statusIcon(n *depNode, inProgressLabel, doneLabel string) str
 	if len(n.blockedBy) > 0 {
 		return "🚫"
 	}
-	return "⏳"
+	// Open, unblocked, not in progress — ready to be picked up
+	return "🟢"
 }
 
 func truncateTitle(s string, maxLen int) string {

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -38,7 +39,24 @@ func MintBotToken(client *http.Client, appID int64, installationID int64, privat
 	if err != nil {
 		return "", err
 	}
+	return mintTokenWithJWT(client, jwt, installationID)
+}
 
+// MintBotTokenForOwner resolves the installation dynamically by listing the
+// app's installations and matching the given repo owner, then mints a token.
+func MintBotTokenForOwner(client *http.Client, appID int64, privateKey *rsa.PrivateKey, owner string) (string, error) {
+	jwt, err := MintJWT(appID, privateKey)
+	if err != nil {
+		return "", err
+	}
+	installID, err := findInstallation(client, jwt, owner)
+	if err != nil {
+		return "", err
+	}
+	return mintTokenWithJWT(client, jwt, installID)
+}
+
+func mintTokenWithJWT(client *http.Client, jwt string, installationID int64) (string, error) {
 	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("https://api.github.com/app/installations/%d/access_tokens", installationID), nil)
 	if err != nil {
 		return "", err
@@ -63,6 +81,45 @@ func MintBotToken(client *http.Client, appID int64, installationID int64, privat
 		return "", err
 	}
 	return result.Token, nil
+}
+
+// findInstallation lists the app's installations and returns the ID whose
+// account login matches owner (case-insensitive).
+func findInstallation(client *http.Client, jwt string, owner string) (int64, error) {
+	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/app/installations", nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+jwt)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "runoq-runtime")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return 0, fmt.Errorf("list installations failed: %s", resp.Status)
+	}
+
+	var installations []struct {
+		ID      int64 `json:"id"`
+		Account struct {
+			Login string `json:"login"`
+		} `json:"account"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&installations); err != nil {
+		return 0, fmt.Errorf("parse installations: %w", err)
+	}
+
+	target := strings.ToLower(owner)
+	for _, inst := range installations {
+		if strings.ToLower(inst.Account.Login) == target {
+			return inst.ID, nil
+		}
+	}
+	return 0, fmt.Errorf("no installation found for owner %q", owner)
 }
 
 func LoadPrivateKey(path string) (*rsa.PrivateKey, error) {

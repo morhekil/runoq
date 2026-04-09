@@ -16,7 +16,6 @@ import (
 // identityFile represents the .runoq/identity.json configuration.
 type identityFile struct {
 	AppID          int64  `json:"appId"`
-	InstallationID int64  `json:"installationId"`
 	PrivateKeyPath string `json:"privateKeyPath"`
 }
 
@@ -71,7 +70,7 @@ func (c *Client) EnsureToken(ctx context.Context) error {
 	if err := json.Unmarshal(data, &identity); err != nil {
 		return nil
 	}
-	if identity.AppID == 0 || identity.InstallationID == 0 || identity.PrivateKeyPath == "" {
+	if identity.AppID == 0 || identity.PrivateKeyPath == "" {
 		return nil
 	}
 
@@ -81,13 +80,30 @@ func (c *Client) EnsureToken(ctx context.Context) error {
 		return nil
 	}
 
-	token, err := MintBotToken(c.httpClient, identity.AppID, identity.InstallationID, privateKey)
+	owner := c.repoOwner()
+	if owner == "" {
+		return nil
+	}
+	token, err := MintBotTokenForOwner(c.httpClient, identity.AppID, privateKey, owner)
 	if err != nil || token == "" {
 		return nil
 	}
 
 	c.env = shell.EnvSet(c.env, "GH_TOKEN", token)
 	return nil
+}
+
+// repoOwner extracts the owner portion from the REPO env var (owner/name format).
+func (c *Client) repoOwner() string {
+	repo, ok := shell.EnvLookup(c.env, "REPO")
+	if !ok {
+		return ""
+	}
+	owner, _, ok := strings.Cut(repo, "/")
+	if !ok {
+		return ""
+	}
+	return owner
 }
 
 // Env returns the current environment, which may include a minted GH_TOKEN.

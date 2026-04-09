@@ -1,4 +1,5 @@
 .runoq/
+.cache/
 !.claude
 .claude/settings.local.json
 .env.*

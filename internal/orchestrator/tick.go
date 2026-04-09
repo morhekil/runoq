@@ -949,32 +949,67 @@ func (t *tickRunner) fetchDependencies(ctx context.Context) error {
 	if !ok {
 		return fmt.Errorf("dependency fetch failed: invalid repo format %q", t.cfg.Repo)
 	}
-	query := fmt.Sprintf(`query { repository(owner: %q, name: %q) { issues(first: 200, states: [OPEN, CLOSED]) { nodes { number blockedBy(first: 20) { nodes { number } } issueType { name } } } } }`, owner, repo)
 
-	var raw string
-	var lastErr error
-	for attempt := 1; attempt <= 3; attempt++ {
-		var err error
-		raw, err = t.ghOutput(ctx, "api", "graphql", "-f", "query="+query)
-		if err == nil {
-			lastErr = nil
+	// GitHub GraphQL caps `first` at 100, so we paginate.
+	cursor := ""
+	for {
+		afterClause := ""
+		if cursor != "" {
+			afterClause = fmt.Sprintf(`, after: %q`, cursor)
+		}
+		query := fmt.Sprintf(`query { repository(owner: %q, name: %q) { issues(first: 100, states: [OPEN, CLOSED]%s) { pageInfo { hasNextPage endCursor } nodes { number blockedBy(first: 20) { nodes { number } } issueType { name } } } } }`, owner, repo, afterClause)
+
+		var raw string
+		var lastErr error
+		for attempt := 1; attempt <= 3; attempt++ {
+			var err error
+			raw, err = t.ghOutput(ctx, "api", "graphql", "-f", "query="+query)
+			if err == nil {
+				lastErr = nil
+				break
+			}
+			lastErr = err
+			if attempt < 3 {
+				time.Sleep(3 * time.Second)
+			}
+		}
+		if lastErr != nil {
+			return fmt.Errorf("dependency fetch failed after 3 attempts: %w", lastErr)
+		}
+
+		fetchBlockedBy(t.issues, raw)
+		fetchIssueTypes(t.issues, raw)
+
+		page := extractPageInfo(raw)
+		if !page.HasNextPage {
 			break
 		}
-		lastErr = err
-		if attempt < 3 {
-			time.Sleep(3 * time.Second)
-		}
+		cursor = page.EndCursor
 	}
-	if lastErr != nil {
-		return fmt.Errorf("dependency fetch failed after 3 attempts: %w", lastErr)
-	}
-
-	fetchBlockedBy(t.issues, raw)
-	fetchIssueTypes(t.issues, raw)
 
 	// Populate parent-epic from sub-issues relationships
 	t.fetchParentEpics(ctx)
 	return nil
+}
+
+type graphqlPageInfo struct {
+	HasNextPage bool   `json:"hasNextPage"`
+	EndCursor   string `json:"endCursor"`
+}
+
+// extractPageInfo pulls pagination cursors from a GraphQL issues response.
+func extractPageInfo(graphqlResponse string) graphqlPageInfo {
+	var resp struct {
+		Data struct {
+			Repository struct {
+				Issues struct {
+					PageInfo graphqlPageInfo `json:"pageInfo"`
+				} `json:"issues"`
+			} `json:"repository"`
+		} `json:"data"`
+	}
+	json.Unmarshal([]byte(graphqlResponse), &resp)
+	return resp.Data.Repository.Issues.PageInfo
 }
 
 func (t *tickRunner) titleForIssue(numberStr string) string {
