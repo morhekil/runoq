@@ -1834,6 +1834,242 @@ func TestPhaseInitDryRunNoPRCreation(t *testing.T) {
 	}
 }
 
+func TestRunFromDevelopTransientErrorDoesNotEscalate(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var stderr bytes.Buffer
+	var calls []string
+
+	worktree := t.TempDir()
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, &stderr)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		calls: &calls, issueNumber: 42, issueTitle: "Implement queue",
+		customHandler: func(req shell.CommandRequest) (bool, error) {
+			if req.Name == "codex" || strings.HasSuffix(req.Name, "/codex") {
+				// Simulate transient capacity error.
+				if req.Stdout != nil {
+					req.Stdout.Write([]byte(`{"type":"turn.failed","error":"Selected model is at capacity"}` + "\n"))
+				}
+				return true, fmt.Errorf("exit status 1")
+			}
+			if req.Name == "git" && strings.Contains(strings.Join(req.Args, " "), "rev-parse") {
+				if req.Stdout != nil {
+					_, _ = io.WriteString(req.Stdout, "abc123\n")
+				}
+				return true, nil
+			}
+			return false, nil
+		},
+	}))
+
+	stateJSON := fmt.Sprintf(`{"issue":42,"phase":"DEVELOP","branch":"runoq/42-implement-queue","worktree":%q,"pr_number":87,"round":0}`, worktree)
+	meta := IssueMetadata{Number: 42, Title: "Implement queue"}
+
+	result, err := app.runFromDevelop(ctx, root, app.env, "owner/repo", 42, stateJSON, meta)
+	if err != nil {
+		t.Fatalf("runFromDevelop: %v", err)
+	}
+
+	// Should NOT have escalated to needs-review
+	for _, call := range calls {
+		if strings.Contains(call, "pr ready") {
+			t.Fatalf("should not call pr ready (needs-review finalize) on transient error, got: %v", calls)
+		}
+	}
+
+	// State should contain transient_retries=1 and transient_retry_after
+	if !strings.Contains(result, `"transient_retries"`) {
+		t.Fatalf("expected transient_retries in state, got %s", result)
+	}
+	var state map[string]any
+	if err := json.Unmarshal([]byte(result), &state); err != nil {
+		t.Fatalf("parse state: %v", err)
+	}
+	retries, _ := state["transient_retries"].(float64)
+	if retries != 1 {
+		t.Errorf("transient_retries = %v, want 1", retries)
+	}
+	retryAfter, _ := state["transient_retry_after"].(string)
+	if retryAfter == "" {
+		t.Error("expected transient_retry_after timestamp in state")
+	}
+}
+
+func TestRunFromDevelopSkipsWhenBackoffActive(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var stderr bytes.Buffer
+	codexCalled := false
+
+	worktree := t.TempDir()
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, &stderr)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		issueNumber: 42, issueTitle: "Implement queue",
+		customHandler: func(req shell.CommandRequest) (bool, error) {
+			if req.Name == "codex" || strings.HasSuffix(req.Name, "/codex") {
+				codexCalled = true
+				return true, nil
+			}
+			return false, nil
+		},
+	}))
+
+	// Set retry_after far in the future
+	futureTime := "2099-01-01T00:00:00Z"
+	stateJSON := fmt.Sprintf(`{"issue":42,"phase":"DEVELOP","branch":"runoq/42-implement-queue","worktree":%q,"pr_number":87,"round":0,"transient_retries":1,"transient_retry_after":%q}`, worktree, futureTime)
+	meta := IssueMetadata{Number: 42, Title: "Implement queue"}
+
+	result, err := app.runFromDevelop(ctx, root, app.env, "owner/repo", 42, stateJSON, meta)
+	if err != nil {
+		t.Fatalf("runFromDevelop: %v", err)
+	}
+
+	if codexCalled {
+		t.Fatal("codex should not be called when backoff is active")
+	}
+
+	// State should be returned unchanged (still in DEVELOP)
+	if !strings.Contains(result, `"transient_retry_after"`) {
+		t.Fatalf("state should preserve transient_retry_after, got %s", result)
+	}
+}
+
+func TestTransientBackoffSchedule(t *testing.T) {
+	app := New(nil, nil, "", io.Discard, io.Discard)
+
+	tests := []struct {
+		retries  int
+		wantMins int
+	}{
+		{0, 2},
+		{1, 5},
+		{2, 15},
+		{3, 30},
+		{4, 30}, // capped
+		{10, 30},
+	}
+	for _, tt := range tests {
+		got := app.transientBackoffDuration(tt.retries)
+		wantSecs := tt.wantMins * 60
+		if int(got.Seconds()) != wantSecs {
+			t.Errorf("transientBackoffDuration(%d) = %v, want %dm", tt.retries, got, tt.wantMins)
+		}
+	}
+}
+
+func TestRunFromDevelopResetsTransientRetriesOnSuccess(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var stderr bytes.Buffer
+	worktree := t.TempDir()
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, &stderr)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		issueNumber: 42, issueTitle: "Implement queue",
+		customHandler: func(req shell.CommandRequest) (bool, error) {
+			if req.Name == "codex" || strings.HasSuffix(req.Name, "/codex") {
+				if req.Stdout != nil {
+					req.Stdout.Write([]byte(`{"type":"thread.started","thread_id":"t1"}` + "\n"))
+					req.Stdout.Write([]byte(`{"tokens": 500}` + "\n"))
+				}
+				// Write fake last-message to -o path
+				for i, arg := range req.Args {
+					if arg == "-o" && i+1 < len(req.Args) {
+						os.WriteFile(req.Args[i+1], []byte("fake output"), 0o644)
+						break
+					}
+				}
+				return true, nil
+			}
+			if req.Name == "git" && strings.Contains(strings.Join(req.Args, " "), "rev-parse") {
+				if req.Stdout != nil {
+					_, _ = io.WriteString(req.Stdout, "abc123\n")
+				}
+				return true, nil
+			}
+			return false, nil
+		},
+	}))
+
+	// State has previous transient retries — should be cleared on success
+	stateJSON := fmt.Sprintf(`{"issue":42,"phase":"DEVELOP","branch":"runoq/42-implement-queue","worktree":%q,"pr_number":87,"round":0,"transient_retries":3,"transient_retry_after":"2020-01-01T00:00:00Z"}`, worktree)
+	meta := IssueMetadata{Number: 42, Title: "Implement queue"}
+
+	result, err := app.runFromDevelop(ctx, root, app.env, "owner/repo", 42, stateJSON, meta)
+	if err != nil {
+		t.Fatalf("runFromDevelop: %v", err)
+	}
+
+	var state map[string]any
+	if err := json.Unmarshal([]byte(result), &state); err != nil {
+		t.Fatalf("parse state: %v", err)
+	}
+
+	retries, _ := state["transient_retries"].(float64)
+	if retries != 0 {
+		t.Errorf("transient_retries = %v, want 0 after successful develop", retries)
+	}
+	if retryAfter, ok := state["transient_retry_after"].(string); ok && retryAfter != "" {
+		t.Errorf("transient_retry_after should be cleared, got %q", retryAfter)
+	}
+}
+
+func TestRunFromDevelopEscalatesAfterMaxTransientRetries(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var stderr bytes.Buffer
+	var calls []string
+
+	worktree := t.TempDir()
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, &stderr)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		calls: &calls, issueNumber: 42, issueTitle: "Implement queue",
+		customHandler: func(req shell.CommandRequest) (bool, error) {
+			if req.Name == "codex" || strings.HasSuffix(req.Name, "/codex") {
+				if req.Stdout != nil {
+					req.Stdout.Write([]byte(`{"type":"turn.failed","error":"Selected model is at capacity"}` + "\n"))
+				}
+				return true, fmt.Errorf("exit status 1")
+			}
+			if req.Name == "git" && strings.Contains(strings.Join(req.Args, " "), "rev-parse") {
+				if req.Stdout != nil {
+					_, _ = io.WriteString(req.Stdout, "abc123\n")
+				}
+				return true, nil
+			}
+			return false, nil
+		},
+	}))
+
+	// Already at max-1 transient retries, this one should trigger escalation
+	stateJSON := fmt.Sprintf(`{"issue":42,"phase":"DEVELOP","branch":"runoq/42-implement-queue","worktree":%q,"pr_number":87,"round":0,"transient_retries":4,"transient_retry_after":"2020-01-01T00:00:00Z"}`, worktree)
+	meta := IssueMetadata{Number: 42, Title: "Implement queue"}
+
+	result, err := app.runFromDevelop(ctx, root, app.env, "owner/repo", 42, stateJSON, meta)
+	if err != nil {
+		t.Fatalf("runFromDevelop: %v", err)
+	}
+
+	// Should have escalated to needs-review (DONE phase with needs-review verdict)
+	if !strings.Contains(result, `"phase":"DONE"`) {
+		t.Fatalf("expected DONE phase after max transient retries, got %s", result)
+	}
+	if !strings.Contains(result, `"needs-review"`) {
+		t.Fatalf("expected needs-review in state, got %s", result)
+	}
+}
+
 func defaultOrchestratorConfig() OrchestratorConfig {
 	return OrchestratorConfig{
 		MaxRounds:        5,

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/saruman/runoq/internal/shell"
 )
@@ -263,7 +264,42 @@ func (a *App) runFromCriteria(ctx context.Context, root string, env []string, re
 	return a.runFromDevelop(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 }
 
+// maxTransientRetries is the number of consecutive transient failures before
+// escalating to needs-review.
+const maxTransientRetries = 5
+
+// transientBackoffSchedule maps retry count to backoff duration.
+var transientBackoffSchedule = []time.Duration{
+	2 * time.Minute,
+	5 * time.Minute,
+	15 * time.Minute,
+	30 * time.Minute,
+}
+
+// transientBackoffDuration returns the backoff duration for the given retry count.
+func (a *App) transientBackoffDuration(retries int) time.Duration {
+	if retries >= len(transientBackoffSchedule) {
+		return transientBackoffSchedule[len(transientBackoffSchedule)-1]
+	}
+	return transientBackoffSchedule[retries]
+}
+
 func (a *App) runFromDevelop(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
+	// Check transient backoff gate.
+	var backoffState struct {
+		TransientRetries    int    `json:"transient_retries"`
+		TransientRetryAfter string `json:"transient_retry_after"`
+	}
+	if err := json.Unmarshal([]byte(stateJSON), &backoffState); err == nil {
+		if backoffState.TransientRetryAfter != "" {
+			retryAfter, err := time.Parse(time.RFC3339, backoffState.TransientRetryAfter)
+			if err == nil && time.Now().Before(retryAfter) {
+				a.logInfo("DEVELOP: issue #%d backoff active until %s, skipping", issueNumber, backoffState.TransientRetryAfter)
+				return stateJSON, nil
+			}
+		}
+	}
+
 	var developResult issueRunnerResult
 	var err error
 	stateJSON, developResult, err = a.phaseDevelop(ctx, root, env, repo, issueNumber, stateJSON)
@@ -275,6 +311,40 @@ func (a *App) runFromDevelop(ctx context.Context, root string, env []string, rep
 	stateJSON, err = a.ensurePRCreated(ctx, root, env, repo, issueNumber, stateJSON, metadata.Title)
 	if err != nil {
 		return "", err
+	}
+
+	if developResult.Status == "transient_error" {
+		retries := backoffState.TransientRetries + 1
+
+		// Escalate after max retries.
+		if retries >= maxTransientRetries {
+			a.logInfo("DEVELOP: issue #%d transient errors exhausted (%d), escalating to needs-review", issueNumber, retries)
+			return a.phaseDevelopNeedsReview(ctx, root, env, repo, issueNumber, stateJSON)
+		}
+
+		backoff := a.transientBackoffDuration(retries)
+		retryAfter := time.Now().Add(backoff).Format(time.RFC3339)
+		a.logInfo("DEVELOP: issue #%d transient error (attempt %d/%d), backing off %v", issueNumber, retries, maxTransientRetries, backoff)
+
+		stateJSON, err = updateStateJSON(stateJSON, func(state map[string]any) {
+			state["transient_retries"] = retries
+			state["transient_retry_after"] = retryAfter
+		})
+		if err != nil {
+			return "", err
+		}
+		return stateJSON, nil
+	}
+
+	// Non-transient result — reset backoff counters.
+	if backoffState.TransientRetries > 0 {
+		stateJSON, err = updateStateJSON(stateJSON, func(state map[string]any) {
+			state["transient_retries"] = 0
+			state["transient_retry_after"] = ""
+		})
+		if err != nil {
+			return "", err
+		}
 	}
 
 	if developResult.Status != "review_ready" {
