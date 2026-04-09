@@ -225,8 +225,19 @@ func (a *App) resumeFromState(ctx context.Context, root string, env []string, re
 	case "CRITERIA":
 		return a.runFromDevelop(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 	case "DEVELOP":
-		return a.runFromOpenPR(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+		return a.runFromVerify(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 	case "OPEN-PR":
+		return a.runFromOpenPR(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+	case "VERIFY":
+		var verifyState struct {
+			VerificationPassed bool `json:"verification_passed"`
+		}
+		if err := json.Unmarshal([]byte(stateJSON), &verifyState); err != nil {
+			return "", fmt.Errorf("failed to parse verify state for resume: %v", err)
+		}
+		if !verifyState.VerificationPassed {
+			return a.runFromDecide(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+		}
 		return a.runFromReview(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 	case "REVIEW":
 		return a.runFromDecide(ctx, root, env, repo, issueNumber, stateJSON, metadata)
@@ -387,7 +398,11 @@ func (a *App) runFromOpenPR(ctx context.Context, root string, env []string, repo
 	if err != nil {
 		return "", err
 	}
-	return a.runFromReview(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+	return a.runFromVerify(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+}
+
+func (a *App) runFromVerify(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, _ IssueMetadata) (string, error) {
+	return a.phaseVerify(ctx, root, env, repo, issueNumber, stateJSON)
 }
 
 func (a *App) runFromReview(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
@@ -395,7 +410,7 @@ func (a *App) runFromReview(ctx context.Context, root string, env []string, repo
 	return a.phaseReview(ctx, root, env, repo, issueNumber, stateJSON)
 }
 
-func (a *App) runFromDecide(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
+func (a *App) runFromDecide(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, _ IssueMetadata) (string, error) {
 	var err error
 	stateJSON, err = a.phaseDecide(ctx, root, env, issueNumber, stateJSON)
 	if err != nil {
@@ -417,15 +432,21 @@ func (a *App) runFromDecide(ctx context.Context, root string, env []string, repo
 		if err != nil {
 			return "", err
 		}
-		// Post audit comment so next tick can derive state from PR
-		if decideState.PRNumber != 0 {
-			_ = a.postAuditCommentWithState(ctx, root, env, repo, decideState.PRNumber, "decide", stateJSON,
-				"Decision: iterate. Next round of development will address review feedback.")
-		}
-		// Tick boundary: return. Next tick resumes from DECIDE state → runFromDevelop.
-		return stateJSON, nil
 	}
-	return a.phaseFinalize(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+	if decideState.PRNumber != 0 {
+		body := "Decision recorded."
+		switch decideState.Decision {
+		case "iterate":
+			body = "Decision: iterate. Next round of development will address review feedback."
+		case "finalize":
+			body = "Decision: finalize. Next tick will perform finalization."
+		case "finalize-needs-review":
+			body = "Decision: finalize-needs-review. Next tick will hand off for human review."
+		}
+		_ = a.postAuditCommentWithState(ctx, root, env, repo, decideState.PRNumber, "decide", stateJSON, body)
+	}
+	// Tick boundary: DECIDE never chains into FINALIZE in the same tick.
+	return stateJSON, nil
 }
 
 
@@ -472,4 +493,3 @@ func (a *App) issueTitle(ctx context.Context, env []string, repo string, issueNu
 	}
 	return payload.Title, nil
 }
-

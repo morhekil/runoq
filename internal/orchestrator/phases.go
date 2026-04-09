@@ -188,7 +188,24 @@ func (a *App) phaseInit(ctx context.Context, root string, env []string, repo str
 		return "", err
 	}
 
-	a.logInfo("INIT: branch=%s worktree=%s (PR deferred to OPEN-PR phase)", branch, worktree)
+	prResult, prErr := a.createDraftPR(ctx, repo, branch, issueNumber, title)
+	if prErr != nil {
+		return "", a.handleInitFailure(ctx, root, env, repo, issueNumber, fmt.Sprintf("draft PR creation failed: %v", prErr), branch, worktree, nil)
+	}
+	if prResult.Number == 0 {
+		return "", a.handleInitFailure(ctx, root, env, repo, issueNumber, "draft PR creation returned an invalid payload", branch, worktree, nil)
+	}
+
+	stateJSON, err = updateStateJSON(stateJSON, func(state map[string]any) {
+		state["pr_number"] = prResult.Number
+	})
+	if err != nil {
+		return "", err
+	}
+
+	_ = a.postAuditCommentWithState(ctx, root, env, repo, prResult.Number, "init", stateJSON, fmt.Sprintf("Initialized work on issue #%d. Branch: `%s`", issueNumber, branch))
+
+	a.logInfo("INIT: branch=%s worktree=%s pr=#%d", branch, worktree, prResult.Number)
 	return stateJSON, nil
 }
 
@@ -409,6 +426,64 @@ func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo 
 	return nextState, result, nil
 }
 
+func (a *App) phaseVerify(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string) (string, error) {
+	var state struct {
+		PRNumber             int      `json:"pr_number"`
+		Round                int      `json:"round"`
+		Branch               string   `json:"branch"`
+		BaselineHash         string   `json:"baseline_hash"`
+		HeadHash             string   `json:"head_hash"`
+		VerificationPassed   bool     `json:"verification_passed"`
+		VerificationFailures []string `json:"verification_failures"`
+	}
+	if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
+		return "", fmt.Errorf("failed to parse state for verify: %v", err)
+	}
+	if state.PRNumber == 0 {
+		return "", errors.New("DEVELOP state is missing pr_number")
+	}
+
+	a.logInfo("VERIFY: issue #%d round %d", issueNumber, max(state.Round, 1))
+
+	status := "PASS"
+	if !state.VerificationPassed {
+		status = "FAIL"
+	}
+
+	checklist := ""
+	if len(state.VerificationFailures) > 0 {
+		items := make([]string, 0, len(state.VerificationFailures))
+		for _, failure := range state.VerificationFailures {
+			items = append(items, "- "+failure)
+		}
+		checklist = strings.Join(items, "\n")
+	}
+
+	verifyState, err := updateStateJSON(stateJSON, func(s map[string]any) {
+		s["phase"] = "VERIFY"
+		if !state.VerificationPassed {
+			s["verdict"] = "FAIL"
+		}
+		if strings.TrimSpace(checklist) != "" {
+			s["review_checklist"] = checklist
+		}
+	})
+	if err != nil {
+		return "", err
+	}
+
+	verifyBody := fmt.Sprintf(
+		"## Verify - round %d\n\n| Field | Value |\n|-------|-------|\n| **Status** | %s |\n| **Commit range** | `%s..%s` |\n| **Branch** | `%s` |\n",
+		max(state.Round, 1), status, truncateHash(state.BaselineHash), truncateHash(state.HeadHash), state.Branch,
+	)
+	if strings.TrimSpace(checklist) != "" {
+		verifyBody += "\n### Failures\n" + checklist + "\n"
+	}
+	_ = a.postAuditCommentWithState(ctx, root, env, repo, state.PRNumber, "verify", verifyState, verifyBody, "verifier")
+
+	return verifyState, nil
+}
+
 func (a *App) phaseReview(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string) (string, error) {
 
 	var state struct {
@@ -555,8 +630,10 @@ func (a *App) phaseReview(ctx context.Context, root string, env []string, repo s
 
 func (a *App) phaseDecide(ctx context.Context, root string, env []string, issueNumber int, stateJSON string) (string, error) {
 	var state struct {
-		Verdict string `json:"verdict"`
-		Round   int    `json:"round"`
+		Phase              string `json:"phase"`
+		Verdict            string `json:"verdict"`
+		Round              int    `json:"round"`
+		VerificationPassed bool   `json:"verification_passed"`
 	}
 	if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
 		return "", fmt.Errorf("failed to parse state for decide: %v", err)
@@ -573,7 +650,12 @@ func (a *App) phaseDecide(ctx context.Context, root string, env []string, issueN
 
 	decision := "finalize-needs-review"
 	nextPhase := "FINALIZE"
-	if verdict == "PASS" {
+	if state.Phase == "VERIFY" && !state.VerificationPassed {
+		if state.Round < cfg.MaxRounds {
+			decision = "iterate"
+			nextPhase = "DEVELOP"
+		}
+	} else if verdict == "PASS" {
 		decision = "finalize"
 	} else if verdict == "ITERATE" && state.Round < cfg.MaxRounds {
 		decision = "iterate"
@@ -827,4 +909,3 @@ func (a *App) handleInitFailure(ctx context.Context, root string, env []string, 
 
 	return errors.New(reason)
 }
-

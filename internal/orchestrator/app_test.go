@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/saruman/runoq/internal/shell"
+	"github.com/saruman/runoq/internal/worktree"
 )
 
 type fakeExitError struct {
@@ -784,9 +785,9 @@ func TestRunFromDecideReturnsOnIterate(t *testing.T) {
 	}
 }
 
-// TestRunFromDecideFinalizesSameTickOnPass verifies that when the verdict is
-// PASS, runFromDecide runs phaseFinalize in the same tick (no boundary).
-func TestRunFromDecideFinalizesSameTickOnPass(t *testing.T) {
+// TestRunFromDecideReturnsBoundaryOnPass verifies that PASS still stops at the
+// DECIDE tick boundary. FINALIZE should happen in the next tick.
+func TestRunFromDecideReturnsBoundaryOnPass(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
 
@@ -816,19 +817,23 @@ func TestRunFromDecideFinalizesSameTickOnPass(t *testing.T) {
 		t.Fatalf("parse result: %v", err)
 	}
 
-	// Should have run finalize — terminal phase
-	if state.Phase != "DONE" {
-		t.Errorf("expected phase DONE (finalize ran in same tick), got %q", state.Phase)
+	// Should return at DECIDE, not continue to FINALIZE.
+	if state.Phase != "DECIDE" {
+		t.Errorf("expected phase DECIDE, got %q", state.Phase)
+	}
+	if !strings.Contains(result, `"decision":"finalize"`) {
+		t.Errorf("expected finalize decision, got %s", result)
 	}
 
-	// Should have called finalize-related commands
-	if !containsCall(calls, "pr ready") {
-		t.Errorf("expected pr ready (finalize), got calls: %v", calls)
+	for _, call := range calls {
+		if strings.Contains(call, "pr ready") || strings.Contains(call, "pr merge") {
+			t.Errorf("should not finalize on decide tick, got: %s", call)
+		}
 	}
 }
 
 // TestResumeFromStateBoundaries verifies that resumeFromState correctly advances
-// through tick boundaries: OPEN-PR→REVIEW, REVIEW→DECIDE, DECIDE(iterate)→DEVELOP.
+// through tick boundaries without chaining across them.
 func TestResumeFromStateBoundaries(t *testing.T) {
 	t.Parallel()
 
@@ -841,19 +846,27 @@ func TestResumeFromStateBoundaries(t *testing.T) {
 		wantCallAbsent string // substring that must NOT appear
 	}{
 		{
-			name:          "OPEN-PR resumes to REVIEW boundary",
+			name:          "OPEN-PR resumes to VERIFY boundary",
 			inputState:    `{"issue":42,"phase":"OPEN-PR","branch":"runoq/42-x","worktree":"/tmp/wt","pr_number":87,"round":1,"baseline_hash":"b","head_hash":"h","commit_range":"b..h","changed_files":["a.go"],"related_files":[],"spec_requirements":"## AC","verification_passed":true}`,
-			wantPhase:     "REVIEW",
+			wantPhase:     "VERIFY",
 			wantTerminal:  false,
-			wantCallMatch: "stream-json", // review agent invoked
+			wantCallMatch: "pr comment 87",
 			wantCallAbsent: "pr merge",   // no finalize
 		},
 		{
-			name:          "REVIEW resumes to DECIDE boundary (PASS → finalize → DONE)",
+			name:           "VERIFY failure resumes to DECIDE boundary",
+			inputState:     `{"issue":42,"phase":"VERIFY","branch":"runoq/42-x","worktree":"/tmp/wt","pr_number":87,"round":1,"verification_passed":false,"verification_failures":["tests failed"],"verdict":"FAIL","summary":"Verification failed"}`,
+			wantPhase:      "DECIDE",
+			wantTerminal:   false,
+			wantCallMatch:  "pr comment 87",
+			wantCallAbsent: "stream-json",
+		},
+		{
+			name:          "REVIEW resumes to DECIDE boundary on PASS",
 			inputState:    `{"issue":42,"phase":"REVIEW","branch":"runoq/42-x","worktree":"/tmp/wt","pr_number":87,"round":1,"verdict":"PASS","score":"42","review_checklist":"- OK","baseline_hash":"b","head_hash":"h","summary":"Good"}`,
-			wantPhase:     "DONE",
-			wantTerminal:  true,
-			wantCallMatch: "pr ready", // finalize ran
+			wantPhase:     "DECIDE",
+			wantTerminal:  false,
+			wantCallAbsent: "pr ready",
 		},
 	}
 
@@ -1366,21 +1379,24 @@ func TestRunIssueResumesFromDevelopState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunIssue failed: %v", err)
 	}
-	// Tick-per-phase: resuming from DEVELOP runs review then stops at REVIEW boundary
-	if !strings.Contains(stateJSON, `"phase":"REVIEW"`) {
-		t.Fatalf("expected REVIEW (tick boundary), got %s", stateJSON)
+	// Tick-per-phase: resuming from DEVELOP runs VERIFY and stops at VERIFY boundary.
+	if !strings.Contains(stateJSON, `"phase":"VERIFY"`) {
+		t.Fatalf("expected VERIFY (tick boundary), got %s", stateJSON)
 	}
 	// Must NOT have called phaseInit or finalize
 	for _, call := range calls {
 		if strings.Contains(call, "pr create") && strings.Contains(call, "--draft") {
 			t.Fatalf("should not have created PR on resume, got: %v", calls)
 		}
+		if strings.Contains(call, "stream-json") {
+			t.Fatalf("should not have called review on verify tick, got: %s", call)
+		}
 		if strings.Contains(call, "pr ready") || strings.Contains(call, "pr merge") {
-			t.Fatalf("should not have called finalize on review tick, got: %s", call)
+			t.Fatalf("should not have called finalize on verify tick, got: %s", call)
 		}
 	}
-	if !strings.Contains(stderr.String(), "REVIEW:") {
-		t.Fatalf("expected REVIEW phase log on resume, got %q", stderr.String())
+	if !strings.Contains(stderr.String(), "VERIFY:") {
+		t.Fatalf("expected VERIFY phase log on resume, got %q", stderr.String())
 	}
 }
 
@@ -1621,6 +1637,45 @@ func TestPhaseOpenPRCreatesPRAndSetsState(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "OPEN-PR: created draft PR #87") {
 		t.Fatalf("expected OPEN-PR log, got %q", stderr.String())
+	}
+}
+
+func TestPhaseInitCreatesPRAndSetsState(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var stderr bytes.Buffer
+	var calls []string
+
+	env := []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root, "RUNOQ_BASE_REF=main"}
+	if err := os.MkdirAll(root+"/config", 0o755); err != nil {
+		t.Fatalf("mkdir config: %v", err)
+	}
+	if err := os.WriteFile(root+"/config/runoq.json", []byte(`{"branchPrefix":"runoq/","worktreePrefix":"runoq-wt-"}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	app := New(nil, env, root, io.Discard, &stderr)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{calls: &calls, issueNumber: 42, issueTitle: "Implement queue"}))
+	wtApp := worktree.New(nil, env, root, io.Discard, io.Discard)
+	wtApp.SetCommandExecutor(app.execCommand)
+	app.SetWorktreeApp(wtApp)
+
+	result, err := app.phaseInit(ctx, root, app.env, "owner/repo", 42, false, "Implement queue")
+	if err != nil {
+		t.Fatalf("phaseInit: %v", err)
+	}
+	if !strings.Contains(result, `"phase":"INIT"`) {
+		t.Fatalf("expected INIT phase, got %s", result)
+	}
+	if !strings.Contains(result, `"pr_number":87`) {
+		t.Fatalf("expected pr_number 87, got %s", result)
+	}
+	if !containsCall(calls, "pr create") {
+		t.Fatalf("expected pr create call during init, got %v", calls)
+	}
+	if !containsCall(calls, "pr comment 87") {
+		t.Fatalf("expected init audit comment on PR, got %v", calls)
 	}
 }
 
