@@ -390,9 +390,12 @@ func TestDevelopmentLoop_LogsProgressToStderr(t *testing.T) {
 	if !strings.Contains(stderrOutput, "round 1") {
 		t.Errorf("stderr should mention round number, got:\n%s", stderrOutput)
 	}
-	// Should indicate agent is starting
-	if !strings.Contains(stderrOutput, "codex") {
-		t.Errorf("stderr should mention codex agent, got:\n%s", stderrOutput)
+	// Log lines must name the specific agent performing the action
+	if !strings.Contains(stderrOutput, "[codex]") {
+		t.Errorf("stderr should tag codex invocation with [codex], got:\n%s", stderrOutput)
+	}
+	if !strings.Contains(stderrOutput, "[verifier]") {
+		t.Errorf("stderr should tag verification with [verifier], got:\n%s", stderrOutput)
 	}
 }
 
