@@ -614,7 +614,7 @@ func (a *App) phaseFinalize(ctx context.Context, root string, env []string, repo
 
 	a.logInfo("FINALIZE: issue #%d decision=%s", issueNumber, defaultString(state.Decision, "finalize-needs-review"))
 
-	finalizeVerdict, issueStatus, finalizeReason, _ := finalizeDecision(state, cfg)
+	finalizeVerdict, issueStatus, finalizeReason := finalizeDecision(state, cfg)
 	a.logInfo(
 		"FINALIZE: decision table: auto_merge_enabled=%t finalize_verdict=%s finalize_reason=%s issue_status=%s",
 		cfg.AutoMergeEnabled,

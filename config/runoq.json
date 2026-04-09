@@ -28,10 +28,7 @@
     "outputPerMillion": 0
   },
   "autoMerge": {
-    "enabled": true,
-    "requireVerification": true,
-    "requireZeroCritical": true,
-    "maxComplexity": "medium"
+    "enabled": true
   },
   "reviewers": [
     "username"

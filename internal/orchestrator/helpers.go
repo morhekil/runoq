@@ -341,24 +341,24 @@ func finalizeDecision(state struct {
 	Round    int      `json:"round"`
 	Caveats  []string `json:"caveats"`
 	Summary  string   `json:"summary"`
-}, cfg OrchestratorConfig) (finalizeVerdict string, issueStatus string, finalizeReason string, complexityOK bool) {
+}, cfg OrchestratorConfig) (finalizeVerdict string, issueStatus string, finalizeReason string) {
 	if state.Verdict != "PASS" {
-		return "needs-review", "needs-review", fmt.Sprintf("Review verdict was %s (not PASS).", defaultString(state.Verdict, "FAIL")), false
+		return "needs-review", "needs-review", fmt.Sprintf("Review verdict was %s (not PASS).", defaultString(state.Verdict, "FAIL"))
 	}
 	if len(state.Caveats) > 0 {
-		return "needs-review", "needs-review", "Caveats present: " + strings.Join(state.Caveats, ", "), false
+		return "needs-review", "needs-review", "Caveats present: " + strings.Join(state.Caveats, ", ")
 	}
 	if !cfg.AutoMergeEnabled {
-		return "needs-review", "needs-review", "Auto-merge is disabled in config.", false
+		return "needs-review", "needs-review", "Auto-merge is disabled in config."
 	}
 	if cfg.AutoMergeMinScore > 0 {
 		score := parseScoreNumber(state.Score)
 		if score < cfg.AutoMergeMinScore {
-			return "needs-review", "needs-review", fmt.Sprintf("Score %d below auto-merge threshold %d.", score, cfg.AutoMergeMinScore), false
+			return "needs-review", "needs-review", fmt.Sprintf("Score %d below auto-merge threshold %d.", score, cfg.AutoMergeMinScore)
 		}
 	}
 
-	return "auto-merge", "done", "", true
+	return "auto-merge", "done", ""
 }
 
 func defaultString(value string, fallback string) string {

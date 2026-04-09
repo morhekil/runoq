@@ -193,7 +193,7 @@ sequenceDiagram
   IssRun-->>Orch: review_ready payload
   Orch->>State: save REVIEW, DECIDE, FINALIZE breadcrumbs
   Orch->>PR: comment orchestrator result and update summary
-  alt PASS and complexity at or below maxComplexity and no caveats
+  alt PASS and no caveats and auto-merge enabled
     Orch->>PR: finalize auto-merge
     PR->>GH: ready PR and enable auto-merge
     Orch->>Queue: set-status done
@@ -212,12 +212,12 @@ sequenceDiagram
 
 | Condition | Outcome |
 | --- | --- |
-| Verification passes, verdict is `PASS`, complexity is at or below `maxComplexity` (currently `medium`), and caveats are empty | Auto-merge PR, mark issue `done`, save terminal state, remove worktree |
+| Verification passes, verdict is `PASS`, caveats are empty, and `autoMerge.enabled` is `true` | Auto-merge PR, mark issue `done`, save terminal state, remove worktree |
 | Verification fails | Post verification failure event, mark issue `needs-human-review`, preserve state |
 | Criteria tamper check fails | Feed `criteria tampered: <files>` back as verification failure, iterate or escalate |
 | Verdict is not `PASS` | Mark `needs-human-review` |
 | Verdict is `PASS` but caveats are present | Mark `needs-human-review` |
-| Verdict is `PASS` but issue complexity exceeds `maxComplexity` (currently `medium`) | Mark `needs-human-review` |
+| `autoMerge.enabled` is `false` | Mark `needs-human-review` |
 
 ## Failure And Escalation Path
 

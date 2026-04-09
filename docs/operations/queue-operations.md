@@ -142,7 +142,7 @@ What happens:
 - local state becomes terminal with `phase: "DONE"`
 - sibling worktree is removed
 
-This happens when the review verdict is `PASS`, caveats are empty, and the issue complexity is at or below the auto-merge threshold (`maxComplexity`, currently `medium`).
+This happens when the review verdict is `PASS`, caveats are empty, and `autoMerge.enabled` is `true`.
 
 ### Human-review escalation
 

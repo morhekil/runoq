@@ -965,7 +965,7 @@ func TestFinalizeDecisionScoreBelowThresholdNeedsReview(t *testing.T) {
 	cfg := defaultOrchestratorConfig()
 	cfg.AutoMergeMinScore = 35
 
-	verdict, issueStatus, reason, _ := finalizeDecision(state, cfg)
+	verdict, issueStatus, reason := finalizeDecision(state, cfg)
 	if verdict != "needs-review" {
 		t.Fatalf("expected needs-review for low score, got %q", verdict)
 	}
@@ -997,7 +997,7 @@ func TestFinalizeDecisionScoreAboveThresholdAutoMerges(t *testing.T) {
 	cfg := defaultOrchestratorConfig()
 	cfg.AutoMergeMinScore = 35
 
-	verdict, _, _, _ := finalizeDecision(state, cfg)
+	verdict, _, _ := finalizeDecision(state, cfg)
 	if verdict != "auto-merge" {
 		t.Fatalf("expected auto-merge for score above threshold, got %q", verdict)
 	}
@@ -1022,7 +1022,7 @@ func TestFinalizeDecisionZeroThresholdIgnoresScore(t *testing.T) {
 
 	cfg := defaultOrchestratorConfig()
 	// AutoMergeMinScore defaults to 0, which means no threshold
-	verdict, _, _, _ := finalizeDecision(state, cfg)
+	verdict, _, _ := finalizeDecision(state, cfg)
 	if verdict != "auto-merge" {
 		t.Fatalf("expected auto-merge when threshold is 0, got %q", verdict)
 	}

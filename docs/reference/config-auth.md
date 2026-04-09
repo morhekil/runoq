@@ -34,10 +34,7 @@ The default runtime config lives at [`config/runoq.json`](../../config/runoq.jso
 | `maxRounds` | Maximum development/review loop rounds | `run.sh`, agent payloads |
 | `maxTokenBudget` | Total token budget passed into orchestration | `run.sh`, agents |
 | `tokenCost.*` | Per-million token pricing for reports | `report.sh` |
-| `autoMerge.enabled` | Auto-merge policy setting | currently informational; finalization logic is enforced in `run.sh` |
-| `autoMerge.requireVerification` | Auto-merge gating expectation | currently informational; verification is always run in `run.sh` |
-| `autoMerge.requireZeroCritical` | Auto-merge review expectation | currently informational; not independently enforced in shell code |
-| `autoMerge.maxComplexity` | Complexity threshold for auto-merge (`low`, `medium`, or `high`) | `orchestrator.sh` reads this value and applies it in the FINALIZE decision table |
+| `autoMerge.enabled` | Whether auto-merge is allowed for PASS verdicts | orchestrator FINALIZE decision table |
 | `reviewers[]` | First reviewer/assignee for needs-review finalization | `run.sh` |
 | `branchPrefix` | Prefix for per-issue branches | `common.sh`, `worktree.sh`, `dispatch-safety.sh` |
 | `worktreePrefix` | Prefix for sibling worktree directories | `common.sh`, `worktree.sh` |
@@ -51,7 +48,6 @@ The default runtime config lives at [`config/runoq.json`](../../config/runoq.jso
 The `autoMerge.*` block is enforced by the orchestrator's FINALIZE decision table. Today:
 
 - verification is always required before successful finalization
-- issue complexity must be at or below `autoMerge.maxComplexity` for auto-merge (default: `medium`)
 - caveats or non-`PASS` verdicts force `needs-human-review`
 - `autoMerge.enabled` must be `true` for auto-merge to activate
 
