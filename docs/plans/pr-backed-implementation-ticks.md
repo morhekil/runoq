@@ -12,6 +12,7 @@ Completed so far:
 - [x] Resume tests updated for `DEVELOP -> VERIFY`, `VERIFY(fail) -> DECIDE`, and `REVIEW(pass) -> DECIDE`
 - [x] `VERIFY` persists verifier inputs in PR state and re-runs deterministic verification from a fresh rehydrated branch worktree
 - [x] `DEVELOP`, `VERIFY`, and `REVIEW` rehydrate disposable worktrees from the pushed branch instead of trusting prior local paths
+- [x] `RESPOND` preempts every PR-backed phase when the PR has unprocessed non-audit comments
 - [x] Orchestrator tests and full `go test ./...` are green after the boundary refactor
 
 Still to do:
@@ -20,7 +21,6 @@ Still to do:
 - [ ] Remove `OPEN-PR` as a meaningful runtime phase and treat it as compatibility-only until old state/comments are gone
 - [ ] Remove the issue-runner as a top-level orchestration concept and keep only reusable helpers
 - [ ] Change phase comments from "next-state carriers" toward phase-result records and centralize routing logic fully in the orchestrator
-- [ ] Make `RESPOND` a preemptive interrupt before every PR-backed phase
 - [ ] Update smoke specs and fixture smoke coverage to the new tick cadence
 
 ## Purpose
@@ -53,7 +53,7 @@ Steady-state flow:
 
 Interrupt flow:
 
-- before any PR-backed phase, check for unprocessed human comments
+- before any PR-backed phase, check for unprocessed PR comments
 - if comments exist, run `RESPOND` only and stop
 
 ## Tick Responsibilities
@@ -149,7 +149,7 @@ Local workspace state is disposable. Each tick may create a worktree, use it, th
 - [x] Add tests for `DECIDE` tick boundary on `PASS`
 - [x] Add tests for `VERIFY(fail) -> DECIDE`
 - [x] Route resumed `DEVELOP` into `VERIFY`
-- [ ] Route pending human comments into `RESPOND` before every PR-backed phase
+- [x] Route pending PR comments into `RESPOND` before every PR-backed phase
 - [ ] Remove legacy routing assumptions that still treat `OPEN-PR` as a primary phase
 
 ### B. Verification Extraction

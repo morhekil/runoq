@@ -1419,6 +1419,93 @@ func TestRunIssueResumesFromDevelopState(t *testing.T) {
 	}
 }
 
+func TestResumeFromStatePreemptsWithRespondBeforePRBackedPhases(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		inputState     string
+		wantCallAbsent string
+	}{
+		{
+			name:           "INIT preempts before DEVELOP",
+			inputState:     `{"issue":42,"phase":"INIT","branch":"runoq/42-x","worktree":"/tmp/wt","pr_number":87,"round":0}`,
+			wantCallAbsent: "stream-json",
+		},
+		{
+			name:           "DEVELOP preempts before VERIFY",
+			inputState:     `{"issue":42,"phase":"DEVELOP","branch":"runoq/42-x","worktree":"/tmp/wt","pr_number":87,"round":1,"baseline_hash":"b","head_hash":"h","verification_passed":true,"verification_failures":[]}`,
+			wantCallAbsent: "pr comment 87 --repo owner/repo --body ## Verify",
+		},
+		{
+			name:           "VERIFY preempts before REVIEW",
+			inputState:     `{"issue":42,"phase":"VERIFY","branch":"runoq/42-x","worktree":"/tmp/wt","pr_number":87,"round":1,"baseline_hash":"b","head_hash":"h","verification_passed":true,"verification_failures":[],"changed_files":["a.go"],"related_files":["a.go"],"spec_requirements":"## AC"}`,
+			wantCallAbsent: "stream-json",
+		},
+		{
+			name:           "REVIEW preempts before DECIDE",
+			inputState:     `{"issue":42,"phase":"REVIEW","branch":"runoq/42-x","worktree":"/tmp/wt","pr_number":87,"round":1,"verdict":"PASS","score":"42","review_checklist":"- OK","baseline_hash":"b","head_hash":"h","summary":"Good"}`,
+			wantCallAbsent: "pr comment 87 --repo owner/repo --body Decision recorded.",
+		},
+		{
+			name:           "DECIDE preempts before FINALIZE",
+			inputState:     `{"issue":42,"phase":"DECIDE","branch":"runoq/42-x","worktree":"/tmp/wt","pr_number":87,"round":1,"decision":"finalize","next_phase":"FINALIZE","verdict":"PASS","score":"42","summary":"Good"}`,
+			wantCallAbsent: "pr merge 87 --repo owner/repo --auto --squash",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := t.Context()
+			root := t.TempDir()
+
+			var calls []string
+
+			app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, io.Discard)
+			app.SetConfig(defaultOrchestratorConfig())
+			app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+				calls:       &calls,
+				issueNumber: 42,
+				issueTitle:  "Implement queue",
+				ghHandler: func(ghArgs string, req shell.CommandRequest) (bool, error) {
+					if strings.Contains(ghArgs, "api") && strings.Contains(ghArgs, "issues/87/comments") && !strings.Contains(ghArgs, "reactions") {
+						_, _ = io.WriteString(req.Stdout, `[
+							{"id": 300, "body": "<!-- runoq:agent:diff-reviewer -->\nPlease re-check edge cases", "user": {"login": "runoq[bot]"}, "created_at": "2026-01-01T00:00:00Z", "reactions": {"+1": 0}}
+						]`)
+						return true, nil
+					}
+					if strings.Contains(ghArgs, "api") && strings.Contains(ghArgs, "reactions") && strings.Contains(ghArgs, "+1") {
+						return true, nil
+					}
+					return false, nil
+				},
+			}))
+
+			meta := IssueMetadata{Number: 42, Title: "Implement queue", EstimatedComplexity: "low", Type: "task"}
+			result, err := app.resumeFromState(ctx, root, app.env, "owner/repo", 42, tt.inputState, meta)
+			if err != nil {
+				t.Fatalf("resumeFromState: %v", err)
+			}
+			if !strings.Contains(result, `"phase":"RESPOND"`) {
+				t.Fatalf("expected RESPOND phase, got %s", result)
+			}
+			if !strings.Contains(result, `"responded_comments":1`) {
+				t.Fatalf("expected responded_comments=1, got %s", result)
+			}
+			if !containsCall(calls, "pr comment 87") {
+				t.Fatalf("expected acknowledge comment on PR, got %v", calls)
+			}
+			for _, call := range calls {
+				if strings.Contains(call, tt.wantCallAbsent) {
+					t.Fatalf("expected comment preemption before downstream phase, got calls %v", calls)
+				}
+			}
+		})
+	}
+}
+
 func commandLine(req shell.CommandRequest) string {
 	return req.Name + " " + strings.Join(req.Args, " ")
 }
@@ -1552,6 +1639,9 @@ func buildMockExecutor(t *testing.T, mc mockConfig) shell.CommandExecutor {
 				_, _ = io.WriteString(req.Stdout, `[]`)
 				return nil
 			case strings.Contains(ghArgs, "pr list"):
+				_, _ = io.WriteString(req.Stdout, `[]`)
+				return nil
+			case strings.Contains(ghArgs, "api") && strings.Contains(ghArgs, "/issues/") && strings.Contains(ghArgs, "/comments"):
 				_, _ = io.WriteString(req.Stdout, `[]`)
 				return nil
 			case strings.Contains(ghArgs, "api") && strings.Contains(ghArgs, "sub_issues"):

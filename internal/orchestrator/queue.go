@@ -208,8 +208,9 @@ func (a *App) runIssueWithEnv(ctx context.Context, root string, env []string, re
 
 func (a *App) resumeFromState(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
 	var state struct {
-		Phase    string `json:"phase"`
-		PRNumber int    `json:"pr_number"`
+		Phase       string `json:"phase"`
+		PRNumber    int    `json:"pr_number"`
+		ResumePhase string `json:"resume_phase"`
 	}
 	if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
 		return "", fmt.Errorf("failed to parse derived state: %v", err)
@@ -220,6 +221,22 @@ func (a *App) resumeFromState(ctx context.Context, root string, env []string, re
 	case "DONE", "FINALIZE":
 		a.logInfo("RESUME: issue #%d already at terminal phase %s", issueNumber, state.Phase)
 		return stateJSON, nil
+	case "RESPOND":
+		switch state.ResumePhase {
+		case "DEVELOP":
+			return a.runFromDevelop(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+		case "VERIFY":
+			return a.runFromVerify(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+		case "REVIEW":
+			return a.runFromReview(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+		case "DECIDE":
+			return a.runFromDecide(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+		case "FINALIZE":
+			return a.runFromFinalize(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+		default:
+			a.logInfo("RESUME: RESPOND state missing resume target, continuing from criteria")
+			return a.runFromCriteria(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+		}
 	case "INIT":
 		return a.runFromCriteria(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 	case "CRITERIA":
@@ -259,7 +276,7 @@ func (a *App) resumeFromState(ctx context.Context, root string, env []string, re
 			}
 			return a.runFromDevelop(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 		}
-		return a.phaseFinalize(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+		return a.runFromFinalize(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 	default:
 		a.logInfo("RESUME: unknown phase %q, starting from criteria", state.Phase)
 		return a.runFromCriteria(ctx, root, env, repo, issueNumber, stateJSON, metadata)
@@ -295,7 +312,47 @@ func (a *App) transientBackoffDuration(retries int) time.Duration {
 	return transientBackoffSchedule[retries]
 }
 
+func (a *App) preemptWithRespond(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, nextPhase string) (string, bool, error) {
+	var state struct {
+		PRNumber int `json:"pr_number"`
+	}
+	if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
+		return "", false, fmt.Errorf("failed to parse state for respond preemption: %v", err)
+	}
+	if state.PRNumber == 0 {
+		return stateJSON, false, nil
+	}
+
+	comments, err := a.findUnprocessedComments(ctx, repo, "pr", state.PRNumber)
+	if err != nil {
+		return "", false, err
+	}
+	if len(comments) == 0 {
+		return stateJSON, false, nil
+	}
+
+	a.logInfo("%s: preempting with RESPOND for PR #%d (%d unprocessed comment(s))", nextPhase, state.PRNumber, len(comments))
+	respondState, err := updateStateJSON(stateJSON, func(s map[string]any) {
+		s["resume_phase"] = nextPhase
+	})
+	if err != nil {
+		return "", false, err
+	}
+
+	respondState, err = a.phaseRespond(ctx, root, env, repo, issueNumber, respondState)
+	if err != nil {
+		return "", false, err
+	}
+	return respondState, true, nil
+}
+
 func (a *App) runFromDevelop(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
+	if respondState, interrupted, err := a.preemptWithRespond(ctx, root, env, repo, issueNumber, stateJSON, "DEVELOP"); err != nil {
+		return "", err
+	} else if interrupted {
+		return respondState, nil
+	}
+
 	// Check transient backoff gate.
 	var backoffState struct {
 		TransientRetries    int    `json:"transient_retries"`
@@ -402,15 +459,31 @@ func (a *App) runFromOpenPR(ctx context.Context, root string, env []string, repo
 }
 
 func (a *App) runFromVerify(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, _ IssueMetadata) (string, error) {
+	if respondState, interrupted, err := a.preemptWithRespond(ctx, root, env, repo, issueNumber, stateJSON, "VERIFY"); err != nil {
+		return "", err
+	} else if interrupted {
+		return respondState, nil
+	}
 	return a.phaseVerify(ctx, root, env, repo, issueNumber, stateJSON)
 }
 
 func (a *App) runFromReview(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
+	if respondState, interrupted, err := a.preemptWithRespond(ctx, root, env, repo, issueNumber, stateJSON, "REVIEW"); err != nil {
+		return "", err
+	} else if interrupted {
+		return respondState, nil
+	}
 	// Tick boundary: run review only, return. Next tick will run decide.
 	return a.phaseReview(ctx, root, env, repo, issueNumber, stateJSON)
 }
 
 func (a *App) runFromDecide(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, _ IssueMetadata) (string, error) {
+	if respondState, interrupted, err := a.preemptWithRespond(ctx, root, env, repo, issueNumber, stateJSON, "DECIDE"); err != nil {
+		return "", err
+	} else if interrupted {
+		return respondState, nil
+	}
+
 	var err error
 	stateJSON, err = a.phaseDecide(ctx, root, env, issueNumber, stateJSON)
 	if err != nil {
@@ -449,6 +522,14 @@ func (a *App) runFromDecide(ctx context.Context, root string, env []string, repo
 	return stateJSON, nil
 }
 
+func (a *App) runFromFinalize(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
+	if respondState, interrupted, err := a.preemptWithRespond(ctx, root, env, repo, issueNumber, stateJSON, "FINALIZE"); err != nil {
+		return "", err
+	} else if interrupted {
+		return respondState, nil
+	}
+	return a.phaseFinalize(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+}
 
 func (a *App) getIssueMetadata(ctx context.Context, root string, env []string, repo string, issueNumber int) (IssueMetadata, error) {
 	issueOut, err := a.ghOutput(ctx, env, "issue", "view", strconv.Itoa(issueNumber), "--repo", repo, "--json", "number,title,body,labels,url")
@@ -475,7 +556,6 @@ func (a *App) getIssueMetadata(ctx context.Context, root string, env []string, r
 
 	return metadataFromIssueView(issue), nil
 }
-
 
 func (a *App) issueTitle(ctx context.Context, env []string, repo string, issueNumber int) (string, error) {
 	out, err := a.ghOutput(ctx, env, "issue", "view", strconv.Itoa(issueNumber), "--repo", repo, "--json", "title")
