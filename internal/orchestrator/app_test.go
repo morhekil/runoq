@@ -823,6 +823,80 @@ func TestRunFromDecideFinalizesSameTickOnPass(t *testing.T) {
 	}
 }
 
+// TestResumeFromStateBoundaries verifies that resumeFromState correctly advances
+// through tick boundaries: OPEN-PR→REVIEW, REVIEW→DECIDE, DECIDE(iterate)→DEVELOP.
+func TestResumeFromStateBoundaries(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		inputState    string
+		wantPhase     string
+		wantTerminal  bool
+		wantCallMatch string // substring that must appear in gh calls
+		wantCallAbsent string // substring that must NOT appear
+	}{
+		{
+			name:          "OPEN-PR resumes to REVIEW boundary",
+			inputState:    `{"issue":42,"phase":"OPEN-PR","branch":"runoq/42-x","worktree":"/tmp/wt","pr_number":87,"round":1,"baseline_hash":"b","head_hash":"h","commit_range":"b..h","changed_files":["a.go"],"related_files":[],"spec_requirements":"## AC","verification_passed":true}`,
+			wantPhase:     "REVIEW",
+			wantTerminal:  false,
+			wantCallMatch: "stream-json", // review agent invoked
+			wantCallAbsent: "pr merge",   // no finalize
+		},
+		{
+			name:          "REVIEW resumes to DECIDE boundary (PASS → finalize → DONE)",
+			inputState:    `{"issue":42,"phase":"REVIEW","branch":"runoq/42-x","worktree":"/tmp/wt","pr_number":87,"round":1,"verdict":"PASS","score":"42","review_checklist":"- OK","baseline_hash":"b","head_hash":"h","summary":"Good"}`,
+			wantPhase:     "DONE",
+			wantTerminal:  true,
+			wantCallMatch: "pr ready", // finalize ran
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			var calls []string
+
+			app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, io.Discard)
+			app.SetConfig(defaultOrchestratorConfig())
+			app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+				calls:       &calls,
+				issueNumber: 42,
+				issueTitle:  "Test",
+			}))
+
+			meta := IssueMetadata{Number: 42, Title: "Test", Type: "task"}
+			result, err := app.resumeFromState(t.Context(), root, app.env, "owner/repo", 42, tt.inputState, meta)
+			if err != nil {
+				t.Fatalf("resumeFromState: %v", err)
+			}
+
+			var state struct{ Phase string `json:"phase"` }
+			if err := json.Unmarshal([]byte(result), &state); err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if state.Phase != tt.wantPhase {
+				t.Errorf("phase = %q, want %q", state.Phase, tt.wantPhase)
+			}
+			if tt.wantTerminal != isTerminalPhase(result) {
+				t.Errorf("isTerminal = %v, want %v", isTerminalPhase(result), tt.wantTerminal)
+			}
+			if tt.wantCallMatch != "" && !containsCall(calls, tt.wantCallMatch) {
+				t.Errorf("expected call containing %q, got: %v", tt.wantCallMatch, calls)
+			}
+			if tt.wantCallAbsent != "" {
+				for _, c := range calls {
+					if strings.Contains(c, tt.wantCallAbsent) {
+						t.Errorf("unexpected call containing %q: %s", tt.wantCallAbsent, c)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestPhaseDecideIteratesSetsNextPhaseDevelop(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
