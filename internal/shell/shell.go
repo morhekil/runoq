@@ -96,7 +96,7 @@ func EnvSet(env []string, key string, value string) []string {
 
 // Fail writes "runoq: {message}\n" to stderr and returns exit code 1.
 func Fail(stderr io.Writer, message string) int {
-	fmt.Fprintf(stderr, "runoq: %s\n", message)
+	_, _ = fmt.Fprintf(stderr, "runoq: %s\n", message)
 	return 1
 }
 

@@ -2,14 +2,17 @@ package comments
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/saruman/runoq/agents"
 )
 
 type fakeGH struct {
-	issueView string
-	calls     []string
+	issueView   string
+	calls       []string
+	reactionErr error
+	labelAddErr error
 }
 
 func (f *fakeGH) IssueView(_ context.Context, repo string, number int, fields string) (string, error) {
@@ -29,12 +32,12 @@ func (f *fakeGH) IssueEditBody(_ context.Context, repo string, number int, body 
 
 func (f *fakeGH) IssueAddLabel(_ context.Context, repo string, number int, label string) error {
 	f.calls = append(f.calls, "issue-add-label:"+label)
-	return nil
+	return f.labelAddErr
 }
 
 func (f *fakeGH) AddReaction(_ context.Context, commentID string, content string) error {
 	f.calls = append(f.calls, "reaction:"+content+":"+commentID)
-	return nil
+	return f.reactionErr
 }
 
 type fakeInvoker struct {
@@ -76,13 +79,25 @@ func TestHandleCommentsQuestion(t *testing.T) {
 	hasEyes := false
 	hasThumbsUp := false
 	for _, c := range gh.calls {
-		if c == "issue-comment" { hasComment = true }
-		if c == "reaction:EYES:IC1" { hasEyes = true }
-		if c == "reaction:THUMBS_UP:IC1" { hasThumbsUp = true }
+		if c == "issue-comment" {
+			hasComment = true
+		}
+		if c == "reaction:EYES:IC1" {
+			hasEyes = true
+		}
+		if c == "reaction:THUMBS_UP:IC1" {
+			hasThumbsUp = true
+		}
 	}
-	if !hasComment { t.Error("expected issue comment") }
-	if !hasEyes { t.Error("expected eyes reaction") }
-	if !hasThumbsUp { t.Error("expected thumbs_up reaction") }
+	if !hasComment {
+		t.Error("expected issue comment")
+	}
+	if !hasEyes {
+		t.Error("expected eyes reaction")
+	}
+	if !hasThumbsUp {
+		t.Error("expected thumbs_up reaction")
+	}
 }
 
 func TestHandleCommentsApprove(t *testing.T) {
@@ -112,9 +127,13 @@ func TestHandleCommentsApprove(t *testing.T) {
 
 	hasLabel := false
 	for _, c := range gh.calls {
-		if c == "issue-add-label:runoq:plan-approved" { hasLabel = true }
+		if c == "issue-add-label:runoq:plan-approved" {
+			hasLabel = true
+		}
 	}
-	if !hasLabel { t.Error("expected plan-approved label to be added") }
+	if !hasLabel {
+		t.Error("expected plan-approved label to be added")
+	}
 }
 
 func TestHandleCommentsClaudeBinPassedToInvoker(t *testing.T) {
@@ -173,5 +192,28 @@ func TestHandleCommentsNoUnrespondedSkips(t *testing.T) {
 		if c == "issue-comment" {
 			t.Error("should not post comment when all are responded")
 		}
+	}
+}
+
+func TestHandleCommentsReturnsReactionError(t *testing.T) {
+	t.Parallel()
+
+	gh := &fakeGH{
+		issueView: `{"number":2,"title":"Review","body":"proposal body","comments":[
+			{"author":{"login":"human"},"body":"Why this order?","id":"IC1","reactionGroups":[]}
+		]}`,
+		reactionErr: errors.New("boom"),
+	}
+
+	err := HandleComments(t.Context(), HandleCommentsConfig{
+		Repo:        "owner/repo",
+		IssueNumber: 2,
+		PlanFile:    "docs/plan.md",
+		RunoqRoot:   t.TempDir(),
+		GH:          gh,
+		Invoker:     &fakeInvoker{},
+	})
+	if err == nil {
+		t.Fatal("expected reaction error")
 	}
 }

@@ -238,8 +238,16 @@ type dispatcher struct {
 	cfg DispatchConfig
 }
 
-func (d *dispatcher) step(msg string)        { fmt.Fprintf(d.cfg.Stderr, "\033[1;36m▸ %s\033[0m\n", msg) }
-func (d *dispatcher) info(msg string)        { fmt.Fprintf(d.cfg.Stderr, "\033[2m  %s\033[0m\n", msg) }
-func (d *dispatcher) detail(key, val string) { fmt.Fprintf(d.cfg.Stderr, "\033[2m  %s:\033[0m %s\n", key, val) }
-func (d *dispatcher) success(msg string)     { fmt.Fprintf(d.cfg.Stderr, "\033[1;32m✔ %s\033[0m\n", msg) }
-func (d *dispatcher) warn(msg string)        { fmt.Fprintf(d.cfg.Stderr, "\033[1;33m⚠ %s\033[0m\n", msg) }
+func (d *dispatcher) step(msg string) {
+	_, _ = fmt.Fprintf(d.cfg.Stderr, "\033[1;36m▸ %s\033[0m\n", msg)
+}
+func (d *dispatcher) info(msg string) { _, _ = fmt.Fprintf(d.cfg.Stderr, "\033[2m  %s\033[0m\n", msg) }
+func (d *dispatcher) detail(key, val string) {
+	_, _ = fmt.Fprintf(d.cfg.Stderr, "\033[2m  %s:\033[0m %s\n", key, val)
+}
+func (d *dispatcher) success(msg string) {
+	_, _ = fmt.Fprintf(d.cfg.Stderr, "\033[1;32m✔ %s\033[0m\n", msg)
+}
+func (d *dispatcher) warn(msg string) {
+	_, _ = fmt.Fprintf(d.cfg.Stderr, "\033[1;33m⚠ %s\033[0m\n", msg)
+}

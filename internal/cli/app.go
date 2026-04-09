@@ -18,9 +18,9 @@ import (
 	"github.com/saruman/runoq/internal/claude"
 	"github.com/saruman/runoq/internal/config"
 	"github.com/saruman/runoq/internal/gitops"
-	"github.com/saruman/runoq/internal/runlog"
 	"github.com/saruman/runoq/internal/orchestrator"
 	"github.com/saruman/runoq/internal/report"
+	"github.com/saruman/runoq/internal/runlog"
 	"github.com/saruman/runoq/internal/setup"
 	"github.com/saruman/runoq/internal/shell"
 )
@@ -195,7 +195,9 @@ func (a *App) Run(ctx context.Context) int {
 		}
 		return a.runSetup(ctx, targetEnv, runoqRoot, args)
 	case "plan":
-		fmt.Fprintln(a.stderr, "runoq plan is removed; use `runoq tick` for the iterative planning workflow.")
+		if _, err := fmt.Fprintln(a.stderr, "runoq plan is removed; use `runoq tick` for the iterative planning workflow."); err != nil {
+			return 1
+		}
 		return 1
 	case "tick":
 		targetEnv, code := a.prepareTargetContext(ctx, runoqRoot, env)
@@ -299,7 +301,7 @@ func (a *App) prepareTargetContext(ctx context.Context, runoqRoot string, env []
 	if logErr == nil {
 		a.stderr = logWriter
 		a.logCloser = logWriter
-		fmt.Fprintf(a.stderr, "  log: %s\n", logWriter.Path())
+		_, _ = fmt.Fprintf(a.stderr, "  log: %s\n", logWriter.Path())
 	}
 
 	repo, err := a.resolveRepo(ctx, env, targetRoot)
@@ -602,21 +604,21 @@ func (a *App) runTickWithCapture(ctx context.Context, env []string, runoqRoot st
 
 	code := orchestrator.RunTick(ctx, orchestrator.TickConfig{
 		Repo:               repo,
-		PlanFile:            planFile,
-		RunoqRoot:           runoqRoot,
-		PlanApprovedLabel:   a.labels.PlanApproved,
-		ReadyLabel:          a.labels.Ready,
-		InProgressLabel:     a.labels.InProgress,
-		DoneLabel:           a.labels.Done,
-		NeedsReviewLabel:    a.labels.NeedsReview,
-		BlockedLabel:        a.labels.Blocked,
-		BranchPrefix:        a.branchPrefix,
-		WorktreePrefix:      a.worktreePrefix,
-		LastCompletedIssue:  lastCompleted,
-		Env:                 env,
-		ExecCommand:         a.execCommand,
-		Stdout:              teeStdout,
-		Stderr:              a.stderr,
+		PlanFile:           planFile,
+		RunoqRoot:          runoqRoot,
+		PlanApprovedLabel:  a.labels.PlanApproved,
+		ReadyLabel:         a.labels.Ready,
+		InProgressLabel:    a.labels.InProgress,
+		DoneLabel:          a.labels.Done,
+		NeedsReviewLabel:   a.labels.NeedsReview,
+		BlockedLabel:       a.labels.Blocked,
+		BranchPrefix:       a.branchPrefix,
+		WorktreePrefix:     a.worktreePrefix,
+		LastCompletedIssue: lastCompleted,
+		Env:                env,
+		ExecCommand:        a.execCommand,
+		Stdout:             teeStdout,
+		Stderr:             a.stderr,
 	})
 
 	completed := parseCompletedIssue(buf.String())
@@ -696,10 +698,10 @@ func (a *App) runLoop(ctx context.Context, env []string, runoqRoot string, args 
 		case 2:
 			waitCycles++
 			if maxWaitCycles > 0 && waitCycles >= maxWaitCycles {
-				fmt.Fprintf(a.stderr, "stopping after %d consecutive wait cycles\n", waitCycles)
+				_, _ = fmt.Fprintf(a.stderr, "stopping after %d consecutive wait cycles\n", waitCycles)
 				return 0
 			}
-			fmt.Fprintf(a.stderr, "waiting %ds before next tick\n", backoff)
+			_, _ = fmt.Fprintf(a.stderr, "waiting %ds before next tick\n", backoff)
 			select {
 			case <-time.After(time.Duration(backoff) * time.Second):
 			case <-loopCtx.Done():

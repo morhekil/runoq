@@ -13,6 +13,20 @@ import (
 	"github.com/saruman/runoq/internal/shell"
 )
 
+func mustMkdirAll(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", path, err)
+	}
+}
+
+func mustWriteFile(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
 func TestListParsesMetadataVariants(t *testing.T) {
 	t.Parallel()
 
@@ -300,8 +314,8 @@ func TestCreateSetsIssueTypeAndLinksParentEpic(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	os.MkdirAll(filepath.Join(tmpDir, ".runoq"), 0o755)
-	os.WriteFile(filepath.Join(tmpDir, ".runoq", "issue-types.json"), []byte(`{"task":"IT_task","epic":"IT_epic"}`), 0o644)
+	mustMkdirAll(t, filepath.Join(tmpDir, ".runoq"))
+	mustWriteFile(t, filepath.Join(tmpDir, ".runoq", "issue-types.json"), []byte(`{"task":"IT_task","epic":"IT_epic"}`))
 
 	app := newTestApp(t, []string{
 		"create", "owner/repo", "Implement queue", "## Acceptance Criteria\n\n- [ ] Works.",
@@ -391,8 +405,8 @@ func TestCreatePlanningAddsLabel(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	os.MkdirAll(filepath.Join(tmpDir, ".runoq"), 0o755)
-	os.WriteFile(filepath.Join(tmpDir, ".runoq", "issue-types.json"), []byte(`{"task":"IT_task","epic":"IT_epic"}`), 0o644)
+	mustMkdirAll(t, filepath.Join(tmpDir, ".runoq"))
+	mustWriteFile(t, filepath.Join(tmpDir, ".runoq", "issue-types.json"), []byte(`{"task":"IT_task","epic":"IT_epic"}`))
 
 	app := newTestApp(t, []string{
 		"create", "owner/repo", "Plan milestone 1", "body",
@@ -451,8 +465,8 @@ func TestCreateAdjustmentAddsLabel(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	os.MkdirAll(filepath.Join(tmpDir, ".runoq"), 0o755)
-	os.WriteFile(filepath.Join(tmpDir, ".runoq", "issue-types.json"), []byte(`{"task":"IT_task","epic":"IT_epic"}`), 0o644)
+	mustMkdirAll(t, filepath.Join(tmpDir, ".runoq"))
+	mustWriteFile(t, filepath.Join(tmpDir, ".runoq", "issue-types.json"), []byte(`{"task":"IT_task","epic":"IT_epic"}`))
 
 	app := newTestApp(t, []string{
 		"create", "owner/repo", "Adjust milestones", "body",

@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -430,22 +429,6 @@ func writeDispatchConfig(t *testing.T, path string) {
 }`
 	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
-	}
-}
-
-func writeIssueStateFile(t *testing.T, path string, issue int, phase string, round int, branch string, prNumber string) {
-	t.Helper()
-
-	state := `{
-  "issue": ` + strconv.Itoa(issue) + `,
-  "phase": "` + phase + `",
-  "round": ` + strconv.Itoa(round) + `,
-  "branch": "` + branch + `",
-  "pr_number": ` + prNumber + `,
-  "updated_at": "2026-03-17T00:00:00Z"
-}`
-	if err := os.WriteFile(path, []byte(state), 0o644); err != nil {
-		t.Fatalf("write state file: %v", err)
 	}
 }
 

@@ -13,6 +13,30 @@ import (
 	"github.com/saruman/runoq/internal/shell"
 )
 
+func mustWriteReqStdout(t *testing.T, req shell.CommandRequest, value string) {
+	t.Helper()
+	if req.Stdout == nil {
+		t.Fatal("stdout writer is nil")
+	}
+	if _, err := req.Stdout.Write([]byte(value)); err != nil {
+		t.Fatalf("write stdout: %v", err)
+	}
+}
+
+func mustMkdirAll(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", path, err)
+	}
+}
+
+func mustWriteFile(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
 func newTestApp(t *testing.T, args []string) *App {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
@@ -204,7 +228,7 @@ func (fe *fakeExecutor) exec(_ context.Context, req shell.CommandRequest) error 
 	}
 	// Default: write empty output for git.
 	if req.Name == "git" && req.Stdout != nil {
-		req.Stdout.Write([]byte("deadbeef123456\n"))
+		mustWriteReqStdout(fe.t, req, "deadbeef123456\n")
 	}
 	return nil
 }
@@ -225,32 +249,32 @@ func writePayloadFile(t *testing.T, dir string, input inputPayload) string {
 func TestDevelopmentLoop_SingleRoundSuccess(t *testing.T) {
 	dir := t.TempDir()
 	worktree := filepath.Join(dir, "wt")
-	os.MkdirAll(worktree, 0o755)
+	mustMkdirAll(t, worktree)
 	logDir := filepath.Join(dir, "logs")
-	os.MkdirAll(logDir, 0o755)
+	mustMkdirAll(t, logDir)
 	runoqRoot := filepath.Join(dir, "runoq")
-	os.MkdirAll(filepath.Join(runoqRoot, "scripts"), 0o755)
+	mustMkdirAll(t, filepath.Join(runoqRoot, "scripts"))
 
 	specFile := filepath.Join(dir, "spec.md")
-	os.WriteFile(specFile, []byte("implement X"), 0o644)
+	mustWriteFile(t, specFile, []byte("implement X"))
 
 	fe := &fakeExecutor{t: t, handlers: map[string]func(shell.CommandRequest) error{
 		"git": func(req shell.CommandRequest) error {
 			if req.Stdout != nil {
-				req.Stdout.Write([]byte("abc123\n"))
+				mustWriteReqStdout(t, req, "abc123\n")
 			}
 			return nil
 		},
 		"codex": func(req shell.CommandRequest) error {
 			// Write a fake events JSONL with thread_id.
 			if req.Stdout != nil {
-				req.Stdout.Write([]byte(`{"type":"thread.started","thread_id":"thread-42"}` + "\n"))
-				req.Stdout.Write([]byte(`{"tokens": 500}` + "\n"))
+				mustWriteReqStdout(t, req, `{"type":"thread.started","thread_id":"thread-42"}`+"\n")
+				mustWriteReqStdout(t, req, `{"tokens": 500}`+"\n")
 			}
 			// Write fake last-message to the -o path.
 			for i, arg := range req.Args {
 				if arg == "-o" && i+1 < len(req.Args) {
-					os.WriteFile(req.Args[i+1], []byte("fake codex output"), 0o644)
+					mustWriteFile(t, req.Args[i+1], []byte("fake codex output"))
 					break
 				}
 			}
@@ -259,13 +283,13 @@ func TestDevelopmentLoop_SingleRoundSuccess(t *testing.T) {
 		"state.sh": func(req shell.CommandRequest) error {
 			// validate-payload: return valid schema.
 			if req.Stdout != nil {
-				req.Stdout.Write([]byte(`{"payload_schema_valid":true}`))
+				mustWriteReqStdout(t, req, `{"payload_schema_valid":true}`)
 			}
 			return nil
 		},
 		"verify.sh": func(req shell.CommandRequest) error {
 			if req.Stdout != nil {
-				req.Stdout.Write([]byte(`{"review_allowed":true,"failures":[],"actual":{"files_changed":["main.go"],"files_added":[],"files_deleted":[]}}`))
+				mustWriteReqStdout(t, req, `{"review_allowed":true,"failures":[],"actual":{"files_changed":["main.go"],"files_added":[],"files_deleted":[]}}`)
 			}
 			return nil
 		},
@@ -316,31 +340,31 @@ func TestDevelopmentLoop_SingleRoundSuccess(t *testing.T) {
 func TestDevelopmentLoop_PostsVerificationSuccessComment(t *testing.T) {
 	dir := t.TempDir()
 	worktree := filepath.Join(dir, "wt")
-	os.MkdirAll(worktree, 0o755)
+	mustMkdirAll(t, worktree)
 	logDir := filepath.Join(dir, "logs")
-	os.MkdirAll(logDir, 0o755)
+	mustMkdirAll(t, logDir)
 	runoqRoot := filepath.Join(dir, "runoq")
-	os.MkdirAll(filepath.Join(runoqRoot, "scripts"), 0o755)
+	mustMkdirAll(t, filepath.Join(runoqRoot, "scripts"))
 
 	specFile := filepath.Join(dir, "spec.md")
-	os.WriteFile(specFile, []byte("implement X"), 0o644)
+	mustWriteFile(t, specFile, []byte("implement X"))
 
 	var lifecycleCalls []string
 	fe := &fakeExecutor{t: t, handlers: map[string]func(shell.CommandRequest) error{
 		"git": func(req shell.CommandRequest) error {
 			if req.Stdout != nil {
-				req.Stdout.Write([]byte("abc123\n"))
+				mustWriteReqStdout(t, req, "abc123\n")
 			}
 			return nil
 		},
 		"codex": func(req shell.CommandRequest) error {
 			if req.Stdout != nil {
-				req.Stdout.Write([]byte(`{"type":"thread.started","thread_id":"thread-42"}` + "\n"))
-				req.Stdout.Write([]byte(`{"tokens": 500}` + "\n"))
+				mustWriteReqStdout(t, req, `{"type":"thread.started","thread_id":"thread-42"}`+"\n")
+				mustWriteReqStdout(t, req, `{"tokens": 500}`+"\n")
 			}
 			for i, arg := range req.Args {
 				if arg == "-o" && i+1 < len(req.Args) {
-					os.WriteFile(req.Args[i+1], []byte("fake codex output"), 0o644)
+					mustWriteFile(t, req.Args[i+1], []byte("fake codex output"))
 					break
 				}
 			}
@@ -348,13 +372,13 @@ func TestDevelopmentLoop_PostsVerificationSuccessComment(t *testing.T) {
 		},
 		"state.sh": func(req shell.CommandRequest) error {
 			if req.Stdout != nil {
-				req.Stdout.Write([]byte(`{"payload_schema_valid":true}`))
+				mustWriteReqStdout(t, req, `{"payload_schema_valid":true}`)
 			}
 			return nil
 		},
 		"verify.sh": func(req shell.CommandRequest) error {
 			if req.Stdout != nil {
-				req.Stdout.Write([]byte(`{"review_allowed":true,"failures":[],"actual":{"files_changed":["main.go"],"files_added":[],"files_deleted":[]}}`))
+				mustWriteReqStdout(t, req, `{"review_allowed":true,"failures":[],"actual":{"files_changed":["main.go"],"files_added":[],"files_deleted":[]}}`)
 			}
 			return nil
 		},
@@ -411,30 +435,30 @@ func TestDevelopmentLoop_PostsVerificationSuccessComment(t *testing.T) {
 func TestDevelopmentLoop_LogsProgressToStderr(t *testing.T) {
 	dir := t.TempDir()
 	worktree := filepath.Join(dir, "wt")
-	os.MkdirAll(worktree, 0o755)
+	mustMkdirAll(t, worktree)
 	logDir := filepath.Join(dir, "logs")
-	os.MkdirAll(logDir, 0o755)
+	mustMkdirAll(t, logDir)
 	runoqRoot := filepath.Join(dir, "runoq")
-	os.MkdirAll(filepath.Join(runoqRoot, "scripts"), 0o755)
+	mustMkdirAll(t, filepath.Join(runoqRoot, "scripts"))
 
 	specFile := filepath.Join(dir, "spec.md")
-	os.WriteFile(specFile, []byte("implement X"), 0o644)
+	mustWriteFile(t, specFile, []byte("implement X"))
 
 	fe := &fakeExecutor{t: t, handlers: map[string]func(shell.CommandRequest) error{
 		"git": func(req shell.CommandRequest) error {
 			if req.Stdout != nil {
-				req.Stdout.Write([]byte("abc123\n"))
+				mustWriteReqStdout(t, req, "abc123\n")
 			}
 			return nil
 		},
 		"codex": func(req shell.CommandRequest) error {
 			if req.Stdout != nil {
-				req.Stdout.Write([]byte(`{"type":"thread.started","thread_id":"thread-42"}` + "\n"))
-				req.Stdout.Write([]byte(`{"tokens": 500}` + "\n"))
+				mustWriteReqStdout(t, req, `{"type":"thread.started","thread_id":"thread-42"}`+"\n")
+				mustWriteReqStdout(t, req, `{"tokens": 500}`+"\n")
 			}
 			for i, arg := range req.Args {
 				if arg == "-o" && i+1 < len(req.Args) {
-					os.WriteFile(req.Args[i+1], []byte("fake codex output"), 0o644)
+					mustWriteFile(t, req.Args[i+1], []byte("fake codex output"))
 					break
 				}
 			}
@@ -442,13 +466,13 @@ func TestDevelopmentLoop_LogsProgressToStderr(t *testing.T) {
 		},
 		"state.sh": func(req shell.CommandRequest) error {
 			if req.Stdout != nil {
-				req.Stdout.Write([]byte(`{"payload_schema_valid":true}`))
+				mustWriteReqStdout(t, req, `{"payload_schema_valid":true}`)
 			}
 			return nil
 		},
 		"verify.sh": func(req shell.CommandRequest) error {
 			if req.Stdout != nil {
-				req.Stdout.Write([]byte(`{"review_allowed":true,"failures":[],"actual":{"files_changed":["main.go"],"files_added":[],"files_deleted":[]}}`))
+				mustWriteReqStdout(t, req, `{"review_allowed":true,"failures":[],"actual":{"files_changed":["main.go"],"files_added":[],"files_deleted":[]}}`)
 			}
 			return nil
 		},
@@ -498,9 +522,9 @@ func TestDevelopmentLoop_LogsProgressToStderr(t *testing.T) {
 func TestDevelopmentLoop_BudgetExhausted(t *testing.T) {
 	dir := t.TempDir()
 	worktree := filepath.Join(dir, "wt")
-	os.MkdirAll(worktree, 0o755)
+	mustMkdirAll(t, worktree)
 	logDir := filepath.Join(dir, "logs")
-	os.MkdirAll(logDir, 0o755)
+	mustMkdirAll(t, logDir)
 
 	payloadFile := writePayloadFile(t, dir, inputPayload{
 		IssueNumber:      1,
@@ -517,7 +541,7 @@ func TestDevelopmentLoop_BudgetExhausted(t *testing.T) {
 	app := New([]string{"run", payloadFile}, nil, dir, &stdout, &stderr)
 	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
 		if req.Name == "git" && req.Stdout != nil {
-			req.Stdout.Write([]byte("deadbeef\n"))
+			mustWriteReqStdout(t, req, "deadbeef\n")
 		}
 		return nil
 	})
@@ -543,30 +567,30 @@ func TestDevelopmentLoop_BudgetExhausted(t *testing.T) {
 func TestDevelopmentLoop_MaxRoundsExhausted(t *testing.T) {
 	dir := t.TempDir()
 	worktree := filepath.Join(dir, "wt")
-	os.MkdirAll(worktree, 0o755)
+	mustMkdirAll(t, worktree)
 	logDir := filepath.Join(dir, "logs")
-	os.MkdirAll(logDir, 0o755)
+	mustMkdirAll(t, logDir)
 	runoqRoot := filepath.Join(dir, "runoq")
-	os.MkdirAll(filepath.Join(runoqRoot, "scripts"), 0o755)
+	mustMkdirAll(t, filepath.Join(runoqRoot, "scripts"))
 
 	specFile := filepath.Join(dir, "spec.md")
-	os.WriteFile(specFile, []byte("spec"), 0o644)
+	mustWriteFile(t, specFile, []byte("spec"))
 
 	roundCount := 0
 	fe := &fakeExecutor{t: t, handlers: map[string]func(shell.CommandRequest) error{
 		"git": func(req shell.CommandRequest) error {
 			if req.Stdout != nil {
-				req.Stdout.Write([]byte("deadbeef\n"))
+				mustWriteReqStdout(t, req, "deadbeef\n")
 			}
 			return nil
 		},
 		"codex": func(req shell.CommandRequest) error {
 			if req.Stdout != nil {
-				req.Stdout.Write([]byte(`{"type":"thread.started","thread_id":"t1"}` + "\n"))
+				mustWriteReqStdout(t, req, `{"type":"thread.started","thread_id":"t1"}`+"\n")
 			}
 			for i, arg := range req.Args {
 				if arg == "-o" && i+1 < len(req.Args) {
-					os.WriteFile(req.Args[i+1], []byte("output"), 0o644)
+					mustWriteFile(t, req.Args[i+1], []byte("output"))
 					break
 				}
 			}
@@ -574,14 +598,14 @@ func TestDevelopmentLoop_MaxRoundsExhausted(t *testing.T) {
 		},
 		"state.sh": func(req shell.CommandRequest) error {
 			if req.Stdout != nil {
-				req.Stdout.Write([]byte(`{"payload_schema_valid":true}`))
+				mustWriteReqStdout(t, req, `{"payload_schema_valid":true}`)
 			}
 			return nil
 		},
 		"verify.sh": func(req shell.CommandRequest) error {
 			roundCount++
 			if req.Stdout != nil {
-				req.Stdout.Write([]byte(`{"review_allowed":false,"failures":["test failed"],"actual":{"files_changed":[],"files_added":[],"files_deleted":[]}}`))
+				mustWriteReqStdout(t, req, `{"review_allowed":false,"failures":["test failed"],"actual":{"files_changed":[],"files_added":[],"files_deleted":[]}}`)
 			}
 			return nil
 		},
@@ -638,7 +662,7 @@ func TestClassifyTransientError(t *testing.T) {
 
 	t.Run("capacity error in event log", func(t *testing.T) {
 		eventsPath := filepath.Join(dir, "capacity-events.jsonl")
-		os.WriteFile(eventsPath, []byte(`{"type":"turn.failed","error":"Selected model is at capacity"}`+"\n"), 0o644)
+		mustWriteFile(t, eventsPath, []byte(`{"type":"turn.failed","error":"Selected model is at capacity"}`+"\n"))
 
 		isTransient, reason := app.classifyTransientError(eventsPath, nil)
 		if !isTransient {
@@ -651,7 +675,7 @@ func TestClassifyTransientError(t *testing.T) {
 
 	t.Run("rate limit error in event log", func(t *testing.T) {
 		eventsPath := filepath.Join(dir, "ratelimit-events.jsonl")
-		os.WriteFile(eventsPath, []byte(`{"type":"turn.failed","error":"Rate limit exceeded, status 429"}`+"\n"), 0o644)
+		mustWriteFile(t, eventsPath, []byte(`{"type":"turn.failed","error":"Rate limit exceeded, status 429"}`+"\n"))
 
 		isTransient, reason := app.classifyTransientError(eventsPath, nil)
 		if !isTransient {
@@ -664,7 +688,7 @@ func TestClassifyTransientError(t *testing.T) {
 
 	t.Run("normal event log", func(t *testing.T) {
 		eventsPath := filepath.Join(dir, "normal-events.jsonl")
-		os.WriteFile(eventsPath, []byte(`{"type":"thread.started","thread_id":"t1"}`+"\n"+`{"type":"turn.completed"}`+"\n"), 0o644)
+		mustWriteFile(t, eventsPath, []byte(`{"type":"thread.started","thread_id":"t1"}`+"\n"+`{"type":"turn.completed"}`+"\n"))
 
 		isTransient, reason := app.classifyTransientError(eventsPath, nil)
 		if isTransient {
@@ -674,7 +698,7 @@ func TestClassifyTransientError(t *testing.T) {
 
 	t.Run("exec error with empty log", func(t *testing.T) {
 		eventsPath := filepath.Join(dir, "empty-events.jsonl")
-		os.WriteFile(eventsPath, []byte{}, 0o644)
+		mustWriteFile(t, eventsPath, []byte{})
 
 		isTransient, reason := app.classifyTransientError(eventsPath, fmt.Errorf("exit status 1"))
 		if !isTransient {
@@ -687,7 +711,7 @@ func TestClassifyTransientError(t *testing.T) {
 
 	t.Run("exec error with valid output", func(t *testing.T) {
 		eventsPath := filepath.Join(dir, "valid-events.jsonl")
-		os.WriteFile(eventsPath, []byte(`{"type":"thread.started","thread_id":"t1"}`+"\n"+`{"type":"turn.completed"}`+"\n"), 0o644)
+		mustWriteFile(t, eventsPath, []byte(`{"type":"thread.started","thread_id":"t1"}`+"\n"+`{"type":"turn.completed"}`+"\n"))
 
 		isTransient, _ := app.classifyTransientError(eventsPath, fmt.Errorf("exit status 1"))
 		if isTransient {
@@ -697,7 +721,7 @@ func TestClassifyTransientError(t *testing.T) {
 
 	t.Run("503 error in event log", func(t *testing.T) {
 		eventsPath := filepath.Join(dir, "503-events.jsonl")
-		os.WriteFile(eventsPath, []byte(`{"type":"turn.failed","error":"Service unavailable (503)"}`+"\n"), 0o644)
+		mustWriteFile(t, eventsPath, []byte(`{"type":"turn.failed","error":"Service unavailable (503)"}`+"\n"))
 
 		isTransient, _ := app.classifyTransientError(eventsPath, nil)
 		if !isTransient {
@@ -719,27 +743,27 @@ func TestClassifyTransientError(t *testing.T) {
 func TestDevelopmentLoop_TransientErrorShortCircuits(t *testing.T) {
 	dir := t.TempDir()
 	worktree := filepath.Join(dir, "wt")
-	os.MkdirAll(worktree, 0o755)
+	mustMkdirAll(t, worktree)
 	logDir := filepath.Join(dir, "logs")
-	os.MkdirAll(logDir, 0o755)
+	mustMkdirAll(t, logDir)
 	runoqRoot := filepath.Join(dir, "runoq")
-	os.MkdirAll(filepath.Join(runoqRoot, "scripts"), 0o755)
+	mustMkdirAll(t, filepath.Join(runoqRoot, "scripts"))
 
 	specFile := filepath.Join(dir, "spec.md")
-	os.WriteFile(specFile, []byte("implement X"), 0o644)
+	mustWriteFile(t, specFile, []byte("implement X"))
 
 	verifyCount := 0
 	fe := &fakeExecutor{t: t, handlers: map[string]func(shell.CommandRequest) error{
 		"git": func(req shell.CommandRequest) error {
 			if req.Stdout != nil {
-				req.Stdout.Write([]byte("abc123\n"))
+				mustWriteReqStdout(t, req, "abc123\n")
 			}
 			return nil
 		},
 		"codex": func(req shell.CommandRequest) error {
 			// Simulate a transient capacity error.
 			if req.Stdout != nil {
-				req.Stdout.Write([]byte(`{"type":"turn.failed","error":"Selected model is at capacity"}` + "\n"))
+				mustWriteReqStdout(t, req, `{"type":"turn.failed","error":"Selected model is at capacity"}`+"\n")
 			}
 			return fmt.Errorf("exit status 1")
 		},

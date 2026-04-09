@@ -15,8 +15,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/saruman/runoq/internal/shell"
 	"github.com/saruman/runoq/internal/gh"
+	"github.com/saruman/runoq/internal/shell"
 )
 
 const usageText = `Usage:
@@ -445,7 +445,9 @@ func (a *App) Create(ctx context.Context, repo string, title string, body string
 	if opts.ParentEpic != "" && newIssueNumber != "" {
 		childID, err := a.ghClient.Output(ctx, "api", fmt.Sprintf("repos/%s/issues/%s", repo, newIssueNumber), "--jq", ".id")
 		if err == nil {
-			a.ghClient.Run(ctx, []string{"api", fmt.Sprintf("repos/%s/issues/%s/sub_issues", repo, opts.ParentEpic), "--method", "POST", "-F", "sub_issue_id=" + strings.TrimSpace(childID)}, io.Discard, io.Discard)
+			if err := a.ghClient.Run(ctx, []string{"api", fmt.Sprintf("repos/%s/issues/%s/sub_issues", repo, opts.ParentEpic), "--method", "POST", "-F", "sub_issue_id=" + strings.TrimSpace(childID)}, io.Discard, io.Discard); err != nil {
+				a.log("issue-queue", fmt.Sprintf("create: warning: failed to link issue #%s as sub-issue of epic #%s: %v", newIssueNumber, opts.ParentEpic, err))
+			}
 			a.log("issue-queue", fmt.Sprintf("create: linked issue #%s as sub-issue of epic #%s", newIssueNumber, opts.ParentEpic))
 		}
 	}
@@ -792,7 +794,9 @@ func (a *App) postCreateMutations(ctx context.Context, repo string, issueNumber 
 		}
 		if typeID, ok := issueTypeIDs[ghType]; ok {
 			mutation := fmt.Sprintf(`mutation { updateIssueIssueType(input: {issueId: %q, issueTypeId: %q}) { issue { id } } }`, nodeID, typeID)
-			a.ghClient.Run(ctx, []string{"api", "graphql", "-f", "query=" + mutation}, io.Discard, io.Discard)
+			if err := a.ghClient.Run(ctx, []string{"api", "graphql", "-f", "query=" + mutation}, io.Discard, io.Discard); err != nil {
+				a.log("issue-queue", fmt.Sprintf("create: warning: failed to set issue type for #%s: %v", issueNumber, err))
+			}
 		}
 	}
 
@@ -826,7 +830,9 @@ func (a *App) postCreateMutations(ctx context.Context, repo string, issueNumber 
 			}
 			if json.Unmarshal([]byte(labelIDRaw), &labelResp) == nil && labelResp.Data.Repository.Label.ID != "" {
 				mutation := fmt.Sprintf(`mutation { addLabelsToLabelable(input: {labelableId: %q, labelIds: [%q]}) { labelable { __typename } } }`, nodeID, labelResp.Data.Repository.Label.ID)
-				a.ghClient.Run(ctx, []string{"api", "graphql", "-f", "query=" + mutation}, io.Discard, io.Discard)
+				if err := a.ghClient.Run(ctx, []string{"api", "graphql", "-f", "query=" + mutation}, io.Discard, io.Discard); err != nil {
+					a.log("issue-queue", fmt.Sprintf("create: warning: failed to add label %q to #%s: %v", name, issueNumber, err))
+				}
 			}
 		}
 	}
@@ -839,7 +845,9 @@ func (a *App) postCreateMutations(ctx context.Context, repo string, issueNumber 
 		}
 		depNodeID = strings.TrimSpace(depNodeID)
 		mutation := fmt.Sprintf(`mutation { addBlockedBy(input: {issueId: %q, blockingIssueId: %q}) { blockedIssue { number } } }`, nodeID, depNodeID)
-		a.ghClient.Run(ctx, []string{"api", "graphql", "-f", "query=" + mutation}, io.Discard, io.Discard)
+		if err := a.ghClient.Run(ctx, []string{"api", "graphql", "-f", "query=" + mutation}, io.Discard, io.Discard); err != nil {
+			a.log("issue-queue", fmt.Sprintf("create: warning: failed to add blockedBy dependency %d to #%s: %v", dep, issueNumber, err))
+		}
 	}
 }
 

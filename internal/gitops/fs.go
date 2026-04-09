@@ -78,63 +78,10 @@ func fsWorktreePrune(gitDir string) error {
 		}
 		linkedDir := strings.TrimSpace(string(data))
 		if _, err := os.Stat(linkedDir); os.IsNotExist(err) {
-			os.RemoveAll(filepath.Join(worktreesDir, entry.Name()))
+			_ = os.RemoveAll(filepath.Join(worktreesDir, entry.Name()))
 		}
 	}
 	return nil
-}
-
-// fsSetConfig sets a key=value in .git/config under the appropriate section.
-// Only supports dotted keys like "user.name" or "user.email".
-func fsSetConfig(gitDir string, key string, value string) error {
-	section, name, ok := strings.Cut(key, ".")
-	if !ok {
-		return fmt.Errorf("unsupported config key format: %s", key)
-	}
-
-	configPath := filepath.Join(gitDir, "config")
-	content, err := os.ReadFile(configPath)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-
-	lines := strings.Split(string(content), "\n")
-	sectionHeader := "[" + section + "]"
-	newLine := "\t" + name + " = " + value
-
-	// Find the section and replace or add the key
-	inSection := false
-	keyFound := false
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == sectionHeader {
-			inSection = true
-			continue
-		}
-		if inSection && strings.HasPrefix(trimmed, "[") {
-			// Entered a new section without finding the key — insert before this line
-			lines = append(lines[:i], append([]string{newLine}, lines[i:]...)...)
-			keyFound = true
-			break
-		}
-		if inSection && strings.HasPrefix(trimmed, name+" =") || inSection && strings.HasPrefix(trimmed, name+"=") {
-			lines[i] = newLine
-			keyFound = true
-			break
-		}
-	}
-
-	if !keyFound {
-		if !inSection {
-			// Section doesn't exist — append it
-			lines = append(lines, sectionHeader, newLine)
-		} else {
-			// Section exists but key wasn't found (we're at EOF) — append to end
-			lines = append(lines, newLine)
-		}
-	}
-
-	return os.WriteFile(configPath, []byte(strings.Join(lines, "\n")), 0o644)
 }
 
 func packedRefExists(gitDir string, ref string) (bool, error) {
@@ -145,7 +92,9 @@ func packedRefExists(gitDir string, ref string) (bool, error) {
 		}
 		return false, err
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
@@ -169,7 +118,9 @@ func removePackedRef(gitDir string, ref string) error {
 		}
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 
 	var lines []string
 	scanner := bufio.NewScanner(f)

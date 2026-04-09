@@ -180,7 +180,9 @@ func TestReplaceProposalInBodySubcommand(t *testing.T) {
 
 	existingBody := "metadata\n\n<!-- runoq:proposal-start -->\nold proposal"
 	proposalFile := t.TempDir() + "/proposal.md"
-	os.WriteFile(proposalFile, []byte("new proposal"), 0o644)
+	if err := os.WriteFile(proposalFile, []byte("new proposal"), 0o644); err != nil {
+		t.Fatalf("write proposal file: %v", err)
+	}
 
 	var stdout, stderr bytes.Buffer
 	app := New([]string{"replace-proposal-in-body", proposalFile}, strings.NewReader(existingBody), &stdout, &stderr)

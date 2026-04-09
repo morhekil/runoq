@@ -14,8 +14,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/saruman/runoq/internal/shell"
 	"github.com/saruman/runoq/internal/gh"
+	"github.com/saruman/runoq/internal/shell"
 )
 
 func TestNewClient(t *testing.T) {
@@ -108,8 +108,8 @@ func TestEnsureToken_OnlyOnce(t *testing.T) {
 	// Fake HTTP server: handle installation listing + token minting.
 	httpClient := &http.Client{
 		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-			switch {
-			case r.URL.Path == "/app/installations":
+			switch r.URL.Path {
+			case "/app/installations":
 				return &http.Response{
 					StatusCode: 200,
 					Header:     http.Header{"Content-Type": []string{"application/json"}},
@@ -151,7 +151,9 @@ func TestEnsureToken_OnlyOnce(t *testing.T) {
 func TestOutput_EnsuresToken(t *testing.T) {
 	exec := func(_ context.Context, req shell.CommandRequest) error {
 		// gh command — return some output.
-		fmt.Fprint(req.Stdout, "output-data\n")
+		if _, err := fmt.Fprint(req.Stdout, "output-data\n"); err != nil {
+			t.Fatalf("write stdout: %v", err)
+		}
 		return nil
 	}
 
@@ -187,8 +189,12 @@ func TestRun_PassesIO(t *testing.T) {
 		if req.Name == "git" {
 			return fmt.Errorf("not a repo")
 		}
-		fmt.Fprint(req.Stdout, "stdout-data")
-		fmt.Fprint(req.Stderr, "stderr-data")
+		if _, err := fmt.Fprint(req.Stdout, "stdout-data"); err != nil {
+			t.Fatalf("write stdout: %v", err)
+		}
+		if _, err := fmt.Fprint(req.Stderr, "stderr-data"); err != nil {
+			t.Fatalf("write stderr: %v", err)
+		}
 		return nil
 	}
 

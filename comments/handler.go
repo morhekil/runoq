@@ -56,11 +56,16 @@ func HandleComments(ctx context.Context, cfg HandleCommentsConfig) error {
 	}
 
 	// Gather comment bodies
-	commentBody := extractCommentBodies(issueView, ids)
+	commentBody, err := extractCommentBodies(issueView, ids)
+	if err != nil {
+		return fmt.Errorf("extract comment bodies: %w", err)
+	}
 
 	// Mark as picked up (eyes)
 	for _, id := range ids {
-		cfg.GH.AddReaction(ctx, id, "EYES")
+		if err := cfg.GH.AddReaction(ctx, id, "EYES"); err != nil {
+			return fmt.Errorf("add eyes reaction to %s: %w", id, err)
+		}
 	}
 
 	// Build agent payload
@@ -68,7 +73,9 @@ func HandleComments(ctx context.Context, cfg HandleCommentsConfig) error {
 		Title string `json:"title"`
 		Body  string `json:"body"`
 	}
-	json.Unmarshal([]byte(issueView), &issueData)
+	if err := json.Unmarshal([]byte(issueView), &issueData); err != nil {
+		return fmt.Errorf("parse issue view: %w", err)
+	}
 
 	payload, _ := json.Marshal(map[string]any{
 		"repo":        cfg.Repo,
@@ -115,7 +122,9 @@ func HandleComments(ctx context.Context, cfg HandleCommentsConfig) error {
 	switch agentResp.Action {
 	case ActionApprove:
 		if cfg.PlanApprovedLabel != "" {
-			cfg.GH.IssueAddLabel(ctx, cfg.Repo, cfg.IssueNumber, cfg.PlanApprovedLabel)
+			if err := cfg.GH.IssueAddLabel(ctx, cfg.Repo, cfg.IssueNumber, cfg.PlanApprovedLabel); err != nil {
+				return fmt.Errorf("add label %q: %w", cfg.PlanApprovedLabel, err)
+			}
 		}
 	case ActionChangeRequest:
 		// TODO: update issue body with revised proposal
@@ -126,20 +135,24 @@ func HandleComments(ctx context.Context, cfg HandleCommentsConfig) error {
 
 	// Mark as responded (thumbs_up)
 	for _, id := range ids {
-		cfg.GH.AddReaction(ctx, id, "THUMBS_UP")
+		if err := cfg.GH.AddReaction(ctx, id, "THUMBS_UP"); err != nil {
+			return fmt.Errorf("add thumbs_up reaction to %s: %w", id, err)
+		}
 	}
 
 	return nil
 }
 
-func extractCommentBodies(issueViewJSON string, ids []string) string {
+func extractCommentBodies(issueViewJSON string, ids []string) (string, error) {
 	var view struct {
 		Comments []struct {
 			ID   string `json:"id"`
 			Body string `json:"body"`
 		} `json:"comments"`
 	}
-	json.Unmarshal([]byte(issueViewJSON), &view)
+	if err := json.Unmarshal([]byte(issueViewJSON), &view); err != nil {
+		return "", err
+	}
 
 	idSet := make(map[string]bool, len(ids))
 	for _, id := range ids {
@@ -152,5 +165,5 @@ func extractCommentBodies(issueViewJSON string, ids []string) string {
 			bodies = append(bodies, c.Body)
 		}
 	}
-	return strings.Join(bodies, "\n\n---\n\n")
+	return strings.Join(bodies, "\n\n---\n\n"), nil
 }

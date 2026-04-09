@@ -68,22 +68,36 @@ type exitCodeError struct {
 func (e exitCodeError) Error() string { return e.msg }
 func (e exitCodeError) ExitCode() int { return e.code }
 
+func mustMkdir(t *testing.T, path string) {
+	t.Helper()
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", path, err)
+	}
+}
+
+func mustWriteStdout(t *testing.T, w io.Writer, value string) {
+	t.Helper()
+	if _, err := io.WriteString(w, value); err != nil {
+		t.Fatalf("write stdout: %v", err)
+	}
+}
+
 func TestRunCreatesLogFile(t *testing.T) {
 	t.Parallel()
 
 	targetRoot := t.TempDir()
 	// Create .git so FindRoot works if TARGET_ROOT is somehow not set
-	os.Mkdir(filepath.Join(targetRoot, ".git"), 0o755)
+	mustMkdir(t, filepath.Join(targetRoot, ".git"))
 
 	executor := func(_ context.Context, req shell.CommandRequest) error {
 		switch {
 		case req.Name == "git" && len(req.Args) >= 4 && req.Args[2] == "remote":
 			if req.Stdout != nil {
-				io.WriteString(req.Stdout, "git@github.com:owner/repo.git\n")
+				mustWriteStdout(t, req.Stdout, "git@github.com:owner/repo.git\n")
 			}
 		case req.Name == "bash" && len(req.Args) > 0 && req.Args[0] == "-lc":
 			if req.Stdout != nil {
-				io.WriteString(req.Stdout, "runtime-token")
+				mustWriteStdout(t, req.Stdout, "runtime-token")
 			}
 		}
 		return nil
@@ -125,7 +139,7 @@ func TestRunRunSubcommandInvokesOrchestrator(t *testing.T) {
 	t.Parallel()
 
 	targetRoot := t.TempDir()
-	os.Mkdir(filepath.Join(targetRoot, ".git"), 0o755)
+	mustMkdir(t, filepath.Join(targetRoot, ".git"))
 
 	// Track calls to verify the orchestrator pipeline is reached.
 	var calls []shell.CommandRequest
@@ -134,11 +148,11 @@ func TestRunRunSubcommandInvokesOrchestrator(t *testing.T) {
 		switch {
 		case req.Name == "git" && len(req.Args) >= 4 && req.Args[2] == "remote":
 			if req.Stdout != nil {
-				io.WriteString(req.Stdout, "git@github.com:owner/repo.git\n")
+				mustWriteStdout(t, req.Stdout, "git@github.com:owner/repo.git\n")
 			}
 		case req.Name == "bash" && len(req.Args) > 0 && req.Args[0] == "-lc":
 			if req.Stdout != nil {
-				io.WriteString(req.Stdout, "runtime-token")
+				mustWriteStdout(t, req.Stdout, "runtime-token")
 			}
 		}
 		return nil
@@ -182,7 +196,7 @@ func TestRunConfigEmptyFallsBackToDefault(t *testing.T) {
 	t.Parallel()
 
 	targetRoot := t.TempDir()
-	os.Mkdir(filepath.Join(targetRoot, ".git"), 0o755)
+	mustMkdir(t, filepath.Join(targetRoot, ".git"))
 
 	// Track the env passed to orchestrator calls to verify RUNOQ_CONFIG.
 	var authEnvSnapshot []string
@@ -190,11 +204,11 @@ func TestRunConfigEmptyFallsBackToDefault(t *testing.T) {
 		switch {
 		case req.Name == "git" && len(req.Args) >= 4 && req.Args[2] == "remote":
 			if req.Stdout != nil {
-				io.WriteString(req.Stdout, "git@github.com:owner/repo.git\n")
+				mustWriteStdout(t, req.Stdout, "git@github.com:owner/repo.git\n")
 			}
 		case req.Name == "bash" && len(req.Args) > 0 && req.Args[0] == "-lc":
 			if req.Stdout != nil {
-				io.WriteString(req.Stdout, "runtime-token")
+				mustWriteStdout(t, req.Stdout, "runtime-token")
 			}
 			// Capture env at auth time — this is the env the orchestrator will receive.
 			authEnvSnapshot = append([]string(nil), req.Env...)
@@ -267,13 +281,14 @@ func TestReportSubcommandUsesRuntimeImplementation(t *testing.T) {
 	}
 }
 
-
 func TestTickSubcommandCallsRunTick(t *testing.T) {
 	t.Parallel()
 
 	targetRoot := t.TempDir()
 	// Create runoq.json with plan path
-	os.WriteFile(filepath.Join(targetRoot, "runoq.json"), []byte(`{"plan":"docs/prd.md"}`), 0o644)
+	if err := os.WriteFile(filepath.Join(targetRoot, "runoq.json"), []byte(`{"plan":"docs/prd.md"}`), 0o644); err != nil {
+		t.Fatalf("write runoq.json: %v", err)
+	}
 
 	var ghCalled bool
 	var stdout strings.Builder
@@ -293,9 +308,13 @@ func TestTickSubcommandCallsRunTick(t *testing.T) {
 			if req.Stdout != nil {
 				switch {
 				case strings.Contains(args, "issue list"):
-					req.Stdout.Write([]byte(`[{"number":1,"title":"Done","state":"CLOSED","body":"","labels":[],"url":"u"}]`))
+					if _, err := req.Stdout.Write([]byte(`[{"number":1,"title":"Done","state":"CLOSED","body":"","labels":[],"url":"u"}]`)); err != nil {
+						t.Fatalf("write issue list: %v", err)
+					}
 				case strings.Contains(args, "api graphql"):
-					req.Stdout.Write([]byte(`{"data":{"repository":{"issues":{"nodes":[{"number":1,"blockedBy":{"nodes":[]},"issueType":{"name":"Epic"}}]}}}}`))
+					if _, err := req.Stdout.Write([]byte(`{"data":{"repository":{"issues":{"nodes":[{"number":1,"blockedBy":{"nodes":[]},"issueType":{"name":"Epic"}}]}}}}`)); err != nil {
+						t.Fatalf("write graphql response: %v", err)
+					}
 				}
 			}
 			return nil
@@ -340,7 +359,6 @@ func TestPlanPrintsRemovedNotice(t *testing.T) {
 		t.Fatalf("expected notice to reference runoq tick, got %q", stderr.String())
 	}
 }
-
 
 func TestUnknownSubcommandPrintsUsage(t *testing.T) {
 	t.Parallel()

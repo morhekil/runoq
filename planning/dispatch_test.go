@@ -27,7 +27,9 @@ func TestRunDispatchSingleRoundPass(t *testing.T) {
 	t.Parallel()
 
 	planFile := filepath.Join(t.TempDir(), "plan.md")
-	os.WriteFile(planFile, []byte("# Plan"), 0o644)
+	if err := os.WriteFile(planFile, []byte("# Plan"), 0o644); err != nil {
+		t.Fatalf("write plan: %v", err)
+	}
 
 	proposalJSON := `{"items":[{"title":"M1","type":"implementation","goal":"Ship it","criteria":["Works"],"priority":1}]}`
 	techVerdict := "VERDICT: PASS\nSCORE: 32/35\nCHECKLIST:\n- [ ] None."
@@ -74,7 +76,9 @@ func TestRunDispatchIteratesOnReviewFailure(t *testing.T) {
 	t.Parallel()
 
 	planFile := filepath.Join(t.TempDir(), "plan.md")
-	os.WriteFile(planFile, []byte("# Plan"), 0o644)
+	if err := os.WriteFile(planFile, []byte("# Plan"), 0o644); err != nil {
+		t.Fatalf("write plan: %v", err)
+	}
 
 	callCount := 0
 	invoker := &fakeInvoker{
@@ -112,7 +116,9 @@ func TestRunDispatchBodyContainsProposal(t *testing.T) {
 	t.Parallel()
 
 	planFile := filepath.Join(t.TempDir(), "plan.md")
-	os.WriteFile(planFile, []byte("# Plan"), 0o644)
+	if err := os.WriteFile(planFile, []byte("# Plan"), 0o644); err != nil {
+		t.Fatalf("write plan: %v", err)
+	}
 
 	invoker := &fakeInvoker{
 		responses: map[string]string{

@@ -18,33 +18,6 @@ type issueView struct {
 	URL    string `json:"url"`
 }
 
-type eligibilityResult struct {
-	Allowed bool     `json:"allowed"`
-	Issue   int      `json:"issue"`
-	Branch  string   `json:"branch"`
-	Reasons []string `json:"reasons"`
-}
-
-type worktreeCreateResult struct {
-	Branch   string `json:"branch"`
-	Worktree string `json:"worktree"`
-}
-
-type prCreateResult struct {
-	Number any `json:"number"`
-}
-
-
-type epicStatusResult struct {
-	AllDone bool  `json:"all_done"`
-	Pending []int `json:"pending"`
-}
-
-type verifyIntegrateResult struct {
-	OK       bool     `json:"ok"`
-	Failures []string `json:"failures"`
-}
-
 type issueRunnerResult struct {
 	Status               string   `json:"status"`
 	LogDir               string   `json:"logDir"`

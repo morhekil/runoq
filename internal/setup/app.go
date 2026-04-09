@@ -34,7 +34,7 @@ type Config struct {
 	AppID      int64  // optional override via RUNOQ_APP_ID
 	SymlinkDir string // default: /usr/local/bin
 	HomeDir    string
-	ConfigPath string // path to runoq.json config
+	ConfigPath string   // path to runoq.json config
 	Env        []string // caller-supplied environment
 }
 
@@ -218,7 +218,9 @@ func resolveAppID(ctx context.Context, slug string, httpClient *http.Client) (in
 	if err != nil {
 		return 0, fmt.Errorf("resolve app ID for %s: %w", slug, err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != 200 {
 		return 0, fmt.Errorf("unable to resolve app ID for %s. For private GitHub Apps, set RUNOQ_APP_ID before running runoq init", slug)
@@ -247,7 +249,9 @@ func resolveInstallation(ctx context.Context, repo, jwt string, httpClient *http
 	if err != nil {
 		return nil, fmt.Errorf("resolve installation for %s: %w", repo, err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode == 404 {
 		return nil, fmt.Errorf("GitHub App installation not found for %s. Install the app on this repository, then rerun runoq init", repo)
@@ -519,7 +523,7 @@ func ensureSymlink(cfg Config, stderr io.Writer) error {
 	target := filepath.Join(cfg.RunoqRoot, "bin", "runoq")
 
 	if err := os.MkdirAll(linkDir, 0o755); err != nil {
-		fmt.Fprintf(stderr, "Warning: %s is not writable. Set RUNOQ_SYMLINK_DIR to a writable directory on your PATH.\n", linkDir)
+		_, _ = fmt.Fprintf(stderr, "Warning: %s is not writable. Set RUNOQ_SYMLINK_DIR to a writable directory on your PATH.\n", linkDir)
 		return nil
 	}
 

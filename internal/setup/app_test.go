@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -90,15 +91,15 @@ func fakeGitHubServer(t *testing.T, appID, installationID int64, slug string) *h
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/apps/"+slug && r.Method == http.MethodGet:
-			json.NewEncoder(w).Encode(map[string]any{"id": appID})
+			mustEncodeJSON(t, w, map[string]any{"id": appID})
 		case strings.HasSuffix(r.URL.Path, "/installation") && r.Method == http.MethodGet:
-			json.NewEncoder(w).Encode(map[string]any{
+			mustEncodeJSON(t, w, map[string]any{
 				"id":       installationID,
 				"app_id":   appID,
 				"app_slug": slug,
 			})
 		case strings.HasPrefix(r.URL.Path, "/app/installations/") && r.Method == http.MethodPost:
-			json.NewEncoder(w).Encode(map[string]string{"token": "ghs_test123"})
+			mustEncodeJSON(t, w, map[string]string{"token": "ghs_test123"})
 		default:
 			http.Error(w, "not found", 404)
 		}
@@ -125,9 +126,18 @@ func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 	return f(r)
 }
 
-// noopExec is a shell.CommandExecutor that does nothing.
-func noopExec(_ context.Context, _ shell.CommandRequest) error {
-	return nil
+func mustEncodeJSON(t *testing.T, w io.Writer, value any) {
+	t.Helper()
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		t.Fatalf("encode JSON: %v", err)
+	}
+}
+
+func mustFprint(t *testing.T, w io.Writer, value string) {
+	t.Helper()
+	if _, err := fmt.Fprint(w, value); err != nil {
+		t.Fatalf("write output: %v", err)
+	}
 }
 
 // --- tests ---
@@ -143,7 +153,7 @@ func TestEnsureLabels_CreatesWhenMissing(t *testing.T) {
 	exec := func(_ context.Context, req shell.CommandRequest) error {
 		// gh label list
 		if len(req.Args) > 0 && req.Args[0] == "label" && req.Args[1] == "list" {
-			fmt.Fprint(req.Stdout, `[{"name":"existing-label"}]`)
+			mustFprint(t, req.Stdout, `[{"name":"existing-label"}]`)
 			return nil
 		}
 		// gh label create
@@ -185,7 +195,7 @@ func TestEnsureLabels_SkipsExisting(t *testing.T) {
 	var created []string
 	exec := func(_ context.Context, req shell.CommandRequest) error {
 		if len(req.Args) > 1 && req.Args[0] == "label" && req.Args[1] == "list" {
-			fmt.Fprint(req.Stdout, `[{"name":"runoq:ready"},{"name":"runoq:done"}]`)
+			mustFprint(t, req.Stdout, `[{"name":"runoq:ready"},{"name":"runoq:done"}]`)
 			return nil
 		}
 		if len(req.Args) > 1 && req.Args[0] == "label" && req.Args[1] == "create" {
@@ -214,7 +224,7 @@ func TestEnsureIssueTypes_WritesMapping(t *testing.T) {
 	exec := func(_ context.Context, req shell.CommandRequest) error {
 		cmd := strings.Join(req.Args, " ")
 		if strings.Contains(cmd, "api graphql") {
-			fmt.Fprint(req.Stdout, `{"data":{"organization":{"issueTypes":{"nodes":[
+			mustFprint(t, req.Stdout, `{"data":{"organization":{"issueTypes":{"nodes":[
 				{"name":"Task","id":"IT_task123"},
 				{"name":"Bug","id":"IT_bug456"},
 				{"name":"Epic","id":"IT_epic789"}
@@ -254,7 +264,7 @@ func TestEnsureIssueTypes_FailsWithoutRequiredTypes(t *testing.T) {
 	exec := func(_ context.Context, req shell.CommandRequest) error {
 		cmd := strings.Join(req.Args, " ")
 		if strings.Contains(cmd, "api graphql") {
-			fmt.Fprint(req.Stdout, `{"data":{"organization":{"issueTypes":{"nodes":[
+			mustFprint(t, req.Stdout, `{"data":{"organization":{"issueTypes":{"nodes":[
 				{"name":"Bug","id":"IT_bug456"}
 			]}}}}`)
 			return nil
@@ -689,12 +699,12 @@ func TestFullRun(t *testing.T) {
 
 	exec := func(_ context.Context, req shell.CommandRequest) error {
 		if len(req.Args) > 1 && req.Args[0] == "label" && req.Args[1] == "list" {
-			fmt.Fprint(req.Stdout, `[{"name":"runoq:ready"},{"name":"runoq:in-progress"},{"name":"runoq:done"}]`)
+			mustFprint(t, req.Stdout, `[{"name":"runoq:ready"},{"name":"runoq:in-progress"},{"name":"runoq:done"}]`)
 			return nil
 		}
 		cmd := strings.Join(req.Args, " ")
 		if strings.Contains(cmd, "api graphql") {
-			fmt.Fprint(req.Stdout, `{"data":{"organization":{"issueTypes":{"nodes":[{"name":"Task","id":"IT_t"},{"name":"Epic","id":"IT_e"}]}}}}`)
+			mustFprint(t, req.Stdout, `{"data":{"organization":{"issueTypes":{"nodes":[{"name":"Task","id":"IT_t"},{"name":"Epic","id":"IT_e"}]}}}}`)
 			return nil
 		}
 		return nil

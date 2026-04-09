@@ -32,7 +32,7 @@ func (s *ghStub) exec(_ context.Context, req shell.CommandRequest) error {
 	for _, r := range s.rules {
 		if strings.Contains(cmd, r.contains) {
 			if req.Stdout != nil && r.stdout != "" {
-				req.Stdout.Write([]byte(r.stdout))
+				_, _ = req.Stdout.Write([]byte(r.stdout))
 			}
 			return r.err
 		}
@@ -68,7 +68,7 @@ func (s *countingStub) exec(_ context.Context, req shell.CommandRequest) error {
 				return r.failErr
 			}
 			if req.Stdout != nil && r.stdout != "" {
-				req.Stdout.Write([]byte(r.stdout))
+				_, _ = req.Stdout.Write([]byte(r.stdout))
 			}
 			return nil
 		}
@@ -92,9 +92,9 @@ func TestFetchDependenciesRetriesOnFailure(t *testing.T) {
 
 	runner := &tickRunner{
 		cfg: TickConfig{
-			Repo:    "owner/repo",
-			Stderr:  io.Discard,
-			Stdout:  io.Discard,
+			Repo:        "owner/repo",
+			Stderr:      io.Discard,
+			Stdout:      io.Discard,
 			ExecCommand: stub.exec,
 		},
 		issues: []issue{
@@ -103,7 +103,9 @@ func TestFetchDependenciesRetriesOnFailure(t *testing.T) {
 		},
 	}
 
-	runner.fetchDependencies(t.Context())
+	if err := runner.fetchDependencies(t.Context()); err != nil {
+		t.Fatalf("fetchDependencies: %v", err)
+	}
 
 	if runner.issues[0].IssueType != "epic" {
 		t.Errorf("issue 1: expected IssueType 'epic', got %q", runner.issues[0].IssueType)
@@ -137,9 +139,9 @@ func TestFetchDependenciesFailsAfterRetries(t *testing.T) {
 
 	runner := &tickRunner{
 		cfg: TickConfig{
-			Repo:    "owner/repo",
-			Stderr:  io.Discard,
-			Stdout:  io.Discard,
+			Repo:        "owner/repo",
+			Stderr:      io.Discard,
+			Stdout:      io.Discard,
 			ExecCommand: stub.exec,
 		},
 		issues: []issue{
@@ -161,7 +163,9 @@ func TestRunTickNoEpicsBootstraps(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "runoq.json")
-	os.WriteFile(configPath, []byte(`{"labels":{"ready":"runoq:ready","inProgress":"runoq:in-progress","done":"runoq:done","needsReview":"runoq:needs-human-review","blocked":"runoq:blocked","planApproved":"runoq:plan-approved"}}`), 0o644)
+	if err := os.WriteFile(configPath, []byte(`{"labels":{"ready":"runoq:ready","inProgress":"runoq:in-progress","done":"runoq:done","needsReview":"runoq:needs-human-review","blocked":"runoq:blocked","planApproved":"runoq:plan-approved"}}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
 
 	var issueCreateCalled bool
 	stub := &ghStub{
@@ -173,10 +177,10 @@ func TestRunTickNoEpicsBootstraps(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	result := RunTick(t.Context(), TickConfig{
-		Repo:        "owner/repo",
-		PlanFile:    "docs/plan.md",
-		RunoqRoot:   tmpDir,
-		Env:         []string{"RUNOQ_CONFIG=" + configPath},
+		Repo:      "owner/repo",
+		PlanFile:  "docs/plan.md",
+		RunoqRoot: tmpDir,
+		Env:       []string{"RUNOQ_CONFIG=" + configPath},
 		ExecCommand: func(ctx context.Context, req shell.CommandRequest) error {
 			if strings.Contains(req.Name+" "+strings.Join(req.Args, " "), "issue create") {
 				issueCreateCalled = true
@@ -538,7 +542,9 @@ func TestTickSelectsTaskAndCallsRunIssue(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "runoq.json")
-	os.WriteFile(configPath, []byte(`{"labels":{"ready":"runoq:ready","inProgress":"runoq:in-progress","done":"runoq:done","needsReview":"runoq:needs-human-review","blocked":"runoq:blocked","planApproved":"runoq:plan-approved"}}`), 0o644)
+	if err := os.WriteFile(configPath, []byte(`{"labels":{"ready":"runoq:ready","inProgress":"runoq:in-progress","done":"runoq:done","needsReview":"runoq:needs-human-review","blocked":"runoq:blocked","planApproved":"runoq:plan-approved"}}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
 
 	// Epic #9 with task children #10 and #11
 	issueList := `[
@@ -619,9 +625,9 @@ func TestDispatchTaskRespectsIssueStatusFromState(t *testing.T) {
 	// phaseFinalize/phaseDevelopNeedsReview is authoritative.
 
 	tests := []struct {
-		name           string
-		stateJSON      string
-		wantSetStatus  string // expected status arg to issueSetStatus, "" means no call
+		name          string
+		stateJSON     string
+		wantSetStatus string // expected status arg to issueSetStatus, "" means no call
 	}{
 		{
 			name:          "needs-review state should not become done",

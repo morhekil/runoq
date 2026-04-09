@@ -63,19 +63,25 @@ func Stream(ctx context.Context, exec shell.CommandExecutor, cfg StreamConfig) e
 	if err != nil {
 		return err
 	}
-	defer stderrFile.Close()
+	defer func() {
+		_ = stderrFile.Close()
+	}()
 
 	streamFile, err := os.Create(filepath.Join(captureDir, "stdout.log"))
 	if err != nil {
 		return err
 	}
-	defer streamFile.Close()
+	defer func() {
+		_ = streamFile.Close()
+	}()
 
 	progressLog, err := os.Create(filepath.Join(captureDir, "progress.log"))
 	if err != nil {
 		return err
 	}
-	defer progressLog.Close()
+	defer func() {
+		_ = progressLog.Close()
+	}()
 
 	writeCaptureContext(captureDir, claudeBin, cfg.Env, cfg.Args)
 	writeRequestArg(captureDir, cfg.Args)
@@ -100,7 +106,9 @@ func Stream(ctx context.Context, exec shell.CommandExecutor, cfg StreamConfig) e
 	// Run claude in background, writing to the pipe.
 	errCh := make(chan error, 1)
 	go func() {
-		defer pw.Close()
+		defer func() {
+			_ = pw.Close()
+		}()
 		errCh <- exec(ctx, shell.CommandRequest{
 			Name:   claudeBin,
 			Args:   fullArgs,
@@ -152,13 +160,17 @@ func CapturedExec(ctx context.Context, exec shell.CommandExecutor, cfg CaptureCo
 	if err != nil {
 		return err
 	}
-	defer stdoutFile.Close()
+	defer func() {
+		_ = stdoutFile.Close()
+	}()
 
 	stderrFile, err := os.Create(filepath.Join(captureDir, "stderr.log"))
 	if err != nil {
 		return err
 	}
-	defer stderrFile.Close()
+	defer func() {
+		_ = stderrFile.Close()
+	}()
 
 	writeCaptureContext(captureDir, claudeBin, cfg.Env, cfg.Args)
 	writeRequestArg(captureDir, cfg.Args)
@@ -316,8 +328,8 @@ func emitProgress(line string, progress io.Writer, progressLog *os.File) {
 			for _, block := range ev.Message.Content {
 				if block.Type == "tool_use" && block.Name != "" {
 					msg := "[agent] tool: " + block.Name
-					fmt.Fprintf(progress, "\033[2m  %s\033[0m\n", msg)
-					fmt.Fprintln(progressLog, msg)
+					_, _ = fmt.Fprintf(progress, "\033[2m  %s\033[0m\n", msg)
+					_, _ = fmt.Fprintln(progressLog, msg)
 				}
 			}
 			thinkingCount := 0
@@ -328,14 +340,14 @@ func emitProgress(line string, progress io.Writer, progressLog *os.File) {
 			}
 			if thinkingCount > 0 {
 				msg := "[agent] thinking..."
-				fmt.Fprintf(progress, "\033[2m  %s\033[0m\n", msg)
-				fmt.Fprintln(progressLog, msg)
+				_, _ = fmt.Fprintf(progress, "\033[2m  %s\033[0m\n", msg)
+				_, _ = fmt.Fprintln(progressLog, msg)
 			}
 		}
 	case "result":
 		msg := "[agent] done"
-		fmt.Fprintf(progress, "\033[2m  %s\033[0m\n", msg)
-		fmt.Fprintln(progressLog, msg)
+		_, _ = fmt.Fprintf(progress, "\033[2m  %s\033[0m\n", msg)
+		_, _ = fmt.Fprintln(progressLog, msg)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +16,13 @@ import (
 
 	"github.com/saruman/runoq/internal/gh"
 )
+
+func mustEncodeJSON(t *testing.T, w io.Writer, value any) {
+	t.Helper()
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		t.Fatalf("encode JSON: %v", err)
+	}
+}
 
 func TestLoadPrivateKey(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -66,7 +74,7 @@ func TestMintBotToken(t *testing.T) {
 			t.Error("missing Authorization header")
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"token": "test-tok-123"})
+		mustEncodeJSON(t, w, map[string]string{"token": "test-tok-123"})
 	}))
 	defer srv.Close()
 
@@ -129,12 +137,12 @@ func TestMintBotTokenForOwner(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/app/installations" && r.Method == http.MethodGet:
-			json.NewEncoder(w).Encode([]map[string]any{
+			mustEncodeJSON(t, w, []map[string]any{
 				{"id": 111, "account": map[string]string{"login": "other-org"}},
 				{"id": 222, "account": map[string]string{"login": "my-org"}},
 			})
 		case r.Method == http.MethodPost && r.URL.Path == "/app/installations/222/access_tokens":
-			json.NewEncoder(w).Encode(map[string]string{"token": "dynamic-tok"})
+			mustEncodeJSON(t, w, map[string]string{"token": "dynamic-tok"})
 		default:
 			http.Error(w, "unexpected request: "+r.URL.Path, 404)
 		}
@@ -169,7 +177,7 @@ func TestMintBotTokenForOwner_NotFound(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]map[string]any{
+		mustEncodeJSON(t, w, []map[string]any{
 			{"id": 111, "account": map[string]string{"login": "other-org"}},
 		})
 	}))

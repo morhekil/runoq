@@ -14,7 +14,10 @@ import (
 var prNumberFromURL = regexp.MustCompile(`/pull/(\d+)`)
 
 // createDraftPR creates a draft PR linked to the given issue.
-func (a *App) createDraftPR(ctx context.Context, repo, branch string, issueNumber int, title string) (struct{ URL string; Number int }, error) {
+func (a *App) createDraftPR(ctx context.Context, repo, branch string, issueNumber int, title string) (struct {
+	URL    string
+	Number int
+}, error) {
 	// Build the PR body from the template
 	templatePath := ""
 	if root := a.runoqRoot(); root != "" {
@@ -30,18 +33,34 @@ func (a *App) createDraftPR(ctx context.Context, repo, branch string, issueNumbe
 
 	bodyFile, err := os.CreateTemp("", "runoq-pr-create.*")
 	if err != nil {
-		return struct{ URL string; Number int }{}, err
+		return struct {
+			URL    string
+			Number int
+		}{}, err
 	}
-	defer os.Remove(bodyFile.Name())
+	defer func() {
+		_ = os.Remove(bodyFile.Name())
+	}()
 	if _, err := io.WriteString(bodyFile, body); err != nil {
-		bodyFile.Close()
-		return struct{ URL string; Number int }{}, err
+		_ = bodyFile.Close()
+		return struct {
+			URL    string
+			Number int
+		}{}, err
 	}
-	bodyFile.Close()
+	if err := bodyFile.Close(); err != nil {
+		return struct {
+			URL    string
+			Number int
+		}{}, err
+	}
 
 	url, err := a.ghOutput(ctx, a.env, "pr", "create", "--repo", repo, "--draft", "--title", title, "--head", branch, "--body-file", bodyFile.Name())
 	if err != nil {
-		return struct{ URL string; Number int }{}, fmt.Errorf("gh pr create: %w", err)
+		return struct {
+			URL    string
+			Number int
+		}{}, fmt.Errorf("gh pr create: %w", err)
 	}
 
 	url = strings.TrimSpace(url)
@@ -50,7 +69,10 @@ func (a *App) createDraftPR(ctx context.Context, repo, branch string, issueNumbe
 		number, _ = strconv.Atoi(m[1])
 	}
 
-	return struct{ URL string; Number int }{URL: url, Number: number}, nil
+	return struct {
+		URL    string
+		Number int
+	}{URL: url, Number: number}, nil
 }
 
 // commentPR posts a comment on a PR.
@@ -59,12 +81,16 @@ func (a *App) commentPR(ctx context.Context, repo string, prNumber int, body str
 	if err != nil {
 		return err
 	}
-	defer os.Remove(bodyFile.Name())
+	defer func() {
+		_ = os.Remove(bodyFile.Name())
+	}()
 	if _, err := io.WriteString(bodyFile, body); err != nil {
-		bodyFile.Close()
+		_ = bodyFile.Close()
 		return err
 	}
-	bodyFile.Close()
+	if err := bodyFile.Close(); err != nil {
+		return err
+	}
 
 	_, err = a.ghOutput(ctx, a.env, "pr", "comment", strconv.Itoa(prNumber), "--repo", repo, "--body-file", bodyFile.Name())
 	return err
@@ -93,9 +119,9 @@ func (a *App) pollMentions(ctx context.Context, repo, handle string) ([]json.Raw
 			continue
 		}
 		var comments []struct {
-			ID        int    `json:"id"`
-			Body      string `json:"body"`
-			User      struct {
+			ID   int    `json:"id"`
+			Body string `json:"body"`
+			User struct {
 				Login string `json:"login"`
 			} `json:"user"`
 			CreatedAt string `json:"created_at"`

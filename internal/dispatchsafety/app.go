@@ -10,8 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -23,8 +21,6 @@ const usageText = `Usage:
   dispatch-safety.sh reconcile <repo>
   dispatch-safety.sh eligibility <repo> <issue-number>
 `
-
-var numericBasenamePattern = regexp.MustCompile(`^[0-9]+$`)
 
 type App struct {
 	args        []string
@@ -241,9 +237,9 @@ func (a *App) runEligibility(ctx context.Context, repo string, issueArg string) 
 	}
 
 	var issue struct {
-		Number int    `json:"number"`
-		Title  string `json:"title"`
-		Body   string `json:"body"`
+		Number int          `json:"number"`
+		Title  string       `json:"title"`
+		Body   string       `json:"body"`
 		Labels []labelEntry `json:"labels"`
 	}
 	if err := json.Unmarshal([]byte(issueOutput), &issue); err != nil {
@@ -328,217 +324,6 @@ func (a *App) runEligibility(ctx context.Context, repo string, issueArg string) 
 	return 1
 }
 
-func (a *App) reconcileStateFile(ctx context.Context, repo string, file string) (reconcileAction, bool, error) {
-	state, ok, err := loadJSONMap(file)
-	if err != nil {
-		return reconcileAction{}, false, err
-	}
-	if !ok {
-		return reconcileAction{}, false, nil
-	}
-
-	phase := rawStringOr(state["phase"], "")
-	if phase == "DONE" {
-		return reconcileAction{}, false, nil
-	}
-	if phase == "FAILED" {
-		issueNumber, _ := intValue(state["issue"])
-		a.cleanupIssueArtifacts(ctx, repo, issueNumber)
-		_ = os.Remove(file)
-		return reconcileAction{
-			Issue:  issueNumber,
-			Action: "cleanup-failed",
-		}, true, nil
-	}
-
-	issueNumber, ok := intValue(state["issue"])
-	if !ok {
-		return reconcileAction{}, false, fmt.Errorf("state file %s is missing a numeric issue", file)
-	}
-	round, _ := intValue(state["round"])
-	branch := rawStringOr(state["branch"], "")
-	prNumber := rawStringOr(state["pr_number"], "")
-	updatedAt := rawStringOr(state["updated_at"], "unknown")
-
-	resumedPR, hasResumedPR, err := a.resolveOpenPRNumber(ctx, repo, prNumber, branch)
-	if err != nil {
-		if !isExitError(err) {
-			return reconcileAction{}, false, err
-		}
-	}
-
-	if hasResumedPR {
-		pushed, branchErr := a.branchIsPushed(ctx, branch)
-		if branchErr != nil {
-			return reconcileAction{}, false, branchErr
-		}
-		if pushed {
-			message := fmt.Sprintf(
-				"Detected interrupted run from %s. Previous phase: %s round %d. Resuming.",
-				updatedAt,
-				phase,
-				round,
-			)
-			if err := a.issueComment(ctx, repo, issueNumber, message); err != nil {
-				return reconcileAction{}, false, err
-			}
-			if err := a.prComment(ctx, repo, resumedPR, message); err != nil {
-				return reconcileAction{}, false, err
-			}
-			return reconcileAction{
-				Issue:    issueNumber,
-				PRNumber: intPtr(resumedPR),
-				Action:   "resume",
-				Phase:    stringPtr(phase),
-				Round:    intPtr(round),
-			}, true, nil
-		}
-	}
-
-	message := fmt.Sprintf(
-		"Detected interrupted run from %s. Previous phase: %s round %d. Marking for human review.",
-		updatedAt,
-		phase,
-		round,
-	)
-	if err := a.setIssueStatus(ctx, repo, issueNumber, "needs-review"); err != nil {
-		return reconcileAction{}, false, err
-	}
-	if err := a.issueComment(ctx, repo, issueNumber, message); err != nil {
-		return reconcileAction{}, false, err
-	}
-	if hasResumedPR {
-		if err := a.prComment(ctx, repo, resumedPR, message); err != nil {
-			return reconcileAction{}, false, err
-		}
-	}
-
-	return reconcileAction{
-		Issue:  issueNumber,
-		Action: "needs-review",
-		Phase:  stringPtr(phase),
-		Round:  intPtr(round),
-	}, true, nil
-}
-
-func (a *App) reconcileStaleLabels(ctx context.Context, repo string, activeIssues map[int]struct{}) ([]reconcileAction, error) {
-	cfg, err := a.loadConfig()
-	if err != nil {
-		return nil, err
-	}
-
-	output, err := a.ghOutput(
-		ctx,
-		"issue", "list",
-		"--repo", repo,
-		"--label", cfg.Labels.InProgress,
-		"--state", "open",
-		"--limit", "200",
-		"--json", "number,title,labels",
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	var issues []map[string]any
-	if err := json.Unmarshal([]byte(output), &issues); err != nil {
-		return nil, fmt.Errorf("failed to parse in-progress issues: %v", err)
-	}
-
-	actions := make([]reconcileAction, 0, len(issues))
-	for _, issue := range issues {
-		issueNumber, ok := intValue(issue["number"])
-		if !ok {
-			continue
-		}
-		if _, exists := activeIssues[issueNumber]; exists {
-			continue
-		}
-
-		if err := a.setIssueStatus(ctx, repo, issueNumber, "ready"); err != nil {
-			return nil, err
-		}
-		message := "Found stale runoq:in-progress label with no active run. Reset to runoq:ready."
-		if err := a.issueComment(ctx, repo, issueNumber, message); err != nil {
-			return nil, err
-		}
-
-		actions = append(actions, reconcileAction{
-			Issue:  issueNumber,
-			Action: "reset-ready",
-		})
-	}
-
-	return actions, nil
-}
-
-func (a *App) activeStateIssues() (map[int]struct{}, error) {
-	files, err := a.stateJSONFiles()
-	if err != nil {
-		return nil, err
-	}
-
-	issues := make(map[int]struct{})
-	for _, file := range files {
-		base := strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
-		if !numericBasenamePattern.MatchString(base) {
-			continue
-		}
-
-		state, ok, err := loadJSONMap(file)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			continue
-		}
-		phase := rawStringOr(state["phase"], "")
-		if phase == "DONE" || phase == "FAILED" {
-			continue
-		}
-		issueNumber, ok := intValue(state["issue"])
-		if !ok {
-			return nil, fmt.Errorf("state file %s is missing a numeric issue", file)
-		}
-		issues[issueNumber] = struct{}{}
-	}
-
-	return issues, nil
-}
-
-func (a *App) resolveOpenPRNumber(ctx context.Context, repo string, prNumber string, branch string) (int, bool, error) {
-	if strings.TrimSpace(prNumber) != "" && prNumber != "null" {
-		output, err := a.ghOutputQuiet(ctx, "pr", "view", prNumber, "--repo", repo, "--json", "number")
-		if err == nil {
-			var pr struct {
-				Number int `json:"number"`
-			}
-			if json.Unmarshal([]byte(output), &pr) == nil && pr.Number != 0 {
-				return pr.Number, true, nil
-			}
-		}
-	}
-
-	if strings.TrimSpace(branch) == "" {
-		return 0, false, nil
-	}
-
-	output, err := a.ghOutputQuiet(ctx, "pr", "list", "--repo", repo, "--state", "open", "--head", branch, "--json", "number")
-	if err != nil {
-		return 0, false, err
-	}
-	var prs []struct {
-		Number int `json:"number"`
-	}
-	if err := json.Unmarshal([]byte(output), &prs); err != nil {
-		return 0, false, fmt.Errorf("failed to parse PR list: %v", err)
-	}
-	if len(prs) == 0 || prs[0].Number == 0 {
-		return 0, false, nil
-	}
-	return prs[0].Number, true, nil
-}
-
 func (a *App) dependencyReason(ctx context.Context, repo string, dependency string, doneLabel string) (string, bool, error) {
 	output, err := a.ghOutput(ctx, "issue", "view", dependency, "--repo", repo, "--json", "labels")
 	if err != nil {
@@ -609,34 +394,8 @@ func (a *App) branchHasConflicts(ctx context.Context, branch string) (bool, erro
 	return repo.MergeHasConflicts(strings.TrimSpace(mergeBase), "origin/main", remoteSHA)
 }
 
-func (a *App) branchIsPushed(ctx context.Context, branch string) (bool, error) {
-	if strings.TrimSpace(branch) == "" {
-		return false, nil
-	}
-
-	repo, err := a.targetRepo(ctx)
-	if err != nil {
-		return false, err
-	}
-
-	gitDirInfo, statErr := os.Stat(filepath.Join(repo.Root(), ".git"))
-	if statErr != nil || !gitDirInfo.IsDir() {
-		return false, nil
-	}
-
-	_, exists, err := repo.RemoteRefExists("origin", branch)
-	if err != nil {
-		return false, nil
-	}
-	return exists, nil
-}
-
 func (a *App) issueComment(ctx context.Context, repo string, issueNumber int, body string) error {
 	return a.runGh(ctx, io.Discard, "issue", "comment", strconv.Itoa(issueNumber), "--repo", repo, "--body", body)
-}
-
-func (a *App) prComment(ctx context.Context, repo string, prNumber int, body string) error {
-	return a.runGh(ctx, io.Discard, "pr", "comment", strconv.Itoa(prNumber), "--repo", repo, "--body", body)
 }
 
 func (a *App) setIssueStatus(ctx context.Context, repo string, issueNumber int, status string) error {
@@ -756,77 +515,6 @@ func (a *App) configPath() (string, error) {
 	return "", errors.New("RUNOQ_CONFIG is required")
 }
 
-// cleanupIssueArtifacts removes all artifacts for a failed issue so it can
-// be re-dispatched. Discovers artifacts by convention (prefix + issue number)
-// using filesystem operations, only calling gh for PR closure.
-func (a *App) cleanupIssueArtifacts(ctx context.Context, repo string, issueNumber int) {
-	targetRoot, _ := shell.EnvLookup(a.env, "TARGET_ROOT")
-	if targetRoot == "" {
-		return
-	}
-
-	cfg, _ := a.loadConfig()
-
-	issueStr := strconv.Itoa(issueNumber)
-
-	// 1. Remove worktree directory (pure filesystem)
-	worktreePrefix := cfg.WorktreePrefix
-	if worktreePrefix == "" {
-		worktreePrefix = "runoq-wt-"
-	}
-	if parent, err := filepath.Abs(filepath.Join(targetRoot, "..")); err == nil {
-		_ = os.RemoveAll(filepath.Join(parent, worktreePrefix+issueStr))
-	}
-
-	// 2. Prune stale worktree metadata in .git/worktrees/
-	worktreesDir := filepath.Join(targetRoot, ".git", "worktrees")
-	if entries, err := os.ReadDir(worktreesDir); err == nil {
-		for _, entry := range entries {
-			if entry.IsDir() && strings.HasPrefix(entry.Name(), worktreePrefix+issueStr) {
-				_ = os.RemoveAll(filepath.Join(worktreesDir, entry.Name()))
-			}
-		}
-	}
-
-	// 3. Delete local branch refs matching prefix + issue number
-	branchPrefix := cfg.BranchPrefix
-	if branchPrefix == "" {
-		branchPrefix = "runoq/"
-	}
-	branchRefDir := filepath.Join(targetRoot, ".git", "refs", "heads")
-	refPrefix := issueStr + "-"
-	for _, segment := range strings.Split(branchPrefix, "/") {
-		if segment != "" {
-			branchRefDir = filepath.Join(branchRefDir, segment)
-		}
-	}
-	if entries, err := os.ReadDir(branchRefDir); err == nil {
-		for _, entry := range entries {
-			if strings.HasPrefix(entry.Name(), refPrefix) {
-				_ = os.Remove(filepath.Join(branchRefDir, entry.Name()))
-			}
-		}
-	}
-
-	// 4. Close open PRs for this issue's branches (GitHub API — unavoidable)
-	// gh pr list doesn't support prefix matching on --head, so list all open
-	// PRs and filter by branch prefix client-side.
-	prsOut, _ := a.ghOutputQuiet(ctx, "pr", "list", "--repo", repo, "--state", "open",
-		"--json", "number,headRefName", "--limit", "50")
-	var prs []struct {
-		Number      int    `json:"number"`
-		HeadRefName string `json:"headRefName"`
-	}
-	if json.Unmarshal([]byte(prsOut), &prs) == nil {
-		matchPrefix := branchPrefix + issueStr + "-"
-		for _, pr := range prs {
-			if strings.HasPrefix(pr.HeadRefName, matchPrefix) {
-				_ = a.runGh(ctx, io.Discard, "pr", "close", strconv.Itoa(pr.Number), "--repo", repo, "--delete-branch")
-			}
-		}
-	}
-}
-
 func (a *App) runoqRoot() (string, error) {
 	if value, ok := shell.EnvLookup(a.env, "RUNOQ_ROOT"); ok && strings.TrimSpace(value) != "" {
 		return value, nil
@@ -860,45 +548,6 @@ func (a *App) targetRepo(ctx context.Context) (gitops.Repo, error) {
 	return gitops.OpenCLI(ctx, root, a.execCommand), nil
 }
 
-func (a *App) stateDir(ctx context.Context) (string, error) {
-	if value, ok := shell.EnvLookup(a.env, "RUNOQ_STATE_DIR"); ok && strings.TrimSpace(value) != "" {
-		return value, nil
-	}
-	targetRoot, err := a.targetRoot(ctx)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(targetRoot, ".runoq", "state"), nil
-}
-
-func (a *App) stateJSONFiles() ([]string, error) {
-	stateDir, err := a.stateDir(context.Background())
-	if err != nil {
-		return nil, err
-	}
-
-	entries, err := os.ReadDir(stateDir)
-	if errors.Is(err, os.ErrNotExist) {
-		return []string{}, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to list state directory: %v", err)
-	}
-
-	files := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		if filepath.Ext(entry.Name()) != ".json" {
-			continue
-		}
-		files = append(files, filepath.Join(stateDir, entry.Name()))
-	}
-	sort.Strings(files)
-	return files, nil
-}
-
 // NewDirect creates an App for direct Go calls (not subprocess).
 func NewDirect(env []string, cwd string, logWriter io.Writer) *App {
 	stderr := io.Writer(io.Discard)
@@ -925,9 +574,9 @@ func (a *App) CheckEligibility(ctx context.Context, repo string, issueNumber int
 	}
 
 	var issue struct {
-		Number int    `json:"number"`
-		Title  string `json:"title"`
-		Body   string `json:"body"`
+		Number int          `json:"number"`
+		Title  string       `json:"title"`
+		Body   string       `json:"body"`
 		Labels []labelEntry `json:"labels"`
 	}
 	if err := json.Unmarshal([]byte(issueOutput), &issue); err != nil {
@@ -998,7 +647,6 @@ func (a *App) CheckEligibility(ctx context.Context, repo string, issueNumber int
 func (a *App) printUsage() {
 	_, _ = io.WriteString(a.stderr, usageText)
 }
-
 
 type labelEntry struct {
 	Name string `json:"name"`
@@ -1083,22 +731,6 @@ func branchSlug(input string) string {
 	return slug
 }
 
-func loadJSONMap(path string) (map[string]any, bool, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to read %s: %v", path, err)
-	}
-
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.UseNumber()
-
-	var value map[string]any
-	if err := decoder.Decode(&value); err != nil {
-		return nil, false, nil
-	}
-	return value, true, nil
-}
-
 func intValue(value any) (int, bool) {
 	switch typed := value.(type) {
 	case int:
@@ -1122,39 +754,6 @@ func intValue(value any) (int, bool) {
 	default:
 		return 0, false
 	}
-}
-
-func rawStringOr(value any, fallback string) string {
-	if value == nil {
-		return fallback
-	}
-	switch typed := value.(type) {
-	case string:
-		return typed
-	case json.Number:
-		return typed.String()
-	case float64:
-		return strconv.FormatFloat(typed, 'f', -1, 64)
-	case int:
-		return strconv.Itoa(typed)
-	case int64:
-		return strconv.FormatInt(typed, 10)
-	case bool:
-		if typed {
-			return "true"
-		}
-		return "false"
-	default:
-		return fmt.Sprint(typed)
-	}
-}
-
-func stringPtr(value string) *string {
-	return &value
-}
-
-func intPtr(value int) *int {
-	return &value
 }
 
 func isExitError(err error) bool {

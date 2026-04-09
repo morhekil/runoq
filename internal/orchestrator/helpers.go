@@ -31,7 +31,6 @@ func metadataFromIssueView(issue issueView) IssueMetadata {
 	}
 }
 
-
 func IssueMetadataFromQueue(raw string, issueNumber int) (IssueMetadata, bool) {
 	var queueEntries []struct {
 		Number              int     `json:"number"`
@@ -69,7 +68,6 @@ func IssueMetadataFromQueue(raw string, issueNumber int) (IssueMetadata, bool) {
 	}
 	return IssueMetadata{}, false
 }
-
 
 type reviewVerdictResult struct {
 	ReviewType string
@@ -320,14 +318,6 @@ func marshalJSON(v any) (string, error) {
 		return "", err
 	}
 	return string(data), nil
-}
-
-func nullableString(value string) *string {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" || trimmed == "null" {
-		return nil
-	}
-	return &trimmed
 }
 
 func finalizeDecision(state struct {

@@ -367,9 +367,15 @@ CHECKLIST:
 - [ ] Add error check at file.go:10
 `
 	tmpFile, _ := os.CreateTemp("", "review-test-*")
-	tmpFile.WriteString(content)
-	tmpFile.Close()
-	defer os.Remove(tmpFile.Name())
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		t.Fatalf("close temp file: %v", err)
+	}
+	defer func() {
+		_ = os.Remove(tmpFile.Name())
+	}()
 
 	result, err := parseReviewVerdict(tmpFile.Name())
 	if err != nil {
@@ -838,20 +844,20 @@ func TestResumeFromStateBoundaries(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name          string
-		inputState    string
-		wantPhase     string
-		wantTerminal  bool
-		wantCallMatch string // substring that must appear in gh calls
+		name           string
+		inputState     string
+		wantPhase      string
+		wantTerminal   bool
+		wantCallMatch  string // substring that must appear in gh calls
 		wantCallAbsent string // substring that must NOT appear
 	}{
 		{
-			name:          "OPEN-PR resumes to VERIFY boundary",
-			inputState:    `{"issue":42,"phase":"OPEN-PR","branch":"runoq/42-x","worktree":"/tmp/wt","pr_number":87,"round":1,"baseline_hash":"b","head_hash":"h","commit_range":"b..h","changed_files":["a.go"],"related_files":[],"spec_requirements":"## AC","verification_passed":true}`,
-			wantPhase:     "VERIFY",
-			wantTerminal:  false,
-			wantCallMatch: "pr comment 87",
-			wantCallAbsent: "pr merge",   // no finalize
+			name:           "OPEN-PR resumes to VERIFY boundary",
+			inputState:     `{"issue":42,"phase":"OPEN-PR","branch":"runoq/42-x","worktree":"/tmp/wt","pr_number":87,"round":1,"baseline_hash":"b","head_hash":"h","commit_range":"b..h","changed_files":["a.go"],"related_files":[],"spec_requirements":"## AC","verification_passed":true}`,
+			wantPhase:      "VERIFY",
+			wantTerminal:   false,
+			wantCallMatch:  "pr comment 87",
+			wantCallAbsent: "pr merge", // no finalize
 		},
 		{
 			name:           "VERIFY failure resumes to DECIDE boundary",
@@ -862,10 +868,10 @@ func TestResumeFromStateBoundaries(t *testing.T) {
 			wantCallAbsent: "stream-json",
 		},
 		{
-			name:          "REVIEW resumes to DECIDE boundary on PASS",
-			inputState:    `{"issue":42,"phase":"REVIEW","branch":"runoq/42-x","worktree":"/tmp/wt","pr_number":87,"round":1,"verdict":"PASS","score":"42","review_checklist":"- OK","baseline_hash":"b","head_hash":"h","summary":"Good"}`,
-			wantPhase:     "DECIDE",
-			wantTerminal:  false,
+			name:           "REVIEW resumes to DECIDE boundary on PASS",
+			inputState:     `{"issue":42,"phase":"REVIEW","branch":"runoq/42-x","worktree":"/tmp/wt","pr_number":87,"round":1,"verdict":"PASS","score":"42","review_checklist":"- OK","baseline_hash":"b","head_hash":"h","summary":"Good"}`,
+			wantPhase:      "DECIDE",
+			wantTerminal:   false,
 			wantCallAbsent: "pr ready",
 		},
 	}
@@ -890,7 +896,9 @@ func TestResumeFromStateBoundaries(t *testing.T) {
 				t.Fatalf("resumeFromState: %v", err)
 			}
 
-			var state struct{ Phase string `json:"phase"` }
+			var state struct {
+				Phase string `json:"phase"`
+			}
 			if err := json.Unmarshal([]byte(result), &state); err != nil {
 				t.Fatalf("parse: %v", err)
 			}
@@ -964,7 +972,6 @@ func TestPhaseFinalizeNeedsReviewWhenAutoMergeDisabled(t *testing.T) {
 	}
 }
 
-
 func TestRunCommandEntryRequiresIssueFlag(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
@@ -1035,12 +1042,18 @@ func TestPhaseIntegrateSuccessWithCriteriaCommitMarksDone(t *testing.T) {
 
 	// Create config file for verify app
 	configDir := root + "/config"
-	os.MkdirAll(configDir, 0o755)
-	os.WriteFile(configDir+"/runoq.json", []byte(`{"verification":{"testCommand":"echo test","buildCommand":"echo build"},"branchPrefix":"runoq/","worktreePrefix":"runoq-wt-"}`), 0o644)
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(configDir+"/runoq.json", []byte(`{"verification":{"testCommand":"echo test","buildCommand":"echo build"},"branchPrefix":"runoq/","worktreePrefix":"runoq-wt-"}`), 0o644); err != nil {
+		t.Fatalf("write runoq.json: %v", err)
+	}
 
 	// Create worktree dir and criteria file so os.Stat passes
 	worktreeDir := t.TempDir()
-	os.WriteFile(worktreeDir+"/criteria.md", []byte("criteria"), 0o644)
+	if err := os.WriteFile(worktreeDir+"/criteria.md", []byte("criteria"), 0o644); err != nil {
+		t.Fatalf("write criteria: %v", err)
+	}
 
 	var calls []string
 
@@ -1090,8 +1103,12 @@ func TestPhaseIntegrateFailureMarksNeedsReviewAndFailed(t *testing.T) {
 
 	// Create a config file for the verify app to read
 	configDir := root + "/config"
-	os.MkdirAll(configDir, 0o755)
-	os.WriteFile(configDir+"/runoq.json", []byte(`{"verification":{"testCommand":"echo test","buildCommand":"echo build"},"branchPrefix":"runoq/","worktreePrefix":"runoq-wt-"}`), 0o644)
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(configDir+"/runoq.json", []byte(`{"verification":{"testCommand":"echo test","buildCommand":"echo build"},"branchPrefix":"runoq/","worktreePrefix":"runoq-wt-"}`), 0o644); err != nil {
+		t.Fatalf("write runoq.json: %v", err)
+	}
 
 	var calls []string
 
@@ -1411,13 +1428,6 @@ func containsCall(calls []string, needle string) bool {
 		}
 	}
 	return false
-}
-
-func assertEnvNotValue(t *testing.T, env []string, key string, disallowed string) {
-	t.Helper()
-	if value, ok := shell.EnvLookup(env, key); ok && value == disallowed {
-		t.Fatalf("expected %s to not be %q, got %q", key, disallowed, value)
-	}
 }
 
 // isGHCall returns true if the command is a direct gh call or a bash-wrapped runoq::gh call,
@@ -1830,7 +1840,9 @@ func TestRunFromDevelopTransientErrorDoesNotEscalate(t *testing.T) {
 			if req.Name == "codex" || strings.HasSuffix(req.Name, "/codex") {
 				// Simulate transient capacity error.
 				if req.Stdout != nil {
-					req.Stdout.Write([]byte(`{"type":"turn.failed","error":"Selected model is at capacity"}` + "\n"))
+					if _, err := req.Stdout.Write([]byte(`{"type":"turn.failed","error":"Selected model is at capacity"}` + "\n")); err != nil {
+						t.Fatalf("write codex transient event: %v", err)
+					}
 				}
 				return true, fmt.Errorf("exit status 1")
 			}
@@ -1956,13 +1968,19 @@ func TestRunFromDevelopResetsTransientRetriesOnSuccess(t *testing.T) {
 		customHandler: func(req shell.CommandRequest) (bool, error) {
 			if req.Name == "codex" || strings.HasSuffix(req.Name, "/codex") {
 				if req.Stdout != nil {
-					req.Stdout.Write([]byte(`{"type":"thread.started","thread_id":"t1"}` + "\n"))
-					req.Stdout.Write([]byte(`{"tokens": 500}` + "\n"))
+					if _, err := req.Stdout.Write([]byte(`{"type":"thread.started","thread_id":"t1"}` + "\n")); err != nil {
+						t.Fatalf("write codex thread event: %v", err)
+					}
+					if _, err := req.Stdout.Write([]byte(`{"tokens": 500}` + "\n")); err != nil {
+						t.Fatalf("write codex token event: %v", err)
+					}
 				}
 				// Write fake last-message to -o path
 				for i, arg := range req.Args {
 					if arg == "-o" && i+1 < len(req.Args) {
-						os.WriteFile(req.Args[i+1], []byte("fake output"), 0o644)
+						if err := os.WriteFile(req.Args[i+1], []byte("fake output"), 0o644); err != nil {
+							t.Fatalf("write fake output: %v", err)
+						}
 						break
 					}
 				}
@@ -2017,7 +2035,9 @@ func TestRunFromDevelopEscalatesAfterMaxTransientRetries(t *testing.T) {
 		customHandler: func(req shell.CommandRequest) (bool, error) {
 			if req.Name == "codex" || strings.HasSuffix(req.Name, "/codex") {
 				if req.Stdout != nil {
-					req.Stdout.Write([]byte(`{"type":"turn.failed","error":"Selected model is at capacity"}` + "\n"))
+					if _, err := req.Stdout.Write([]byte(`{"type":"turn.failed","error":"Selected model is at capacity"}` + "\n")); err != nil {
+						t.Fatalf("write codex transient event: %v", err)
+					}
 				}
 				return true, fmt.Errorf("exit status 1")
 			}
@@ -2066,7 +2086,9 @@ func TestRunFromDevelopTransientErrorPostsDiagnosticComment(t *testing.T) {
 		customHandler: func(req shell.CommandRequest) (bool, error) {
 			if req.Name == "codex" || strings.HasSuffix(req.Name, "/codex") {
 				if req.Stdout != nil {
-					req.Stdout.Write([]byte(`{"type":"turn.failed","error":"Selected model is at capacity"}` + "\n"))
+					if _, err := req.Stdout.Write([]byte(`{"type":"turn.failed","error":"Selected model is at capacity"}` + "\n")); err != nil {
+						t.Fatalf("write codex transient event: %v", err)
+					}
 				}
 				return true, fmt.Errorf("exit status 1")
 			}

@@ -24,36 +24,36 @@ import (
 
 // TickConfig configures a single tick execution.
 type TickConfig struct {
-	Repo              string
-	PlanFile          string
-	RunoqRoot         string
-	PlanApprovedLabel string
-	ReadyLabel        string
-	InProgressLabel    string
-	DoneLabel          string
-	NeedsReviewLabel   string
-	BlockedLabel       string
-	BranchPrefix       string
-	WorktreePrefix     string
-	LastCompletedIssue int
+	Repo                 string
+	PlanFile             string
+	RunoqRoot            string
+	PlanApprovedLabel    string
+	ReadyLabel           string
+	InProgressLabel      string
+	DoneLabel            string
+	NeedsReviewLabel     string
+	BlockedLabel         string
+	BranchPrefix         string
+	WorktreePrefix       string
+	LastCompletedIssue   int
 	DryRunImplementation bool // when true, implementation dispatch is dry-run only (no worktree/codex)
-	Env                []string
-	ExecCommand       shell.CommandExecutor
-	Stdout            io.Writer
-	Stderr            io.Writer
+	Env                  []string
+	ExecCommand          shell.CommandExecutor
+	Stdout               io.Writer
+	Stderr               io.Writer
 }
 
 // issue represents a GitHub issue from the issue list.
 type issue struct {
-	Number    int      `json:"number"`
-	Title     string   `json:"title"`
-	State     string   `json:"state"`
-	Body      string   `json:"body"`
-	URL       string   `json:"url"`
-	Labels    []label  `json:"labels"`
-	BlockedBy   []int  `json:"-"` // populated from GitHub's blockedBy API
-	IssueType   string `json:"-"` // populated from GitHub's issueType API
-	ParentEpic  int    `json:"-"` // populated from sub-issues API
+	Number     int     `json:"number"`
+	Title      string  `json:"title"`
+	State      string  `json:"state"`
+	Body       string  `json:"body"`
+	URL        string  `json:"url"`
+	Labels     []label `json:"labels"`
+	BlockedBy  []int   `json:"-"` // populated from GitHub's blockedBy API
+	IssueType  string  `json:"-"` // populated from GitHub's issueType API
+	ParentEpic int     `json:"-"` // populated from sub-issues API
 }
 
 type label struct {
@@ -122,7 +122,7 @@ func (t *tickRunner) run(ctx context.Context) int {
 			return t.handleBootstrap(ctx)
 		}
 		t.success("All milestones complete")
-		fmt.Fprintln(t.cfg.Stdout, "All milestones complete")
+		_, _ = fmt.Fprintln(t.cfg.Stdout, "All milestones complete")
 		return 3
 	}
 	t.detail("epic", fmt.Sprintf("#%d %s", epic.Number, epic.Title))
@@ -212,7 +212,7 @@ func (t *tickRunner) run(ctx context.Context) int {
 	}
 
 	t.warn(fmt.Sprintf("%d tasks in progress, none ready", openChildren))
-	fmt.Fprintf(t.cfg.Stdout, "%d tasks in progress, none ready\n", openChildren)
+	_, _ = fmt.Fprintf(t.cfg.Stdout, "%d tasks in progress, none ready\n", openChildren)
 	return 2
 }
 
@@ -281,7 +281,7 @@ func (t *tickRunner) handleActiveConversations(ctx context.Context) int {
 		}
 
 		t.success(fmt.Sprintf("Responded to comments on PR #%d for task #%d", prNumber, iss.Number))
-		fmt.Fprintf(t.cfg.Stdout, "Responded to comments on PR #%d\n", prNumber)
+		_, _ = fmt.Fprintf(t.cfg.Stdout, "Responded to comments on PR #%d\n", prNumber)
 		return 0
 	}
 
@@ -337,13 +337,15 @@ func (t *tickRunner) handleBootstrap(ctx context.Context) int {
 	// Write proposal to issue body
 	currentBody, _ := t.ghOutput(ctx, "issue", "view", planningNumber, "--repo", t.cfg.Repo, "--json", "body", "--jq", ".body // \"\"")
 	newBody := planning.ReplaceProposalInBody(currentBody, result.FormattedBody)
-	t.ghEditBody(ctx, planningNumber, newBody)
+	if err := t.ghEditBody(ctx, planningNumber, newBody); err != nil {
+		return t.fail("update proposal on #%s: %v", planningNumber, err)
+	}
 
 	// Assign after proposal is posted
 	t.issueAssign(ctx, t.cfg.Repo, planningNumber)
 
 	t.success("Proposal posted on #" + planningNumber)
-	fmt.Fprintf(t.cfg.Stdout, "Created planning milestone. Proposal posted on #%s\n", planningNumber)
+	_, _ = fmt.Fprintf(t.cfg.Stdout, "Created planning milestone. Proposal posted on #%s\n", planningNumber)
 	return 0
 }
 
@@ -377,16 +379,16 @@ func (t *tickRunner) handlePendingReview(ctx context.Context, pending *issue) in
 			Invoker:           invoker,
 		}); err != nil {
 			t.warn(fmt.Sprintf("Comment handler failed for #%d: %v", pending.Number, err))
-			fmt.Fprintf(t.cfg.Stdout, "Comment handler failed for #%d\n", pending.Number)
+			_, _ = fmt.Fprintf(t.cfg.Stdout, "Comment handler failed for #%d\n", pending.Number)
 		} else {
 			t.success(fmt.Sprintf("Responded to comments on #%d", pending.Number))
-			fmt.Fprintf(t.cfg.Stdout, "Responded to comments on #%d\n", pending.Number)
+			_, _ = fmt.Fprintf(t.cfg.Stdout, "Responded to comments on #%d\n", pending.Number)
 		}
 		return 0
 	}
 
 	t.warn(fmt.Sprintf("Awaiting human decision on #%d", pending.Number))
-	fmt.Fprintf(t.cfg.Stdout, "Awaiting human decision on #%d\n", pending.Number)
+	_, _ = fmt.Fprintf(t.cfg.Stdout, "Awaiting human decision on #%d\n", pending.Number)
 	return 2
 }
 
@@ -394,8 +396,12 @@ func (t *tickRunner) handleApprovedPlanning(ctx context.Context, reviewView stri
 	proposalJSON, err := planning.ExtractMarkedJSONBlock(reviewView, "runoq:payload:plan-proposal")
 	if err != nil {
 		// Try extracting from the body field
-		var view struct{ Body string `json:"body"` }
-		json.Unmarshal([]byte(reviewView), &view)
+		var view struct {
+			Body string `json:"body"`
+		}
+		if err := json.Unmarshal([]byte(reviewView), &view); err != nil {
+			return t.fail("parse review view: %v", err)
+		}
 		proposalJSON, err = planning.ExtractMarkedJSONBlock(view.Body, "runoq:payload:plan-proposal")
 		if err != nil {
 			return t.fail("extract proposal: %v", err)
@@ -411,8 +417,6 @@ func (t *tickRunner) handleApprovedPlanning(ctx context.Context, reviewView stri
 	parentTitle := t.titleForIssue(reviewParent)
 	t.detail("parent", "#"+reviewParent+" "+parentTitle)
 	t.detail("items to create", fmt.Sprintf("%d", len(filtered.Items)))
-
-	
 
 	if parentTitle == "Project Planning" {
 		t.info("creating milestone epics")
@@ -435,11 +439,17 @@ func (t *tickRunner) handleApprovedPlanning(ctx context.Context, reviewView stri
 		}
 		if firstMilestone != "" {
 			t.info("creating planning issue for first milestone #" + firstMilestone)
-			t.issueCreate(ctx, t.cfg.Repo, "Break down "+firstMilestoneTitle+" into tasks", "## Acceptance Criteria\n\n- [ ] Tasks proposed.", "--type", "planning", "--priority", "1", "--estimated-complexity", "low", "--parent-epic", firstMilestone)
+			if _, err := t.issueCreate(ctx, t.cfg.Repo, "Break down "+firstMilestoneTitle+" into tasks", "## Acceptance Criteria\n\n- [ ] Tasks proposed.", "--type", "planning", "--priority", "1", "--estimated-complexity", "low", "--parent-epic", firstMilestone); err != nil {
+				return t.fail("create planning issue for epic #%s: %v", firstMilestone, err)
+			}
 		}
 		t.info(fmt.Sprintf("closing review #%d and parent #%s", reviewNumber, reviewParent))
-		t.issueSetStatus(ctx, t.cfg.Repo, fmt.Sprintf("%d", reviewNumber), "done")
-		t.issueSetStatus(ctx, t.cfg.Repo, reviewParent, "done")
+		if err := t.issueSetStatus(ctx, t.cfg.Repo, fmt.Sprintf("%d", reviewNumber), "done"); err != nil {
+			return t.fail("close review #%d: %v", reviewNumber, err)
+		}
+		if err := t.issueSetStatus(ctx, t.cfg.Repo, reviewParent, "done"); err != nil {
+			return t.fail("close parent #%s: %v", reviewParent, err)
+		}
 	} else {
 		t.info("creating task issues under epic #" + reviewParent)
 		keyToNumber := make(map[string]string)
@@ -479,20 +489,26 @@ func (t *tickRunner) handleApprovedPlanning(ctx context.Context, reviewView stri
 			t.info(fmt.Sprintf("created task #%s: %s (%s)", issueNum, item.Title, complexity))
 		}
 		t.info(fmt.Sprintf("closing review #%d", reviewNumber))
-		t.issueSetStatus(ctx, t.cfg.Repo, fmt.Sprintf("%d", reviewNumber), "done")
+		if err := t.issueSetStatus(ctx, t.cfg.Repo, fmt.Sprintf("%d", reviewNumber), "done"); err != nil {
+			return t.fail("close review #%d: %v", reviewNumber, err)
+		}
 	}
 
 	t.success(fmt.Sprintf("Applied approvals from #%d, created issues", reviewNumber))
-	fmt.Fprintf(t.cfg.Stdout, "Applied approvals from #%d, created issues\n", reviewNumber)
+	_, _ = fmt.Fprintf(t.cfg.Stdout, "Applied approvals from #%d, created issues\n", reviewNumber)
 	return 0
 }
 
 func (t *tickRunner) handleApprovedAdjustment(ctx context.Context, reviewView string, reviewNumber int, reviewParent string, selection comments.ItemSelection) int {
 	// Extract adjustment JSON from issue body
-	var view struct{ Body string `json:"body"` }
-	json.Unmarshal([]byte(reviewView), &view)
+	var view struct {
+		Body string `json:"body"`
+	}
+	if err := json.Unmarshal([]byte(reviewView), &view); err != nil {
+		return t.fail("parse review view: %v", err)
+	}
 
-	adjustmentJSON := view.Body
+	var adjustmentJSON string
 	// Try extracting from marked block first
 	if extracted, err := planning.ExtractMarkedJSONBlock(view.Body, "runoq:payload:milestone-reviewer"); err == nil {
 		adjustmentJSON = extracted
@@ -520,8 +536,6 @@ func (t *tickRunner) handleApprovedAdjustment(ctx context.Context, reviewView st
 	}
 	t.detail("adjustments to apply", fmt.Sprintf("%d", len(filtered)))
 
-	
-
 	for _, adj := range filtered {
 		switch adj.Type {
 		case "modify":
@@ -531,33 +545,48 @@ func (t *tickRunner) handleApprovedAdjustment(ctx context.Context, reviewView st
 				targetIssue := t.findIssueByNumber(*adj.TargetMilestoneNumber)
 				if targetIssue != nil {
 					newBody := targetIssue.Body + "\n\n" + adj.Description
-					t.ghEditBody(ctx, target, newBody)
+					if err := t.ghEditBody(ctx, target, newBody); err != nil {
+						return t.fail("update issue #%s body: %v", target, err)
+					}
 				}
 			}
 		case "new_milestone":
 			title := cmp.Or(adj.Title, adj.Description)
 			t.info("creating new milestone: " + title)
 			desc := cmp.Or(adj.Description, adj.Reason)
-			t.issueCreate(ctx, t.cfg.Repo, title, "## Context\n\n"+desc+"\n\n## Acceptance Criteria\n\n- [ ] "+desc, "--type", "epic", "--priority", "99", "--estimated-complexity", "low")
+			if _, err := t.issueCreate(ctx, t.cfg.Repo, title, "## Context\n\n"+desc+"\n\n## Acceptance Criteria\n\n- [ ] "+desc, "--type", "epic", "--priority", "99", "--estimated-complexity", "low"); err != nil {
+				return t.fail("create milestone %q: %v", title, err)
+			}
 		default:
 			t.info(fmt.Sprintf("applying %s adjustment", adj.Type))
 		}
 	}
 
 	t.info(fmt.Sprintf("closing review #%d and parent #%s", reviewNumber, reviewParent))
-	t.issueSetStatus(ctx, t.cfg.Repo, fmt.Sprintf("%d", reviewNumber), "done")
-	t.issueSetStatus(ctx, t.cfg.Repo, reviewParent, "done")
+	if err := t.issueSetStatus(ctx, t.cfg.Repo, fmt.Sprintf("%d", reviewNumber), "done"); err != nil {
+		return t.fail("close review #%d: %v", reviewNumber, err)
+	}
+	if err := t.issueSetStatus(ctx, t.cfg.Repo, reviewParent, "done"); err != nil {
+		return t.fail("close parent #%s: %v", reviewParent, err)
+	}
 
 	// Refresh and seed next planning issue
-	raw, _ := t.ghOutput(ctx, "issue", "list", "--repo", t.cfg.Repo, "--state", "all", "--limit", "200", "--json", "number,title,body,labels,state,url")
-	json.Unmarshal([]byte(raw), &t.issues)
+	raw, err := t.ghOutput(ctx, "issue", "list", "--repo", t.cfg.Repo, "--state", "all", "--limit", "200", "--json", "number,title,body,labels,state,url")
+	if err != nil {
+		return t.fail("refresh issues: %v", err)
+	}
+	if err := json.Unmarshal([]byte(raw), &t.issues); err != nil {
+		return t.fail("parse refreshed issues: %v", err)
+	}
 	if next := t.firstOpenEpic(); next != nil {
 		t.info(fmt.Sprintf("seeding planning issue for next epic #%d", next.Number))
-		t.issueCreate(ctx, t.cfg.Repo, "Break down "+next.Title+" into tasks", "## Acceptance Criteria\n\n- [ ] Tasks proposed.", "--type", "planning", "--priority", "1", "--estimated-complexity", "low", "--parent-epic", fmt.Sprintf("%d", next.Number))
+		if _, err := t.issueCreate(ctx, t.cfg.Repo, "Break down "+next.Title+" into tasks", "## Acceptance Criteria\n\n- [ ] Tasks proposed.", "--type", "planning", "--priority", "1", "--estimated-complexity", "low", "--parent-epic", fmt.Sprintf("%d", next.Number)); err != nil {
+			return t.fail("seed planning issue for epic #%d: %v", next.Number, err)
+		}
 	}
 
 	t.success(fmt.Sprintf("Applied adjustments from #%d", reviewNumber))
-	fmt.Fprintf(t.cfg.Stdout, "Applied approvals from #%d, created issues\n", reviewNumber)
+	_, _ = fmt.Fprintf(t.cfg.Stdout, "Applied approvals from #%d, created issues\n", reviewNumber)
 	return 0
 }
 
@@ -575,12 +604,18 @@ func (t *tickRunner) handlePlanningDispatch(ctx context.Context, planningChild *
 
 	var milestoneFile string
 	if mode == "task" {
-		tmp, _ := os.CreateTemp("", "runoq-milestone-*.json")
-		epicJSON, _ := json.Marshal(epic)
-		tmp.Write(epicJSON)
-		tmp.Close()
-		defer os.Remove(tmp.Name())
-		milestoneFile = tmp.Name()
+		epicJSON, err := json.Marshal(epic)
+		if err != nil {
+			return t.fail("marshal milestone: %v", err)
+		}
+		tmpPath, err := writeTempFile("runoq-milestone-*.json", epicJSON)
+		if err != nil {
+			return t.fail("write milestone file: %v", err)
+		}
+		defer func() {
+			_ = os.Remove(tmpPath)
+		}()
+		milestoneFile = tmpPath
 	}
 
 	result, err := planning.RunDispatch(ctx, planning.DispatchConfig{
@@ -601,11 +636,13 @@ func (t *tickRunner) handlePlanningDispatch(ctx context.Context, planningChild *
 	issueNumber := fmt.Sprintf("%d", planningChild.Number)
 	currentBody, _ := t.ghOutput(ctx, "issue", "view", issueNumber, "--repo", t.cfg.Repo, "--json", "body", "--jq", ".body // \"\"")
 	newBody := planning.ReplaceProposalInBody(currentBody, result.FormattedBody)
-	t.ghEditBody(ctx, issueNumber, newBody)
+	if err := t.ghEditBody(ctx, issueNumber, newBody); err != nil {
+		return t.fail("update proposal on #%s: %v", issueNumber, err)
+	}
 
 	t.issueAssign(ctx, t.cfg.Repo, issueNumber)
 	t.success(fmt.Sprintf("Proposal posted on #%d", planningChild.Number))
-	fmt.Fprintf(t.cfg.Stdout, "Proposal posted on #%d\n", planningChild.Number)
+	_, _ = fmt.Fprintf(t.cfg.Stdout, "Proposal posted on #%d\n", planningChild.Number)
 	return 0
 }
 
@@ -631,7 +668,7 @@ func (t *tickRunner) handleImplementation(ctx context.Context, epicNumber int) i
 			}
 		}
 		t.warn("all tasks blocked")
-		fmt.Fprintln(t.cfg.Stdout, "All tasks blocked")
+		_, _ = fmt.Fprintln(t.cfg.Stdout, "All tasks blocked")
 		return 2
 	}
 
@@ -677,11 +714,13 @@ func (t *tickRunner) dispatchTask(ctx context.Context, task *issue) int {
 	// Phases like phaseDevelopNeedsReview already set status on the issue;
 	// only call set-status here when the state indicates it's needed.
 	if status := issueStatusFromDoneState(stateJSON); status != "" {
-		t.issueSetStatus(ctx, t.cfg.Repo, fmt.Sprintf("%d", task.Number), status)
+		if err := t.issueSetStatus(ctx, t.cfg.Repo, fmt.Sprintf("%d", task.Number), status); err != nil {
+			return t.fail("set status on issue #%d: %v", task.Number, err)
+		}
 	}
 
 	t.success(fmt.Sprintf("Issue #%d — phase: %s", task.Number, phase))
-	fmt.Fprintf(t.cfg.Stdout, "Issue #%d — phase: %s\n", task.Number, phase)
+	_, _ = fmt.Fprintf(t.cfg.Stdout, "Issue #%d — phase: %s\n", task.Number, phase)
 	return 0
 }
 
@@ -731,7 +770,7 @@ func (t *tickRunner) handleMilestoneComplete(ctx context.Context, epicNumber int
 	t.issueAssign(ctx, t.cfg.Repo, adjNumber)
 
 	t.success(fmt.Sprintf("Milestone #%d reviewed. Adjustments on #%s", epicNumber, adjNumber))
-	fmt.Fprintf(t.cfg.Stdout, "Milestone #%d review complete. Adjustments proposed on #%s\n", epicNumber, adjNumber)
+	_, _ = fmt.Fprintf(t.cfg.Stdout, "Milestone #%d review complete. Adjustments proposed on #%s\n", epicNumber, adjNumber)
 	return 0
 }
 
@@ -844,8 +883,12 @@ func (t *tickRunner) planningNeedsDispatch(ctx context.Context, iss *issue) bool
 	if err != nil {
 		return true
 	}
-	var v struct{ Body string `json:"body"` }
-	json.Unmarshal([]byte(view), &v)
+	var v struct {
+		Body string `json:"body"`
+	}
+	if err := json.Unmarshal([]byte(view), &v); err != nil {
+		return true
+	}
 	return !strings.Contains(v.Body, "runoq:payload:plan-proposal")
 }
 
@@ -1008,8 +1051,27 @@ func extractPageInfo(graphqlResponse string) graphqlPageInfo {
 			} `json:"repository"`
 		} `json:"data"`
 	}
-	json.Unmarshal([]byte(graphqlResponse), &resp)
+	if err := json.Unmarshal([]byte(graphqlResponse), &resp); err != nil {
+		return graphqlPageInfo{}
+	}
 	return resp.Data.Repository.Issues.PageInfo
+}
+
+func writeTempFile(pattern string, data []byte) (string, error) {
+	tmpFile, err := os.CreateTemp("", pattern)
+	if err != nil {
+		return "", err
+	}
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpFile.Name())
+		return "", err
+	}
+	if err := tmpFile.Close(); err != nil {
+		_ = os.Remove(tmpFile.Name())
+		return "", err
+	}
+	return tmpFile.Name(), nil
 }
 
 func (t *tickRunner) titleForIssue(numberStr string) string {
@@ -1030,12 +1092,16 @@ func (t *tickRunner) findIssueByNumber(number int) *issue {
 	return nil
 }
 
-func (t *tickRunner) ghEditBody(ctx context.Context, issueNumber string, newBody string) {
-	tmpFile, _ := os.CreateTemp("", "runoq-edit-*.md")
-	tmpFile.WriteString(newBody)
-	tmpFile.Close()
-	defer os.Remove(tmpFile.Name())
-	t.ghOutput(ctx, "issue", "edit", issueNumber, "--repo", t.cfg.Repo, "--body-file", tmpFile.Name())
+func (t *tickRunner) ghEditBody(ctx context.Context, issueNumber string, newBody string) error {
+	tmpPath, err := writeTempFile("runoq-edit-*.md", []byte(newBody))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = os.Remove(tmpPath)
+	}()
+	_, err = t.ghOutput(ctx, "issue", "edit", issueNumber, "--repo", t.cfg.Repo, "--body-file", tmpPath)
+	return err
 }
 
 const dagMarker = "<!-- runoq:dag -->"
@@ -1057,7 +1123,7 @@ func (t *tickRunner) postDAGComment(ctx context.Context, epicNumber int, graph *
 			for _, c := range comments {
 				if strings.Contains(c.Body, dagMarker) {
 					// Update existing comment
-					t.ghOutput(ctx, "api", "--method", "PATCH",
+					_, _ = t.ghOutput(ctx, "api", "--method", "PATCH",
 						fmt.Sprintf("repos/%s/issues/comments/%s", t.cfg.Repo, c.ID),
 						"-f", "body="+body)
 					return
@@ -1067,11 +1133,15 @@ func (t *tickRunner) postDAGComment(ctx context.Context, epicNumber int, graph *
 	}
 
 	// Post new comment
-	tmpFile, _ := os.CreateTemp("", "runoq-dag-*.md")
-	tmpFile.WriteString(body)
-	tmpFile.Close()
-	defer os.Remove(tmpFile.Name())
-	t.ghOutput(ctx, "issue", "comment", epicStr, "--repo", t.cfg.Repo, "--body-file", tmpFile.Name())
+	tmpPath, err := writeTempFile("runoq-dag-*.md", []byte(body))
+	if err != nil {
+		t.warn(fmt.Sprintf("failed to write DAG comment: %v", err))
+		return
+	}
+	defer func() {
+		_ = os.Remove(tmpPath)
+	}()
+	_, _ = t.ghOutput(ctx, "issue", "comment", epicStr, "--repo", t.cfg.Repo, "--body-file", tmpPath)
 }
 
 func sliceContains(s []int, v int) bool {
@@ -1090,17 +1160,19 @@ func (a *tickGHAdapter) IssueView(_ context.Context, repo string, number int, fi
 }
 
 func (a *tickGHAdapter) IssueComment(_ context.Context, repo string, number int, body string) error {
-	tmpFile, _ := os.CreateTemp("", "runoq-comment-*.md")
-	tmpFile.WriteString(body)
-	tmpFile.Close()
-	defer os.Remove(tmpFile.Name())
-	_, err := a.runner.ghOutput(a.ctx, "issue", "comment", fmt.Sprintf("%d", number), "--repo", repo, "--body-file", tmpFile.Name())
+	tmpPath, err := writeTempFile("runoq-comment-*.md", []byte(body))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = os.Remove(tmpPath)
+	}()
+	_, err = a.runner.ghOutput(a.ctx, "issue", "comment", fmt.Sprintf("%d", number), "--repo", repo, "--body-file", tmpPath)
 	return err
 }
 
 func (a *tickGHAdapter) IssueEditBody(_ context.Context, repo string, number int, body string) error {
-	a.runner.ghEditBody(a.ctx, fmt.Sprintf("%d", number), body)
-	return nil
+	return a.runner.ghEditBody(a.ctx, fmt.Sprintf("%d", number), body)
 }
 
 func (a *tickGHAdapter) IssueAddLabel(_ context.Context, repo string, number int, label string) error {
@@ -1202,24 +1274,26 @@ func (t *tickRunner) elapsed() string {
 
 func (t *tickRunner) step(msg string) {
 	ts := time.Now().Format("15:04:05")
-	fmt.Fprintf(t.cfg.Stderr, "\033[1;36m▸ [%s] %s\033[0m\n", ts, msg)
+	_, _ = fmt.Fprintf(t.cfg.Stderr, "\033[1;36m▸ [%s] %s\033[0m\n", ts, msg)
 	t.lastStepAt = time.Now()
 }
 
-func (t *tickRunner) info(msg string)        { fmt.Fprintf(t.cfg.Stderr, "\033[2m  %s\033[0m\n", msg) }
-func (t *tickRunner) detail(key, val string) { fmt.Fprintf(t.cfg.Stderr, "\033[2m  %s:\033[0m %s\n", key, val) }
+func (t *tickRunner) info(msg string) { _, _ = fmt.Fprintf(t.cfg.Stderr, "\033[2m  %s\033[0m\n", msg) }
+func (t *tickRunner) detail(key, val string) {
+	_, _ = fmt.Fprintf(t.cfg.Stderr, "\033[2m  %s:\033[0m %s\n", key, val)
+}
 
 func (t *tickRunner) success(msg string) {
 	ts := time.Now().Format("15:04:05")
-	fmt.Fprintf(t.cfg.Stderr, "\033[1;32m✔ [%s] %s%s\033[0m\n", ts, msg, t.elapsed())
+	_, _ = fmt.Fprintf(t.cfg.Stderr, "\033[1;32m✔ [%s] %s%s\033[0m\n", ts, msg, t.elapsed())
 }
 
 func (t *tickRunner) warn(msg string) {
-	fmt.Fprintf(t.cfg.Stderr, "\033[1;33m⚠ %s\033[0m\n", msg)
+	_, _ = fmt.Fprintf(t.cfg.Stderr, "\033[1;33m⚠ %s\033[0m\n", msg)
 }
 
 func (t *tickRunner) fail(format string, args ...any) int {
 	ts := time.Now().Format("15:04:05")
-	fmt.Fprintf(t.cfg.Stderr, "\033[1;31m✘ [%s] runoq: %s%s\033[0m\n", ts, fmt.Sprintf(format, args...), t.elapsed())
+	_, _ = fmt.Fprintf(t.cfg.Stderr, "\033[1;31m✘ [%s] runoq: %s%s\033[0m\n", ts, fmt.Sprintf(format, args...), t.elapsed())
 	return 1
 }

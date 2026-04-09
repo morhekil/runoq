@@ -46,7 +46,7 @@ func New(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) *Ap
 // Run executes the subcommand and returns an exit code.
 func (a *App) Run(_ context.Context) int {
 	if len(a.args) == 0 {
-		fmt.Fprint(a.stderr, usageText)
+		_, _ = fmt.Fprint(a.stderr, usageText)
 		return 1
 	}
 
@@ -76,8 +76,8 @@ func (a *App) Run(_ context.Context) int {
 	case "replace-proposal-in-body":
 		return a.runReplaceProposalInBody()
 	default:
-		fmt.Fprintf(a.stderr, "unknown subcommand: %s\n", a.args[0])
-		fmt.Fprint(a.stderr, usageText)
+		_, _ = fmt.Fprintf(a.stderr, "unknown subcommand: %s\n", a.args[0])
+		_, _ = fmt.Fprint(a.stderr, usageText)
 		return 1
 	}
 }
@@ -87,7 +87,7 @@ func (a *App) readStdin() ([]byte, error) {
 }
 
 func (a *App) fail(format string, args ...any) int {
-	fmt.Fprintf(a.stderr, "tick-fmt: "+format+"\n", args...)
+	_, _ = fmt.Fprintf(a.stderr, "tick-fmt: "+format+"\n", args...)
 	return 1
 }
 
@@ -100,7 +100,7 @@ func (a *App) runFormatProposal() int {
 	if err := json.Unmarshal(data, &p); err != nil {
 		return a.fail("parse proposal: %v", err)
 	}
-	fmt.Fprint(a.stdout, planning.FormatPlanProposal(p))
+	_, _ = fmt.Fprint(a.stdout, planning.FormatPlanProposal(p))
 	return 0
 }
 
@@ -113,7 +113,7 @@ func (a *App) runProposalCommentBody() int {
 	if err := json.Unmarshal(data, &input); err != nil {
 		return a.fail("parse input: %v", err)
 	}
-	fmt.Fprint(a.stdout, planning.FormatProposalCommentBody(input))
+	_, _ = fmt.Fprint(a.stdout, planning.FormatProposalCommentBody(input))
 	return 0
 }
 
@@ -126,7 +126,7 @@ func (a *App) runMilestoneBody() int {
 	if err := json.Unmarshal(data, &item); err != nil {
 		return a.fail("parse item: %v", err)
 	}
-	fmt.Fprint(a.stdout, planning.FormatMilestoneBody(item))
+	_, _ = fmt.Fprint(a.stdout, planning.FormatMilestoneBody(item))
 	return 0
 }
 
@@ -139,7 +139,7 @@ func (a *App) runAdjustmentReviewBody() int {
 	if err := json.Unmarshal(data, &input); err != nil {
 		return a.fail("parse input: %v", err)
 	}
-	fmt.Fprint(a.stdout, planning.FormatAdjustmentReviewBody(input))
+	_, _ = fmt.Fprint(a.stdout, planning.FormatAdjustmentReviewBody(input))
 	return 0
 }
 
@@ -172,7 +172,7 @@ func (a *App) runExtractJSON() int {
 	if err != nil {
 		return a.fail("%v", err)
 	}
-	fmt.Fprintln(a.stdout, extracted)
+	_, _ = fmt.Fprintln(a.stdout, extracted)
 	return 0
 }
 
@@ -233,7 +233,7 @@ func (a *App) runMergeChecklists() int {
 	if len(a.args) >= 3 {
 		right = a.args[2]
 	}
-	fmt.Fprintln(a.stdout, planning.MergeChecklists(left, right))
+	_, _ = fmt.Fprintln(a.stdout, planning.MergeChecklists(left, right))
 	return 0
 }
 
@@ -283,6 +283,6 @@ func (a *App) runReplaceProposalInBody() int {
 		return a.fail("read stdin: %v", err)
 	}
 	result := planning.ReplaceProposalInBody(string(bodyData), string(proposalData))
-	fmt.Fprint(a.stdout, result)
+	_, _ = fmt.Fprint(a.stdout, result)
 	return 0
 }

@@ -43,7 +43,7 @@ func New(args []string, env []string, cwd string, stdout io.Writer, stderr io.Wr
 // logAgent writes a progress line to stderr, tagged with the agent name and issue number.
 func (a *App) logAgent(agent string, input *inputPayload, format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
-	fmt.Fprintf(a.stderr, "[%s] #%d: %s\n", agent, input.IssueNumber, msg)
+	_, _ = fmt.Fprintf(a.stderr, "[%s] #%d: %s\n", agent, input.IssueNumber, msg)
 }
 
 func (a *App) SetCommandExecutor(execFn shell.CommandExecutor) {
@@ -356,11 +356,17 @@ func (a *App) invokeCodex(ctx context.Context, input *inputPayload, state *round
 	absLastMsg, _ := filepath.Abs(lastMsgPath)
 
 	// Ensure parent dirs exist.
-	os.MkdirAll(filepath.Dir(eventLogPath), 0o755)
-	os.MkdirAll(filepath.Dir(absLastMsg), 0o755)
+	if err := os.MkdirAll(filepath.Dir(eventLogPath), 0o755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(absLastMsg), 0o755); err != nil {
+		return err
+	}
 
 	eventFile, _ := os.Create(eventLogPath)
-	defer eventFile.Close()
+	defer func() {
+		_ = eventFile.Close()
+	}()
 
 	captureDir := filepath.Join(state.logDir, fmt.Sprintf("codex-round-%d", state.round))
 	env := shell.EnvSet(a.env, "RUNOQ_CODEX_CAPTURE_DIR", captureDir)
@@ -384,11 +390,17 @@ func (a *App) resumeCodex(ctx context.Context, input *inputPayload, state *round
 
 	absLastMsg, _ := filepath.Abs(lastMsgPath)
 
-	os.MkdirAll(filepath.Dir(eventLogPath), 0o755)
-	os.MkdirAll(filepath.Dir(absLastMsg), 0o755)
+	if err := os.MkdirAll(filepath.Dir(eventLogPath), 0o755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(absLastMsg), 0o755); err != nil {
+		return err
+	}
 
 	eventFile, _ := os.Create(eventLogPath)
-	defer eventFile.Close()
+	defer func() {
+		_ = eventFile.Close()
+	}()
 
 	return a.execCommand(ctx, shell.CommandRequest{
 		Name:   codexBin,
@@ -406,7 +418,9 @@ func (a *App) extractThreadID(eventsPath string) string {
 	if err != nil {
 		return ""
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 
 	var lastThreadID string
 	scanner := bufio.NewScanner(f)
@@ -458,7 +472,9 @@ func (a *App) classifyTransientError(eventsPath string, execErr error) (bool, st
 		}
 		return false, ""
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 
 	hasOutput := false
 	scanner := bufio.NewScanner(f)
@@ -543,7 +559,9 @@ func (a *App) validatePayload(ctx context.Context, worktree, baseline, lastMsgFi
 	}
 
 	// Write the validate output to the payload file.
-	os.WriteFile(payloadFile, []byte(out), 0o644)
+	if err := os.WriteFile(payloadFile, []byte(out), 0o644); err != nil {
+		return false
+	}
 
 	// Check if payload_schema_valid is true.
 	var parsed map[string]any
@@ -625,7 +643,9 @@ func (a *App) postVerificationComment(ctx context.Context, input *inputPayload, 
 
 	// Write to temp file and invoke lifecycle script.
 	tmpFile := filepath.Join(state.logDir, fmt.Sprintf("round-%d-verify-comment.md", round))
-	os.WriteFile(tmpFile, []byte(b.String()), 0o644)
+	if err := os.WriteFile(tmpFile, []byte(b.String()), 0o644); err != nil {
+		return
+	}
 
 	_ = a.execCommand(ctx, shell.CommandRequest{
 		Name: lifecycleScript,
@@ -650,7 +670,9 @@ func (a *App) postVerificationSuccessComment(ctx context.Context, input *inputPa
 	fmt.Fprintf(&b, "**Commit range**: `%s..%s`\n", short(roundBaseline), short(state.headHash))
 
 	tmpFile := filepath.Join(state.logDir, fmt.Sprintf("round-%d-verify-success-comment.md", round))
-	os.WriteFile(tmpFile, []byte(b.String()), 0o644)
+	if err := os.WriteFile(tmpFile, []byte(b.String()), 0o644); err != nil {
+		return
+	}
 
 	_ = a.execCommand(ctx, shell.CommandRequest{
 		Name: lifecycleScript,
@@ -856,5 +878,5 @@ func (a *App) RunDevelop(ctx context.Context, payloadPath string) (*outputPayloa
 type OutputPayload = outputPayload
 
 func (a *App) printUsage() {
-	io.WriteString(a.stderr, usageText)
+	_, _ = io.WriteString(a.stderr, usageText)
 }

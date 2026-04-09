@@ -5,13 +5,15 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/saruman/runoq/internal/shell"
 	"github.com/saruman/runoq/internal/gh"
+	"github.com/saruman/runoq/internal/shell"
 )
 
 func TestOutput(t *testing.T) {
 	fake := func(_ context.Context, req shell.CommandRequest) error {
-		fmt.Fprint(req.Stdout, "hello\n")
+		if _, err := fmt.Fprint(req.Stdout, "hello\n"); err != nil {
+			t.Fatalf("write stdout: %v", err)
+		}
 		return nil
 	}
 

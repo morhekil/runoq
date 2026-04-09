@@ -13,12 +13,14 @@ func TestLoadFileReturnsRawSections(t *testing.T) {
 
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "runoq.json")
-	os.WriteFile(configPath, []byte(`{
+	if err := os.WriteFile(configPath, []byte(`{
 		"labels": {"ready": "runoq:ready", "inProgress": "runoq:in-progress"},
 		"maxRounds": 5,
 		"branchPrefix": "runoq/",
 		"verification": {"testCommand": "npm test"}
-	}`), 0o644)
+	}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
 
 	raw, err := LoadFile(configPath)
 	if err != nil {
@@ -90,7 +92,7 @@ func TestNoEnvLeakageInInternalPackages(t *testing.T) {
 	internalDir := filepath.Join(root, "internal")
 	var violations []string
 
-	filepath.WalkDir(internalDir, func(path string, d os.DirEntry, err error) error {
+	if err := filepath.WalkDir(internalDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
@@ -112,7 +114,9 @@ func TestNoEnvLeakageInInternalPackages(t *testing.T) {
 			}
 		}
 		return nil
-	})
+	}); err != nil {
+		t.Fatalf("walk internal dir: %v", err)
+	}
 
 	if len(violations) > 0 {
 		t.Fatalf("env access found in internal packages:\n%s", strings.Join(violations, "\n"))

@@ -207,7 +207,9 @@ func TestCLIRepoConformance(t *testing.T) {
 			t.Fatalf("WorktreeAdd: %v", err)
 		}
 		// Simulate kill: remove dir, leave metadata
-		os.RemoveAll(wtPath)
+		if err := os.RemoveAll(wtPath); err != nil {
+			t.Fatalf("RemoveAll: %v", err)
+		}
 		if err := repo.WorktreePrune(); err != nil {
 			t.Fatalf("WorktreePrune: %v", err)
 		}

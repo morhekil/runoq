@@ -10,16 +10,33 @@ import (
 	"testing"
 )
 
+func newTestWriter(t *testing.T, terminal *bytes.Buffer, logDir string) *Writer {
+	t.Helper()
+	w, err := NewWriter(terminal, logDir)
+	if err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := w.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	})
+	return w
+}
+
+func mustWriteFile(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
 func TestWriterTeesToTerminalAndFile(t *testing.T) {
 	t.Parallel()
 
 	logDir := t.TempDir()
 	var terminal bytes.Buffer
-	w, err := NewWriter(&terminal, logDir)
-	if err != nil {
-		t.Fatalf("NewWriter: %v", err)
-	}
-	defer w.Close()
+	w := newTestWriter(t, &terminal, logDir)
 
 	msg := "\033[1;36m▸ [12:34:56] Starting tick\033[0m\n"
 	if _, err := w.Write([]byte(msg)); err != nil {
@@ -49,11 +66,7 @@ func TestWriterCreatesLogFile(t *testing.T) {
 
 	logDir := t.TempDir()
 	var terminal bytes.Buffer
-	w, err := NewWriter(&terminal, logDir)
-	if err != nil {
-		t.Fatalf("NewWriter: %v", err)
-	}
-	defer w.Close()
+	w := newTestWriter(t, &terminal, logDir)
 
 	path := w.Path()
 	if !strings.HasPrefix(filepath.Base(path), "runoq-") {
@@ -72,11 +85,7 @@ func TestLogEventWritesJSON(t *testing.T) {
 
 	logDir := t.TempDir()
 	var terminal bytes.Buffer
-	w, err := NewWriter(&terminal, logDir)
-	if err != nil {
-		t.Fatalf("NewWriter: %v", err)
-	}
-	defer w.Close()
+	w := newTestWriter(t, &terminal, logDir)
 
 	w.LogEvent("phase_transition", map[string]any{
 		"issue":      42,
@@ -118,10 +127,10 @@ func TestCleanupKeepsNewestLogs(t *testing.T) {
 	// Create 25 fake log files with sequential timestamps
 	for i := range 25 {
 		name := fmt.Sprintf("runoq-20260401-%06d.log", i)
-		os.WriteFile(filepath.Join(logDir, name), []byte("log"), 0o644)
+		mustWriteFile(t, filepath.Join(logDir, name), []byte("log"))
 	}
 	// Also create a non-log file that should be untouched
-	os.WriteFile(filepath.Join(logDir, "other.txt"), []byte("keep"), 0o644)
+	mustWriteFile(t, filepath.Join(logDir, "other.txt"), []byte("keep"))
 
 	err := Cleanup(logDir, 20)
 	if err != nil {
@@ -159,7 +168,7 @@ func TestCleanupNoopWhenUnderLimit(t *testing.T) {
 	logDir := t.TempDir()
 	for i := range 5 {
 		name := fmt.Sprintf("runoq-20260401-%06d.log", i)
-		os.WriteFile(filepath.Join(logDir, name), []byte("log"), 0o644)
+		mustWriteFile(t, filepath.Join(logDir, name), []byte("log"))
 	}
 
 	err := Cleanup(logDir, 20)
