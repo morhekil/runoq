@@ -156,7 +156,30 @@ func (a *App) runSingleIssue(ctx context.Context, root string, env []string, rep
 	if err != nil {
 		return "", err
 	}
-	return a.runIssueWithEnv(ctx, root, env, repo, issueNumber, dryRun, title, metadata)
+	// CLI path: loop through tick boundaries until a terminal phase.
+	stateJSON, err := a.runIssueWithEnv(ctx, root, env, repo, issueNumber, dryRun, title, metadata)
+	if err != nil || dryRun {
+		return stateJSON, err
+	}
+	for !isTerminalPhase(stateJSON) {
+		a.logInfo("CLI: phase boundary reached, continuing to next phase")
+		stateJSON, err = a.resumeFromState(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+		if err != nil {
+			return stateJSON, err
+		}
+	}
+	return stateJSON, nil
+}
+
+// isTerminalPhase returns true if the state JSON indicates a terminal phase.
+func isTerminalPhase(stateJSON string) bool {
+	var state struct {
+		Phase string `json:"phase"`
+	}
+	if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
+		return false
+	}
+	return state.Phase == "DONE" || state.Phase == "FINALIZE"
 }
 
 func (a *App) runIssueWithEnv(ctx context.Context, root string, env []string, repo string, issueNumber int, dryRun bool, title string, metadata IssueMetadata) (string, error) {
@@ -241,56 +264,25 @@ func (a *App) runFromCriteria(ctx context.Context, root string, env []string, re
 }
 
 func (a *App) runFromDevelop(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
-	for {
-		var developResult issueRunnerResult
-		var err error
-		stateJSON, developResult, err = a.phaseDevelop(ctx, root, env, repo, issueNumber, stateJSON)
-		if err != nil {
-			return "", err
-		}
-
-		if developResult.Status != "review_ready" {
-			// Create PR before handoff so the work is visible and reviewable
-			stateJSON, err = a.ensurePRCreated(ctx, root, env, repo, issueNumber, stateJSON, metadata.Title)
-			if err != nil {
-				return "", err
-			}
-			return a.phaseDevelopNeedsReview(ctx, root, env, repo, issueNumber, stateJSON)
-		}
-
-		// Create PR after first successful develop if not yet created
-		stateJSON, err = a.ensurePRCreated(ctx, root, env, repo, issueNumber, stateJSON, metadata.Title)
-		if err != nil {
-			return "", err
-		}
-
-		stateJSON, err = a.runFromReviewLoop(ctx, root, env, repo, issueNumber, stateJSON, metadata)
-		if err != nil {
-			return "", err
-		}
-
-		var decideState struct {
-			Phase           string `json:"phase"`
-			Decision        string `json:"decision"`
-			NextPhase       string `json:"next_phase"`
-			ReviewChecklist string `json:"review_checklist"`
-		}
-		if err := json.Unmarshal([]byte(stateJSON), &decideState); err != nil {
-			return "", fmt.Errorf("failed to parse decide state: %v", err)
-		}
-
-		if decideState.NextPhase == "DEVELOP" && decideState.Decision == "iterate" {
-			stateJSON, err = updateStateJSON(stateJSON, func(state map[string]any) {
-				state["previous_checklist"] = decideState.ReviewChecklist
-			})
-			if err != nil {
-				return "", err
-			}
-			continue
-		}
-
-		return a.phaseFinalize(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+	var developResult issueRunnerResult
+	var err error
+	stateJSON, developResult, err = a.phaseDevelop(ctx, root, env, repo, issueNumber, stateJSON)
+	if err != nil {
+		return "", err
 	}
+
+	// Always create PR so work is visible
+	stateJSON, err = a.ensurePRCreated(ctx, root, env, repo, issueNumber, stateJSON, metadata.Title)
+	if err != nil {
+		return "", err
+	}
+
+	if developResult.Status != "review_ready" {
+		return a.phaseDevelopNeedsReview(ctx, root, env, repo, issueNumber, stateJSON)
+	}
+
+	// Tick boundary: PR created, next tick runs review
+	return stateJSON, nil
 }
 
 // ensurePRCreated calls phaseOpenPR if pr_number is not set in the state.
@@ -354,19 +346,6 @@ func (a *App) runFromDecide(ctx context.Context, root string, env []string, repo
 	return a.phaseFinalize(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 }
 
-// runFromReviewLoop runs review + decide phases (single pass, no loop).
-func (a *App) runFromReviewLoop(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
-	var err error
-	stateJSON, err = a.phaseReview(ctx, root, env, repo, issueNumber, stateJSON)
-	if err != nil {
-		return "", err
-	}
-	stateJSON, err = a.phaseDecide(ctx, root, env, issueNumber, stateJSON)
-	if err != nil {
-		return "", err
-	}
-	return stateJSON, nil
-}
 
 func (a *App) getIssueMetadata(ctx context.Context, root string, env []string, repo string, issueNumber int) (IssueMetadata, error) {
 	issueOut, err := a.ghOutput(ctx, env, "issue", "view", strconv.Itoa(issueNumber), "--repo", repo, "--json", "number,title,body,labels,url")
