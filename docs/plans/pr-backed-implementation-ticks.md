@@ -10,12 +10,13 @@ Completed so far:
 - [x] `DECIDE` is a hard tick boundary and no longer chains into `FINALIZE` in the same tick
 - [x] `VERIFY` exists as an explicit orchestrator phase boundary in the router
 - [x] Resume tests updated for `DEVELOP -> VERIFY`, `VERIFY(fail) -> DECIDE`, and `REVIEW(pass) -> DECIDE`
+- [x] `VERIFY` persists verifier inputs in PR state and re-runs deterministic verification from a fresh rehydrated branch worktree
+- [x] `DEVELOP`, `VERIFY`, and `REVIEW` rehydrate disposable worktrees from the pushed branch instead of trusting prior local paths
 - [x] Orchestrator tests and full `go test ./...` are green after the boundary refactor
 
 Still to do:
 
 - [ ] Move verification execution itself out of the issue-runner loop so `VERIFY` is a truly separate tick on a fresh machine
-- [ ] Rehydrate disposable worktrees from an existing branch for every worktree-using tick instead of assuming prior local paths remain valid
 - [ ] Remove `OPEN-PR` as a meaningful runtime phase and treat it as compatibility-only until old state/comments are gone
 - [ ] Remove the issue-runner as a top-level orchestration concept and keep only reusable helpers
 - [ ] Change phase comments from "next-state carriers" toward phase-result records and centralize routing logic fully in the orchestrator
@@ -154,16 +155,16 @@ Local workspace state is disposable. Each tick may create a worktree, use it, th
 ### B. Verification Extraction
 
 - [ ] Split verification execution out of `issue-runner` so `DEVELOP` no longer performs verification internally
-- [ ] Persist whatever inputs `VERIFY` needs in a GitHub-recoverable form
-- [ ] Make `VERIFY` re-run deterministic verification on a fresh machine
-- [ ] Update tests to prove `VERIFY` is independent of prior local temp files
+- [x] Persist whatever inputs `VERIFY` needs in a GitHub-recoverable form
+- [x] Make `VERIFY` re-run deterministic verification on a fresh machine
+- [x] Update tests to prove `VERIFY` is independent of prior local temp files
 
 ### C. Disposable Worktree Rehydration
 
-- [ ] Add a worktree helper that can materialize an existing pushed branch into a fresh disposable worktree
-- [ ] Use that helper from `DEVELOP`
-- [ ] Use that helper from `VERIFY`
-- [ ] Use that helper from `REVIEW`
+- [x] Add a worktree helper that can materialize an existing pushed branch into a fresh disposable worktree
+- [x] Use that helper from `DEVELOP`
+- [x] Use that helper from `VERIFY`
+- [x] Use that helper from `REVIEW`
 - [ ] Best-effort cleanup the worktree after each tick
 
 ### D. Issue-Runner Reduction
@@ -190,4 +191,6 @@ Local workspace state is disposable. Each tick may create a worktree, use it, th
 
 The current landed slice is intentionally partial.
 
-It establishes the new phase boundaries in the orchestrator, but it does not yet complete the deeper architectural change of making `VERIFY` fully independent from the issue-runner's internal loop. That remaining work is the next major slice.
+It now establishes fresh-worktree execution for `DEVELOP`/`VERIFY`/`REVIEW` and makes `VERIFY` rerun deterministic verification from persisted state instead of trusting prior temp files.
+
+The remaining architectural gap is that `issue-runner` still performs an internal verification loop to decide whether a `DEVELOP` round is review-ready. Fully removing that internal loop is still the next major slice.

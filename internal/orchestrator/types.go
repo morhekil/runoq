@@ -19,18 +19,19 @@ type issueView struct {
 }
 
 type issueRunnerResult struct {
-	Status               string   `json:"status"`
-	LogDir               string   `json:"logDir"`
-	BaselineHash         string   `json:"baselineHash"`
-	HeadHash             string   `json:"headHash"`
-	CommitRange          string   `json:"commitRange"`
-	ReviewLogPath        string   `json:"reviewLogPath"`
-	SpecRequirements     string   `json:"specRequirements"`
-	ChangedFiles         []string `json:"changedFiles"`
-	RelatedFiles         []string `json:"relatedFiles"`
-	CumulativeTokens     int      `json:"cumulativeTokens"`
-	VerificationPassed   bool     `json:"verificationPassed"`
-	VerificationFailures []string `json:"verificationFailures"`
-	Caveats              []string `json:"caveats"`
-	Summary              string   `json:"summary"`
+	Status               string         `json:"status"`
+	LogDir               string         `json:"logDir"`
+	BaselineHash         string         `json:"baselineHash"`
+	HeadHash             string         `json:"headHash"`
+	CommitRange          string         `json:"commitRange"`
+	ReviewLogPath        string         `json:"reviewLogPath"`
+	SpecRequirements     string         `json:"specRequirements"`
+	ChangedFiles         []string       `json:"changedFiles"`
+	RelatedFiles         []string       `json:"relatedFiles"`
+	CumulativeTokens     int            `json:"cumulativeTokens"`
+	VerificationPayload  map[string]any `json:"verificationPayload"`
+	VerificationPassed   bool           `json:"verificationPassed"`
+	VerificationFailures []string       `json:"verificationFailures"`
+	Caveats              []string       `json:"caveats"`
+	Summary              string         `json:"summary"`
 }

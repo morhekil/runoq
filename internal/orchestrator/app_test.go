@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -1803,6 +1805,64 @@ func TestPhaseRespondNoComments(t *testing.T) {
 	}
 }
 
+func TestPhaseVerifyRerunsDeterministicVerificationFromStatePayload(t *testing.T) {
+	ctx := t.Context()
+	baseDir := t.TempDir()
+	remoteDir := filepath.Join(baseDir, "remote.git")
+	localDir := filepath.Join(baseDir, "local")
+	makeRemoteBackedRepoForOrchestratorTest(t, remoteDir, localDir)
+	writeOrchestratorConfig(t, localDir, "true", "true")
+
+	branch := "runoq/42-implement-queue"
+	runCmdOrchestratorTest(t, localDir, "git", "checkout", "-b", branch)
+	baseSHA := strings.TrimSpace(runCmdOrchestratorTest(t, localDir, "git", "rev-parse", "HEAD"))
+
+	if err := os.WriteFile(filepath.Join(localDir, "feature.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write feature.txt: %v", err)
+	}
+	runCmdOrchestratorTest(t, localDir, "git", "add", "feature.txt")
+	runCmdOrchestratorTest(t, localDir, "git", "commit", "-m", "Add feature")
+	runCmdOrchestratorTest(t, localDir, "git", "push", "-u", "origin", branch)
+	headSHA := strings.TrimSpace(runCmdOrchestratorTest(t, localDir, "git", "rev-parse", "HEAD"))
+	runCmdOrchestratorTest(t, localDir, "git", "checkout", "main")
+
+	env := []string{
+		"RUNOQ_ROOT=" + localDir,
+		"TARGET_ROOT=" + localDir,
+	}
+	app := New(nil, env, localDir, io.Discard, io.Discard)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(func(ctx context.Context, req shell.CommandRequest) error {
+		if req.Name == "gh" {
+			if strings.HasPrefix(strings.Join(req.Args, " "), "pr comment ") {
+				return nil
+			}
+			t.Fatalf("unexpected gh call: %s %s", req.Name, strings.Join(req.Args, " "))
+		}
+		return shell.RunCommand(ctx, req)
+	})
+
+	staleWorktree := filepath.Join(baseDir, "stale-worktree")
+	stateJSON := fmt.Sprintf(`{"issue":42,"phase":"DEVELOP","pr_number":87,"branch":%q,"worktree":%q,"round":1,"baseline_hash":%q,"head_hash":"stale-head","verification_passed":true,"verification_failures":[],"verification_payload":{"status":"completed","commits_pushed":[%q],"commit_range":%q,"files_changed":[],"files_added":["feature.txt"],"files_deleted":[],"tests_run":true,"tests_passed":false,"test_summary":"still failing","build_passed":true,"blockers":[],"notes":""}}`, branch, staleWorktree, baseSHA, headSHA, headSHA+".."+headSHA)
+
+	result, err := app.phaseVerify(ctx, localDir, env, "owner/repo", 42, stateJSON)
+	if err != nil {
+		t.Fatalf("phaseVerify: %v", err)
+	}
+	if !strings.Contains(result, `"phase":"VERIFY"`) {
+		t.Fatalf("expected VERIFY phase, got %s", result)
+	}
+	if !strings.Contains(result, `"verdict":"FAIL"`) {
+		t.Fatalf("expected FAIL verdict from rerun verification, got %s", result)
+	}
+	if !strings.Contains(result, "codex self-reported test failure") {
+		t.Fatalf("expected rerun verification failure detail, got %s", result)
+	}
+	if !strings.Contains(result, `"verification_passed":false`) {
+		t.Fatalf("expected verification_passed=false after rerun, got %s", result)
+	}
+}
+
 func TestPhaseInitDryRunNoPRCreation(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
@@ -2149,4 +2209,55 @@ func defaultOrchestratorConfig() OrchestratorConfig {
 		BranchPrefix:     "runoq/",
 		WorktreePrefix:   "runoq-wt-",
 	}
+}
+
+func makeRemoteBackedRepoForOrchestratorTest(t *testing.T, remoteDir string, localDir string) {
+	t.Helper()
+
+	seedDir := filepath.Join(t.TempDir(), "seed")
+	runCmdOrchestratorTest(t, ".", "git", "init", "-b", "main", seedDir)
+	runCmdOrchestratorTest(t, seedDir, "git", "config", "user.name", "Test User")
+	runCmdOrchestratorTest(t, seedDir, "git", "config", "user.email", "test@example.com")
+	if err := os.WriteFile(filepath.Join(seedDir, "README.md"), []byte("seed\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	runCmdOrchestratorTest(t, seedDir, "git", "add", "README.md")
+	runCmdOrchestratorTest(t, seedDir, "git", "commit", "-m", "Initial commit")
+
+	runCmdOrchestratorTest(t, ".", "git", "clone", "--bare", seedDir, remoteDir)
+	runCmdOrchestratorTest(t, ".", "git", "clone", remoteDir, localDir)
+	runCmdOrchestratorTest(t, localDir, "git", "config", "user.name", "Test User")
+	runCmdOrchestratorTest(t, localDir, "git", "config", "user.email", "test@example.com")
+}
+
+func writeOrchestratorConfig(t *testing.T, root string, testCommand string, buildCommand string) {
+	t.Helper()
+
+	if err := os.MkdirAll(filepath.Join(root, "config"), 0o755); err != nil {
+		t.Fatalf("mkdir config: %v", err)
+	}
+	content := fmt.Sprintf(`{
+  "branchPrefix": "runoq/",
+  "worktreePrefix": "runoq-wt-",
+  "verification": {
+    "testCommand": %q,
+    "buildCommand": %q
+  }
+}
+`, testCommand, buildCommand)
+	if err := os.WriteFile(filepath.Join(root, "config", "runoq.json"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+}
+
+func runCmdOrchestratorTest(t *testing.T, dir string, name string, args ...string) string {
+	t.Helper()
+
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%s %v failed: %v\n%s", name, args, err, string(output))
+	}
+	return string(output)
 }

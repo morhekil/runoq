@@ -288,9 +288,14 @@ func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo 
 	if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
 		return "", issueRunnerResult{}, fmt.Errorf("failed to parse state for develop: %v", err)
 	}
-	if strings.TrimSpace(state.Worktree) == "" || strings.TrimSpace(state.Branch) == "" {
-		return "", issueRunnerResult{}, errors.New("INIT state is missing worktree or branch")
+	if strings.TrimSpace(state.Branch) == "" {
+		return "", issueRunnerResult{}, errors.New("INIT state is missing branch")
 	}
+	worktreeResult, err := a.worktreeApp.RehydrateWorktree(ctx, issueNumber, state.Branch)
+	if err != nil {
+		return "", issueRunnerResult{}, fmt.Errorf("rehydrate worktree: %w", err)
+	}
+	state.Worktree = worktreeResult.Worktree
 
 	bodyOut, err := a.ghOutput(ctx, env, "issue", "view", strconv.Itoa(issueNumber), "--repo", repo, "--json", "body")
 	if err != nil {
@@ -384,6 +389,7 @@ func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo 
 		ChangedFiles:         runnerResult.ChangedFiles,
 		RelatedFiles:         runnerResult.RelatedFiles,
 		CumulativeTokens:     runnerResult.CumulativeTokens,
+		VerificationPayload:  runnerResult.VerificationPayload,
 		VerificationPassed:   runnerResult.VerificationPassed,
 		VerificationFailures: runnerResult.VerificationFailures,
 		Caveats:              runnerResult.Caveats,
@@ -403,6 +409,7 @@ func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo 
 		state["changed_files"] = result.ChangedFiles
 		state["related_files"] = result.RelatedFiles
 		state["cumulative_tokens"] = result.CumulativeTokens
+		state["verification_payload"] = result.VerificationPayload
 		state["verification_passed"] = result.VerificationPassed
 		state["verification_failures"] = result.VerificationFailures
 		state["caveats"] = result.Caveats
@@ -427,14 +434,17 @@ func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo 
 }
 
 func (a *App) phaseVerify(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string) (string, error) {
+	a.ensureSubApps()
 	var state struct {
-		PRNumber             int      `json:"pr_number"`
-		Round                int      `json:"round"`
-		Branch               string   `json:"branch"`
-		BaselineHash         string   `json:"baseline_hash"`
-		HeadHash             string   `json:"head_hash"`
-		VerificationPassed   bool     `json:"verification_passed"`
-		VerificationFailures []string `json:"verification_failures"`
+		PRNumber             int            `json:"pr_number"`
+		Round                int            `json:"round"`
+		Branch               string         `json:"branch"`
+		Worktree             string         `json:"worktree"`
+		BaselineHash         string         `json:"baseline_hash"`
+		HeadHash             string         `json:"head_hash"`
+		VerificationPayload  map[string]any `json:"verification_payload"`
+		VerificationPassed   bool           `json:"verification_passed"`
+		VerificationFailures []string       `json:"verification_failures"`
 	}
 	if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
 		return "", fmt.Errorf("failed to parse state for verify: %v", err)
@@ -442,8 +452,45 @@ func (a *App) phaseVerify(ctx context.Context, root string, env []string, repo s
 	if state.PRNumber == 0 {
 		return "", errors.New("DEVELOP state is missing pr_number")
 	}
+	if strings.TrimSpace(state.Branch) == "" || strings.TrimSpace(state.BaselineHash) == "" {
+		return "", errors.New("DEVELOP state is missing branch or baseline_hash")
+	}
 
 	a.logInfo("VERIFY: issue #%d round %d", issueNumber, max(state.Round, 1))
+
+	headHash := state.HeadHash
+	if len(state.VerificationPayload) > 0 {
+		worktreeResult, err := a.worktreeApp.RehydrateWorktree(ctx, issueNumber, state.Branch)
+		if err != nil {
+			return "", fmt.Errorf("rehydrate worktree: %w", err)
+		}
+		state.Worktree = worktreeResult.Worktree
+
+		payloadFile, err := os.CreateTemp("", "runoq-verify-payload.*")
+		if err != nil {
+			return "", err
+		}
+		defer func() {
+			_ = os.Remove(payloadFile.Name())
+		}()
+		if err := json.NewEncoder(payloadFile).Encode(state.VerificationPayload); err != nil {
+			_ = payloadFile.Close()
+			return "", err
+		}
+		if err := payloadFile.Close(); err != nil {
+			return "", err
+		}
+
+		verifyResult, err := a.verifyApp.RoundVerify(ctx, state.Worktree, state.Branch, state.BaselineHash, payloadFile.Name())
+		if err != nil {
+			return "", fmt.Errorf("verify round: %w", err)
+		}
+		state.VerificationPassed = verifyResult.ReviewAllowed
+		state.VerificationFailures = verifyResult.Failures
+		if resolvedHead, resolveErr := gitops.OpenCLI(ctx, state.Worktree, a.execCommand).ResolveHEAD(); resolveErr == nil {
+			headHash = resolvedHead
+		}
+	}
 
 	status := "PASS"
 	if !state.VerificationPassed {
@@ -461,6 +508,12 @@ func (a *App) phaseVerify(ctx context.Context, root string, env []string, repo s
 
 	verifyState, err := updateStateJSON(stateJSON, func(s map[string]any) {
 		s["phase"] = "VERIFY"
+		if strings.TrimSpace(state.Worktree) != "" {
+			s["worktree"] = state.Worktree
+		}
+		s["head_hash"] = headHash
+		s["verification_passed"] = state.VerificationPassed
+		s["verification_failures"] = state.VerificationFailures
 		if !state.VerificationPassed {
 			s["verdict"] = "FAIL"
 		}
@@ -474,7 +527,7 @@ func (a *App) phaseVerify(ctx context.Context, root string, env []string, repo s
 
 	verifyBody := fmt.Sprintf(
 		"## Verify - round %d\n\n| Field | Value |\n|-------|-------|\n| **Status** | %s |\n| **Commit range** | `%s..%s` |\n| **Branch** | `%s` |\n",
-		max(state.Round, 1), status, truncateHash(state.BaselineHash), truncateHash(state.HeadHash), state.Branch,
+		max(state.Round, 1), status, truncateHash(state.BaselineHash), truncateHash(headHash), state.Branch,
 	)
 	if strings.TrimSpace(checklist) != "" {
 		verifyBody += "\n### Failures\n" + checklist + "\n"
@@ -485,6 +538,7 @@ func (a *App) phaseVerify(ctx context.Context, root string, env []string, repo s
 }
 
 func (a *App) phaseReview(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string) (string, error) {
+	a.ensureSubApps()
 
 	var state struct {
 		Worktree          string   `json:"worktree"`
@@ -502,9 +556,14 @@ func (a *App) phaseReview(ctx context.Context, root string, env []string, repo s
 	if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
 		return "", fmt.Errorf("failed to parse state for review: %v", err)
 	}
-	if strings.TrimSpace(state.Worktree) == "" || strings.TrimSpace(state.Branch) == "" || state.PRNumber == 0 {
-		return "", errors.New("DEVELOP state is missing worktree, branch, or PR metadata")
+	if strings.TrimSpace(state.Branch) == "" || state.PRNumber == 0 {
+		return "", errors.New("DEVELOP state is missing branch or PR metadata")
 	}
+	worktreeResult, err := a.worktreeApp.RehydrateWorktree(ctx, issueNumber, state.Branch)
+	if err != nil {
+		return "", fmt.Errorf("rehydrate worktree: %w", err)
+	}
+	state.Worktree = worktreeResult.Worktree
 
 	round := max(state.Round, 1)
 	a.logInfo("REVIEW: spawning diff-reviewer for issue #%d round %d", issueNumber, round)
@@ -623,7 +682,6 @@ func (a *App) phaseReview(ctx context.Context, root string, env []string, repo s
 	}
 
 	_ = a.postAuditCommentWithState(ctx, root, env, repo, state.PRNumber, "review", reviewState, reviewBody)
-
 
 	return reviewState, nil
 }
@@ -762,7 +820,6 @@ func (a *App) phaseFinalize(ctx context.Context, root string, env []string, repo
 	if err := a.updatePRBody(ctx, env, repo, state.PRNumber, state.Summary, defaultString(strings.TrimSpace(state.Verdict), "FAIL"), defaultString(strings.TrimSpace(state.Score), "0"), max(state.Round, 1), cfg.MaxRounds, state.Caveats); err != nil {
 		a.logInfo("FINALIZE: PR body update failed: %v", err)
 	}
-
 
 	doneState, err := updateStateJSON(finalizeState, func(state map[string]any) {
 		state["phase"] = "DONE"
