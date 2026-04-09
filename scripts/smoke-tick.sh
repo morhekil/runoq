@@ -113,6 +113,24 @@ tick_preflight_json() {
   '
 }
 
+list_task_children() {
+  local repo="$1"
+  local parent_epic="$2"
+  local sub_issues result
+  sub_issues="$(runoq::gh api "repos/${repo}/issues/${parent_epic}/sub_issues" --paginate 2>/dev/null || printf '[]')"
+  result='[]'
+  while IFS= read -r issue; do
+    [[ -n "$issue" ]] || continue
+    local type state
+    type="$(issue_type_from_labels "$issue")"
+    state="$(printf '%s' "$issue" | jq -r '.state')"
+    if [[ "$type" == "task" && "$state" == "open" ]]; then
+      result="$(printf '%s' "$result" | jq --argjson issue "$issue" '. + [$issue]')"
+    fi
+  done < <(printf '%s' "$sub_issues" | jq -c '.[]')
+  printf '%s\n' "$result"
+}
+
 issue_type_from_labels() {
   local issue_json="$1"
   runoq::issue_type "$(printf '%s' "$issue_json" | jq '.labels // []')"
@@ -387,9 +405,7 @@ run_tick_smoke() {
   add_step "materialize_tasks" "$output"
   issues_json="$(list_issues_json "$repo")"
   local milestone1_tasks
-  milestone1_tasks="$(printf '%s' "$issues_json" | jq -c --argjson parent "$milestone1_number" '
-    [.[] | select(.state == "OPEN" and (.body // "" | contains("type: task")) and (.body // "" | contains("parent_epic: " + ($parent|tostring))))]'
-  )"
+  milestone1_tasks="$(list_task_children "$repo" "$milestone1_number")"
   add_check_or_failure \
     "$(printf '%s' "$milestone1_tasks" | jq -e 'length == 2' >/dev/null && printf true || printf false)" \
     "milestone1_tasks_created" \
@@ -459,9 +475,7 @@ run_tick_smoke() {
   add_step "materialize_discovery_tasks" "$output"
   issues_json="$(list_issues_json "$repo")"
   local milestone2_tasks
-  milestone2_tasks="$(printf '%s' "$issues_json" | jq -c --argjson parent "$milestone2_number" '
-    [.[] | select(.state == "OPEN" and (.body // "" | contains("type: task")) and (.body // "" | contains("parent_epic: " + ($parent|tostring))))]'
-  )"
+  milestone2_tasks="$(list_task_children "$repo" "$milestone2_number")"
   while IFS= read -r task_number; do
     [[ -n "$task_number" ]] || continue
     runoq::gh issue edit "$task_number" --repo "$repo" --remove-label "runoq:in-progress" --add-label "runoq:done" >/dev/null
