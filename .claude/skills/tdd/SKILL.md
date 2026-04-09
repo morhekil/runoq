@@ -8,6 +8,9 @@ description: Code writing skill enforcing red/green/refactor TDD workflow with c
 When writing code, follow the red/green/refactor cycle strictly. Every feature or change begins with a failing test.
 A TDD cycle is not complete until refactoring has been done and green state is committed.
 
+This skill's commit gate overrides any default habit of deferring commits unless the user explicitly says not to commit.
+Requests like "continue implementation" do not permit batching multiple TDD cycles into one uncommitted patch.
+
 ## Workflow
 
 ### 1. Red — write a failing test first
@@ -30,7 +33,7 @@ A TDD cycle is not complete until refactoring has been done and green state is c
 
 ### 4. Commit Gate
 
-Before proceeding to the next requirement, you must do all of the following:
+After green and refactor, you must stop and do all of the following before any further analysis, edits, or new tests:
 
 1. Run the relevant tests and confirm they are green.
 2. Inspect `git status --short`.
@@ -59,8 +62,10 @@ Go back to step 1 for the next requirement.
 - Never commit with failing tests.
 - Never write implementation before the test that requires it.
 - Never batch multiple unrelated changes into one commit.
+- Never batch multiple completed TDD cycles into one uncommitted change set.
 - Keep each TDD cycle small — one behavior per cycle.
 - When fixing a bug, first write a test that reproduces it (red), then fix (green).
 - A completed red/green/refactor cycle MUST end with a commit.
 - Do not start the next cycle while the previous green state is uncommitted.
 - If unrelated local changes exist, commit only the files for the completed cycle and leave unrelated changes unstaged.
+- If code was changed under this skill and the user did not explicitly forbid commits, the final response must include the commit SHA(s) or a concrete blocker that prevented committing.
