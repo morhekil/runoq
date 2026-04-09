@@ -12,6 +12,7 @@ This repository implements the deterministic runtime layer for GitHub-backed age
 
 ## Development guidelines
 
+- ALWAYS USE TDD SKILL WHEN WRITING CODE
 - Keep the CLI thin and push stable logic into reusable runtime components.
 - Prefer small, composable commands with explicit inputs, outputs, and side effects.
 - Preserve existing contracts unless there is an intentional, documented versioned change.
@@ -19,6 +20,7 @@ This repository implements the deterministic runtime layer for GitHub-backed age
 - Reuse existing helpers, fixtures, and workflows before adding new ones.
 - Keep prompts and agents thin; they should call stable repository logic rather than reimplement it.
 - Focus on modularity and testability. Avoid monolithic scripts or agents that do everything.
+- If current code architecture manifests as an implementation concern, prefer refactoring into a cleaner architecture over hacking solution in place; follow Kent Beck's principle of "First make the change easy, then make the easy change"
 
 ## Testing and validation
 
@@ -35,6 +37,12 @@ When writing, reviewing, or setting up Go code, use the skills in `.agents/skill
 - **use-modern-go** — detect the project's Go version and use modern idioms up to that version.
 - **golang-linter** — configure golangci-lint, interpret output, and apply lint fixes.
 - **golang-data-structures** — choose and optimize slices, maps, containers, generics, and pointer types.
+
+# runoq runtime notes
+
+- Agents and skills in this repo are loaded into target projects via `--add-dir`.
+- Utility scripts are the source of truth for queue state, PR lifecycle, state management, and reporting.
+- Do not duplicate deterministic rules from the scripts into prompts.
 
 ## Documentation
 
