@@ -14,7 +14,7 @@ Completed so far:
 - [x] `DEVELOP`, `VERIFY`, and `REVIEW` rehydrate disposable worktrees from the pushed branch instead of trusting prior local paths
 - [x] `RESPOND` preempts every PR-backed phase when the PR has unprocessed non-audit comments
 - [x] `DEVELOP` now runs exactly one codex round and leaves deterministic verification to `VERIFY`
-- [x] `OPEN-PR` no longer appears in newly written runtime state and only remains as a resume-compatibility path
+- [x] `OPEN-PR` no longer appears in runtime state and stale `OPEN-PR` resumes are rejected explicitly
 - [x] Disposable worktrees are cleaned up on a best-effort basis after `DEVELOP`, `VERIFY`, and `REVIEW`
 - [x] `issue-runner` has been reduced to a bounded develop-round helper rather than a multi-step orchestration loop
 - [x] Operator/reference docs and smoke specs reflect the `INIT -> DEVELOP -> VERIFY -> REVIEW -> DECIDE -> FINALIZE` cadence
@@ -174,7 +174,7 @@ Local workspace state is disposable. Each tick may create a worktree, use it, th
 
 - [x] Move from phase comments carrying full next-state assumptions toward phase-result comments
 - [x] Keep routing policy centralized in the orchestrator
-- [x] Keep backward compatibility with existing state comments only as long as needed for resume
+- [x] Remove the last `OPEN-PR` resume-compatibility path once current PR-backed routing is stable
 
 ### F. Smoke and Docs
 
@@ -188,4 +188,4 @@ Local workspace state is disposable. Each tick may create a worktree, use it, th
 
 This plan is complete.
 
-The runtime now uses PR-backed, one-step-per-tick implementation flow with explicit `DEVELOP`, `VERIFY`, `REVIEW`, `DECIDE`, and `FINALIZE` boundaries; compatibility-only handling for legacy `OPEN-PR` state; best-effort disposable worktree cleanup; and docs/smoke specs aligned to the new cadence.
+The runtime now uses PR-backed, one-step-per-tick implementation flow with explicit `DEVELOP`, `VERIFY`, `REVIEW`, `DECIDE`, and `FINALIZE` boundaries; explicit rejection of stale `OPEN-PR` state; best-effort disposable worktree cleanup; and docs/smoke specs aligned to the new cadence.

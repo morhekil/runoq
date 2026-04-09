@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -244,7 +245,7 @@ func (a *App) resumeFromState(ctx context.Context, root string, env []string, re
 	case "DEVELOP":
 		return a.runFromVerify(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 	case "OPEN-PR":
-		return a.runFromOpenPR(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+		return "", errors.New("OPEN-PR state is no longer supported; re-run from a current PR-backed phase")
 	case "VERIFY":
 		var verifyState struct {
 			VerificationPassed bool `json:"verification_passed"`
@@ -447,15 +448,6 @@ func (a *App) ensurePRCreated(ctx context.Context, root string, env []string, re
 		return stateJSON, nil
 	}
 	return a.phaseOpenPR(ctx, root, env, repo, issueNumber, stateJSON, title)
-}
-
-func (a *App) runFromOpenPR(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
-	var err error
-	stateJSON, err = a.ensurePRCreated(ctx, root, env, repo, issueNumber, stateJSON, metadata.Title)
-	if err != nil {
-		return "", err
-	}
-	return a.runFromVerify(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 }
 
 func (a *App) runFromVerify(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, _ IssueMetadata) (string, error) {

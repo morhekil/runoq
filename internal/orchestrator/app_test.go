@@ -414,7 +414,7 @@ func TestFormatAuditCommentWithAgent(t *testing.T) {
 }
 
 func TestFormatAuditCommentWithoutAgent(t *testing.T) {
-	result := formatAuditComment("open-pr", `{"phase":"OPEN-PR"}`, "PR created.")
+	result := formatAuditComment("open-pr", `{"phase":"DEVELOP"}`, "PR created.")
 	if !strings.Contains(result, "> Posted by `orchestrator` — open-pr phase") {
 		t.Fatalf("expected default attribution, got %q", result)
 	}
@@ -701,8 +701,8 @@ func TestRunFromReviewReturnsAfterReview(t *testing.T) {
 		issueTitle:  "Implement queue",
 	}))
 
-	// State after OPEN-PR: PR exists, ready for review
-	stateJSON := `{"issue":42,"phase":"OPEN-PR","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":87,"round":1,"baseline_hash":"base","head_hash":"head","commit_range":"base..head","changed_files":["main.go"],"related_files":[],"spec_requirements":"## AC","verification_passed":true}`
+	// State with an existing PR: review should run without depending on legacy OPEN-PR state.
+	stateJSON := `{"issue":42,"phase":"DEVELOP","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":87,"round":1,"baseline_hash":"base","head_hash":"head","commit_range":"base..head","changed_files":["main.go"],"related_files":[],"spec_requirements":"## AC","verification_passed":true}`
 
 	result, err := app.runFromReview(ctx, root, app.env, "owner/repo", 42, stateJSON, IssueMetadata{Number: 42, Type: "task"})
 	if err != nil {
@@ -850,16 +850,14 @@ func TestResumeFromStateBoundaries(t *testing.T) {
 		inputState     string
 		wantPhase      string
 		wantTerminal   bool
+		wantErrMatch   string
 		wantCallMatch  string // substring that must appear in gh calls
 		wantCallAbsent string // substring that must NOT appear
 	}{
 		{
-			name:           "OPEN-PR resumes to VERIFY boundary",
-			inputState:     `{"issue":42,"phase":"OPEN-PR","branch":"runoq/42-x","worktree":"/tmp/wt","pr_number":87,"round":1,"baseline_hash":"b","head_hash":"h","commit_range":"b..h","changed_files":["a.go"],"related_files":[],"spec_requirements":"## AC","verification_passed":true}`,
-			wantPhase:      "VERIFY",
-			wantTerminal:   false,
-			wantCallMatch:  "pr comment 87",
-			wantCallAbsent: "pr merge", // no finalize
+			name:         "OPEN-PR resume is rejected",
+			inputState:   `{"issue":42,"phase":"OPEN-PR","branch":"runoq/42-x","worktree":"/tmp/wt","pr_number":87,"round":1,"baseline_hash":"b","head_hash":"h","commit_range":"b..h","changed_files":["a.go"],"related_files":[],"spec_requirements":"## AC","verification_passed":true}`,
+			wantErrMatch: "OPEN-PR state is no longer supported",
 		},
 		{
 			name:           "VERIFY failure resumes to DECIDE boundary",
@@ -894,6 +892,15 @@ func TestResumeFromStateBoundaries(t *testing.T) {
 
 			meta := IssueMetadata{Number: 42, Title: "Test", Type: "task"}
 			result, err := app.resumeFromState(t.Context(), root, app.env, "owner/repo", 42, tt.inputState, meta)
+			if tt.wantErrMatch != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q", tt.wantErrMatch)
+				}
+				if !strings.Contains(err.Error(), tt.wantErrMatch) {
+					t.Fatalf("error = %q, want substring %q", err.Error(), tt.wantErrMatch)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("resumeFromState: %v", err)
 			}
