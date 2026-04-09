@@ -68,7 +68,7 @@ Maintenance review 2026-03-17
 
 The body includes:
 
-- `<!-- runoq:event -->`
+- `<!-- runoq:bot -->`
 - timestamp
 - current branch
 - current commit SHA

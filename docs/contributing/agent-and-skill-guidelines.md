@@ -86,7 +86,7 @@ The prompt layer must preserve the repo’s audit markers.
 
 Required markers include:
 
-- `<!-- runoq:event -->`
+- `<!-- runoq:bot -->`
 - `<!-- runoq:payload:github-orchestrator-dispatch -->`
 - `<!-- runoq:payload:codex-return -->`
 - `<!-- runoq:payload:orchestrator-return -->`

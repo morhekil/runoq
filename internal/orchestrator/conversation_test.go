@@ -13,11 +13,11 @@ func TestFindUnprocessedCommentsFiltersProcessed(t *testing.T) {
 	t.Parallel()
 
 	// Simulate GitHub API response with 3 comments:
-	// 1. Bot comment (runoq:event marker) — skip
+	// 1. Bot comment (runoq:bot marker) — skip
 	// 2. Human comment with +1 reaction — already processed, skip
 	// 3. Human comment without +1 — unprocessed, return
 	commentsJSON := `[
-		{"id": 100, "body": "<!-- runoq:event:init -->\nOrchestrator initialized.", "user": {"login": "runoq[bot]"}, "created_at": "2026-01-01T00:00:00Z", "reactions": {"+1": 0}},
+		{"id": 100, "body": "<!-- runoq:bot -->\nOrchestrator initialized.", "user": {"login": "runoq[bot]"}, "created_at": "2026-01-01T00:00:00Z", "reactions": {"+1": 0}},
 		{"id": 200, "body": "Looks good!", "user": {"login": "human1"}, "created_at": "2026-01-01T01:00:00Z", "reactions": {"+1": 1}},
 		{"id": 300, "body": "Please add error handling", "user": {"login": "human2"}, "created_at": "2026-01-01T02:00:00Z", "reactions": {"+1": 0}}
 	]`

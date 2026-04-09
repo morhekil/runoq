@@ -64,7 +64,6 @@ The `autoMerge.*` block is enforced by the orchestrator's FINALIZE decision tabl
 ```json
 {
   "appId": 123,
-  "installationId": 789,
   "privateKeyPath": "/absolute/or/tilde/path/to/app-key.pem"
 }
 ```
@@ -72,8 +71,12 @@ The `autoMerge.*` block is enforced by the orchestrator's FINALIZE decision tabl
 Field meaning:
 
 - `appId`: numeric GitHub App ID supplied by `RUNOQ_APP_ID` or looked up from the public app slug
-- `installationId`: numeric installation ID for the target repo
 - `privateKeyPath`: path recorded during `init`; `gh-auth.sh` also allows `RUNOQ_APP_KEY` to override it later
+
+> **Note:** `installationId` was previously required but is now resolved dynamically
+> from the repo owner via `GET /app/installations`. Existing files with the field
+> are still valid — it is written by `runoq init` and used by shell scripts, but
+> the Go runtime ignores it.
 
 If the file is missing, `gh-auth.sh` exits with `Run 'runoq init' first.` unless an existing `GH_TOKEN` is already available.
 
@@ -107,7 +110,7 @@ If the file is missing, `gh-auth.sh` exits with `Run 'runoq init' first.` unless
 
 1. If `GH_TOKEN` is set and `RUNOQ_FORCE_REFRESH_TOKEN` is unset, return it unchanged.
 2. Otherwise, if `RUNOQ_TEST_GH_TOKEN` is set, return that test token.
-3. Otherwise, load `.runoq/identity.json`, resolve the private key path, mint a JWT, and call `POST /app/installations/<installationId>/access_tokens`.
+3. Otherwise, load `.runoq/identity.json`, resolve the private key path, mint a JWT, look up the installation for the repo owner via `GET /app/installations`, and call `POST /app/installations/<id>/access_tokens`.
 
 This means a shell session with an exported `GH_TOKEN` will bypass GitHub App minting unless you explicitly force refresh.
 
@@ -174,7 +177,7 @@ A mention is authorized when the collaborator rank is greater than or equal to t
 
 `mentions.sh process` handles unauthorized mentions based on `authorization.denyResponse`:
 
-- `comment`: post an `<!-- runoq:event -->` denial comment on the PR or issue
+- `comment`: post an `<!-- runoq:bot -->` denial comment on the PR or issue
 - any other value: ignore silently
 
 The current default config is:

@@ -151,7 +151,7 @@ Symptoms:
 
 What to do:
 
-- Check whether the bar-setter agent produced output (look for the `runoq:event:criteria` PR comment)
+- Check whether the bar-setter agent produced output (look for the `runoq:bot:criteria` PR comment)
 - If the worktree and PR are still intact, you can manually write criteria files and rerun
 - If the issue is not worth the bar-setter overhead, consider lowering its complexity to `low` in the issue metadata block
 

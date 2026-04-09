@@ -152,7 +152,12 @@ func (a *App) prepareAuth(ctx context.Context, root string, env []string) []stri
 	if h, err := os.UserHomeDir(); err == nil {
 		homeDir = h
 	}
-	client := gh.NewClient(a.execCommand, http.DefaultClient, env, a.cwd, homeDir)
+	// Use TARGET_ROOT for identity resolution; fall back to a.cwd.
+	cwd := a.cwd
+	if tr, ok := shell.EnvLookup(env, "TARGET_ROOT"); ok && tr != "" {
+		cwd = tr
+	}
+	client := gh.NewClient(a.execCommand, http.DefaultClient, env, cwd, homeDir)
 	if err := client.EnsureToken(ctx); err != nil {
 		a.logInfo("Token mint failed or skipped (will use ambient credentials)")
 		return env
@@ -256,10 +261,8 @@ func (a *App) configureGitBotRemote(ctx context.Context, env []string, dir strin
 // formatAuditComment builds the comment body with event marker, optional state block, and human-readable content.
 func formatAuditComment(event string, stateJSON string, body string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "<!-- runoq:event:%s -->\n", event)
-	if stateJSON != "" {
-		fmt.Fprintf(&b, "%s%s%s\n", markerStatePrefix, stateJSON, markerStateSuffix)
-	}
+	fmt.Fprintf(&b, "<!-- runoq:bot -->\n")
+	fmt.Fprintf(&b, "%s%s%s\n", markerStatePrefix, stateJSON, markerStateSuffix)
 	fmt.Fprintf(&b, "> Posted by `orchestrator` — %s phase\n\n%s\n", event, body)
 	return b.String()
 }
@@ -455,47 +458,7 @@ func (a *App) deriveStateFromGitHub(ctx context.Context, env []string, repo stri
 	if err != nil {
 		return "", pr.Number, false, err
 	}
-	if state != "" {
-		return state, pr.Number, true, nil
-	}
-
-	// Fallback: derive phase from latest runoq:event marker
-	phase := derivePhaseFromEventMarkers(string(prView.Comments))
-	if phase == "" {
-		return "", pr.Number, true, nil
-	}
-
-	fallbackState, err := marshalJSON(map[string]any{
-		"phase":     phase,
-		"pr_number": pr.Number,
-		"branch":    pr.HeadRefName,
-		"issue":     issueNumber,
-	})
-	if err != nil {
-		return "", pr.Number, false, err
-	}
-	return fallbackState, pr.Number, true, nil
-}
-
-// derivePhaseFromEventMarkers scans comments for the latest <!-- runoq:event:X --> marker
-// and returns the phase name. Used as fallback when no structured state block exists.
-func derivePhaseFromEventMarkers(commentsJSON string) string {
-	var comments []struct {
-		Body string `json:"body"`
-	}
-	if err := json.Unmarshal([]byte(commentsJSON), &comments); err != nil {
-		return ""
-	}
-	var latest string
-	for _, c := range comments {
-		for line := range strings.SplitSeq(c.Body, "\n") {
-			if strings.HasPrefix(line, "<!-- runoq:event:") && strings.HasSuffix(line, " -->") {
-				event := line[len("<!-- runoq:event:") : len(line)-len(" -->")]
-				latest = strings.ToUpper(event)
-			}
-		}
-	}
-	return latest
+	return state, pr.Number, state != "", nil
 }
 
 func envOrDefault(env []string, key string, fallback string) string {

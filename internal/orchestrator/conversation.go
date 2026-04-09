@@ -24,7 +24,7 @@ var agentMarkerPattern = regexp.MustCompile(`<!-- runoq:agent:(\S+) -->`)
 
 // findUnprocessedComments queries GitHub for comments on an issue or PR,
 // returning those without a +1 reaction (the "processed" marker).
-// Filters out bot event comments (runoq:event markers).
+// Filters out bot-generated comments (runoq:bot markers).
 func (a *App) findUnprocessedComments(ctx context.Context, repo string, artifactType string, number int) ([]UnprocessedComment, error) {
 	endpoint := fmt.Sprintf("repos/%s/issues/%d/comments", repo, number)
 	raw, err := a.ghOutput(ctx, a.env, "api", endpoint, "--paginate")
@@ -56,8 +56,8 @@ func (a *App) findUnprocessedComments(ctx context.Context, repo string, artifact
 			continue
 		}
 
-		// Skip orchestrator event comments (audit trail, not conversation)
-		if strings.Contains(c.Body, "runoq:event:") {
+		// Skip bot-generated comments (audit trail, not conversation)
+		if strings.Contains(c.Body, "runoq:bot") {
 			continue
 		}
 

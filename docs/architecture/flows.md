@@ -42,7 +42,7 @@ sequenceDiagram
     alt unanswered human comment exists
       Tick->>Comment: answer plan-review comment
       Comment->>Claude: plan-comment-responder
-      Comment->>GH: post runoq:event reply
+      Comment->>GH: post runoq:bot reply
     else awaiting human decision
       Tick-->>Operator: single-line awaiting status
     end
@@ -236,7 +236,7 @@ sequenceDiagram
 
   alt dev command stalls or exits non-zero
     Run->>State: keep latest non-terminal breadcrumb
-    Run->>PR: post runoq:event failure comment
+    Run->>PR: post runoq:bot failure comment
     Run->>GH: post matching issue event
     Run-->>Run: exit with underlying dev status
   else payload missing or malformed
@@ -332,7 +332,7 @@ sequenceDiagram
       Mention->>State: record-mention comment_id
       Mention-->>Caller: action=process
     else permission denied and denyResponse=comment
-      Mention->>GH: post runoq:event denial comment
+      Mention->>GH: post runoq:bot denial comment
       Mention->>State: record-mention comment_id
       Mention-->>Caller: action=deny
     else permission denied and denyResponse!=comment
@@ -413,7 +413,7 @@ sequenceDiagram
     Haiku-->>Orch: question | change-request | approval | irrelevant
     alt question
       Orch->>Responder: spawn with PR context
-      Responder->>GH: post reply with runoq:event marker
+      Responder->>GH: post reply with runoq:bot marker
       Orch->>State: record-mention
     else change-request
       Orch->>Orch: extract checklist, feed into DEVELOP loop

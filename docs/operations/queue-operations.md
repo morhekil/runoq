@@ -204,10 +204,10 @@ Look for:
 
 Look for:
 
-- `runoq:event:init` — orchestrator initialization
-- `runoq:event:criteria` — bar-setter acceptance criteria (medium/high complexity)
-- `runoq:event:review` — diff review verdict, score, and checklist per round
-- `runoq:event:finalize` — finalization decision table with complexity, verdict, and auto-merge status
+- `runoq:bot:init` — orchestrator initialization
+- `runoq:bot:criteria` — bar-setter acceptance criteria (medium/high complexity)
+- `runoq:bot:review` — diff review verdict, score, and checklist per round
+- `runoq:bot:finalize` — finalization decision table with complexity, verdict, and auto-merge status
 - payload reconstruction comments when malformed output was patched or synthesized
 
 ### PR body

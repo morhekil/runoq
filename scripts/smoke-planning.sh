@@ -409,10 +409,10 @@ run_planning() {
     )"
     printf '%s\n' "$output" >"$artifacts_dir/tick-comment.log"
     planning_view="$(issue_view_json "$repo" "$planning_number")"
-    if printf '%s' "$planning_view" | jq -e '(.comments // []) | any(.body // "" | contains("runoq:event"))' >/dev/null; then
+    if printf '%s' "$planning_view" | jq -e '(.comments // []) | any(.body // "" | contains("runoq:bot"))' >/dev/null; then
       checks_json="$(append_check "$checks_json" "planning_comment_answered")"
     else
-      failures_json="$(append_missing "$failures_json" "Tick did not answer the planning question with a runoq:event comment.")"
+      failures_json="$(append_missing "$failures_json" "Tick did not answer the planning question with a runoq:bot comment.")"
     fi
   fi
 

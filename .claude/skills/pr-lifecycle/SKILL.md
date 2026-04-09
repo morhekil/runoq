@@ -20,6 +20,6 @@ Use this skill for deterministic PR operations. Delegate all GitHub mutations to
 
 ## Rules
 
-- Preserve the audit markers `<!-- runoq:payload:* -->` and `<!-- runoq:event -->`.
+- Preserve the audit markers `<!-- runoq:payload:* -->` and `<!-- runoq:bot -->`.
 - Update only marker-delimited sections in the PR body; never rewrite the whole template structure by hand.
 - Treat review comments and `@runoq` issue comments as actionable input; audit comments are write-only.

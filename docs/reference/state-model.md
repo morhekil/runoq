@@ -340,9 +340,9 @@ GitHub comments are the audit trail. The runtime uses machine-recognizable marke
 
 | Marker | Meaning | Typical location |
 | --- | --- | --- |
-| `<!-- runoq:event -->` | human-readable operational event | issue comments, PR comments, maintenance tracking issue comments |
-| `<!-- runoq:event:<phase> -->` | phase-specific event posted by the orchestrator (e.g., `runoq:event:init`, `runoq:event:criteria`, `runoq:event:review`, `runoq:event:finalize`) | PR and issue comments |
-| `<!-- runoq:event:verification-failure -->` | verification failure posted by `issue-runner` after a failed round | PR comment |
+| `<!-- runoq:bot -->` | human-readable operational event | issue comments, PR comments, maintenance tracking issue comments |
+| `<!-- runoq:bot:<phase> -->` | phase-specific event posted by the orchestrator (e.g., `runoq:bot:init`, `runoq:bot:criteria`, `runoq:bot:review`, `runoq:bot:finalize`) | PR and issue comments |
+| `<!-- runoq:bot:verification-failure -->` | verification failure posted by `issue-runner` after a failed round | PR comment |
 | `<!-- runoq:payload:codex-return -->` | normalized or reconstructed dev-round payload | PR comment |
 
 ### PR body markers

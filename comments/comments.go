@@ -60,7 +60,7 @@ func ParseHumanCommentSelection(issueViewJSON string) (ItemSelection, error) {
 		if c.Author.Login == "runoq" {
 			continue
 		}
-		if strings.Contains(c.Body, "runoq:event") {
+		if strings.Contains(c.Body, "runoq:bot") {
 			continue
 		}
 		body := c.Body
@@ -105,7 +105,7 @@ func FindUnrespondedCommentIDs(issueViewJSON string) ([]string, error) {
 		if c.Author.Login == "runoq" {
 			continue
 		}
-		if strings.Contains(c.Body, "runoq:event") {
+		if strings.Contains(c.Body, "runoq:bot") {
 			continue
 		}
 		hasThumbsUp := false

@@ -25,7 +25,7 @@ load test_helper
   run grep -n "runoq:payload:codex-return" "$(fixture_path "comments/audit-codex-return.md")"
   [ "$status" -eq 0 ]
 
-  run grep -n "runoq:event" "$(fixture_path "comments/audit-event.md")"
+  run grep -n "runoq:bot" "$(fixture_path "comments/audit-event.md")"
   [ "$status" -eq 0 ]
 }
 

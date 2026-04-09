@@ -855,7 +855,7 @@ grep -n '^name: plan-comment-responder$' \
 grep -n 'NEVER.*edit.*code' "$RUNOQ_ROOT/.claude/agents/plan-comment-responder.md"
 grep -n 'NEVER.*modify.*state\|NEVER.*create issues' \
   "$RUNOQ_ROOT/.claude/agents/plan-comment-responder.md"
-grep -n 'runoq:event' "$RUNOQ_ROOT/.claude/agents/plan-comment-responder.md"
+grep -n 'runoq:bot' "$RUNOQ_ROOT/.claude/agents/plan-comment-responder.md"
 
 # AC-D3-4: plan-comment-handler.sh reads comments from the issue
 # (bats test: given a fake gh scenario with comments, handler invokes agent)
@@ -863,7 +863,7 @@ grep -q 'plan-comment-responder' "$FAKE_CLAUDE_LOG"
 
 # AC-D3-5: Handler posts reply as issue comment with audit marker
 grep -q 'issue comment' "$FAKE_GH_LOG"
-grep -q 'runoq:event' "$FAKE_GH_CAPTURE_DIR"/*.body
+grep -q 'runoq:bot' "$FAKE_GH_CAPTURE_DIR"/*.body
 
 # AC-D3-6: Handler does NOT post if no new human comments exist
 # (bats test: given no new comments since last runoq reply, handler is a no-op)
@@ -984,7 +984,7 @@ STEP 2: Human comments on milestone plan — question + partial rejection
   runoq tick
   Agent fixture: plan-comment-responder answers the question and acknowledges
     the rejection
-  ASSERT: reply comment posted on planning issue with runoq:event marker
+  ASSERT: reply comment posted on planning issue with runoq:bot marker
   ASSERT: reply references items by number (item 2, item 3)
   runoq tick → no new comments, awaiting
   ASSERT: output contains "Awaiting human decision on #N"
@@ -1151,7 +1151,7 @@ STEP 1: runoq tick → bootstrap + milestone decomposition (real LLM)
   EVAL: reviewer scores present in proposal
 
 STEP 2: Inject comment: "Why this milestone order?" → runoq tick
-  EVAL: reply posted with runoq:event marker
+  EVAL: reply posted with runoq:bot marker
   EVAL: reply is non-empty and references the plan
   Auto-approve → runoq tick → materialize milestones
   EVAL: milestone epics exist with valid metadata

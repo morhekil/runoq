@@ -535,7 +535,7 @@ func (a *App) postVerificationComment(ctx context.Context, input *inputPayload, 
 
 	// Build comment body.
 	var b strings.Builder
-	fmt.Fprintf(&b, "<!-- runoq:event:verification-failure -->\n")
+	fmt.Fprintf(&b, "<!-- runoq:bot -->\n")
 	fmt.Fprintf(&b, "## Verification failure — round %d\n\n", round)
 	fmt.Fprintf(&b, "> Posted by `issue-runner` / `verify.sh` — round %d of %d, branch `%s`\n\n", round, input.MaxRounds, input.Branch)
 	fmt.Fprintf(&b, "**Commit range**: `%s..%s`\n", short(roundBaseline), short(state.headHash))

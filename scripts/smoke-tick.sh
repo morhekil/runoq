@@ -330,12 +330,12 @@ run_tick_smoke() {
   add_step "planning_comment_response" "$output"
   planning_view="$(issue_view_json "$repo" "$planning_number")"
   add_check_or_failure \
-    "$(printf '%s' "$planning_view" | jq -e '(.comments // []) | any(.body // "" | contains("runoq:event"))' >/dev/null && printf true || printf false)" \
+    "$(printf '%s' "$planning_view" | jq -e '(.comments // []) | any(.body // "" | contains("runoq:bot"))' >/dev/null && printf true || printf false)" \
     "comment_reply_posted" \
     "Planning comment response was not posted."
   add_check_or_failure \
     "$(printf '%s' "$planning_view" | jq -e '
-      [.comments // [] | .[] | select((.author.login // "") != "runoq" and ((.body // "") | contains("runoq:event") | not))]
+      [.comments // [] | .[] | select((.author.login // "") != "runoq" and ((.body // "") | contains("runoq:bot") | not))]
       | last | .reactionGroups // [] | any(.content == "THUMBS_UP" and (.users.totalCount // 0) > 0)
     ' >/dev/null 2>&1 && printf true || printf false)" \
     "comment_responded_reaction" \

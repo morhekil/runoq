@@ -107,7 +107,7 @@ func (a *App) pollMentions(ctx context.Context, repo, handle string) ([]json.Raw
 			if !strings.Contains(c.Body, mention) {
 				continue
 			}
-			if strings.Contains(c.Body, "runoq:payload") || strings.Contains(c.Body, "runoq:event") {
+			if strings.Contains(c.Body, "runoq:payload") || strings.Contains(c.Body, "runoq:bot") {
 				continue
 			}
 			ctxType := "issue"

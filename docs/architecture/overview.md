@@ -169,7 +169,7 @@ The core architectural rule is that durable behavior belongs in Go packages and 
 
 `runoq` uses two different persistence models on purpose:
 
-- GitHub issues, PRs, and comments are the operational audit trail. Audit markers such as `<!-- runoq:event -->` and `<!-- runoq:payload:* -->` make those comments machine-recognizable and human-readable.
+- GitHub issues, PRs, and comments are the operational audit trail. Audit markers such as `<!-- runoq:bot -->` and `<!-- runoq:payload:* -->` make those comments machine-recognizable and human-readable.
 - `.runoq/state/*.json` is a resumability mechanism. State files track the latest local phase, worktree, PR number, timestamps, payload normalization output, and mention deduplication, but they are not the long-term record of operator actions.
 
 ### Working tree safety

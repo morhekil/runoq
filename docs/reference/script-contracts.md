@@ -7,7 +7,7 @@ This document summarizes the public shell-script contracts under [`scripts/`](..
 Treat these outputs as stability-sensitive:
 
 - JSON returned by the subcommands documented below
-- audit markers such as `<!-- runoq:event -->` and `<!-- runoq:payload:* -->`
+- audit markers such as `<!-- runoq:bot -->` and `<!-- runoq:payload:* -->`
 - marker-delimited PR template sections used by `update-summary`
 
 Treat these as implementation details unless separately documented:
@@ -142,11 +142,11 @@ Primary callers: `tick.sh`, tests.
 
 | Invocation | Arguments | JSON/stdout contract | Side effects |
 | --- | --- | --- | --- |
-| `plan-comment-handler.sh` | `<repo> <issue-number> <plan-file>` | single-line status `Responded to comments on #<n>` on success | reads issue comments, invokes `plan-comment-responder`, posts `runoq:event` reply comment |
+| `plan-comment-handler.sh` | `<repo> <issue-number> <plan-file>` | single-line status `Responded to comments on #<n>` on success | reads issue comments, invokes `plan-comment-responder`, posts `runoq:bot` reply comment |
 
 Notes:
 
-- Only human comments without an existing `runoq:event` reply are actionable.
+- Only human comments without an existing `runoq:bot` reply are actionable.
 - Replies are intentionally audit-marked so later ticks can detect whether a comment has already been handled.
 
 ## `orchestrator.sh`
@@ -225,7 +225,7 @@ Primary callers: `run.sh`, `mentions.sh`, skills, tests.
 
 Notes:
 
-- `read-actionable` filters out audit payload comments and `runoq:event` comments from issue-comment results.
+- `read-actionable` filters out audit payload comments and `runoq:bot` comments from issue-comment results.
 - `poll-mentions` determines PR vs issue context from the GitHub item type, not from comment text.
 
 ## `state.sh`

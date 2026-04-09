@@ -7,7 +7,7 @@
   },
   {
     "id": 3002,
-    "body": "<!-- runoq:event --> internal note",
+    "body": "<!-- runoq:bot --> internal note",
     "user": { "login": "runoq[bot]" },
     "created_at": "2026-03-17T01:05:00Z"
   }

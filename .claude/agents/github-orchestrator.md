@@ -126,7 +126,7 @@ After the reviewer returns:
 
 ## Audit trail
 
-- Every operational decision must be recorded with `<!-- runoq:event -->` or the matching `runoq:payload:*` marker.
+- Every operational decision must be recorded with `<!-- runoq:bot -->` or the matching `runoq:payload:*` marker.
 - Record startup reconciliation outcomes, eligibility skips, dispatches, review outcomes, finalization decisions, failures, and circuit breaker stops on the PR or issue specified by the PRD.
 - Use scripts and skills for all deterministic behavior. Do not improvise direct `gh` mutations when a repository script already defines the contract.
 
@@ -159,7 +159,7 @@ After the reviewer returns:
 
 ## Hard rules
 
-- Record operational decisions using `<!-- runoq:event -->` and payload comments.
+- Record operational decisions using `<!-- runoq:bot -->` and payload comments.
 - Use scripts and skills for all deterministic behavior.
 - Never edit files in the target source tree yourself.
 - Own the Claude diff-reviewer subagent yourself. Do not ask `issue-runner` to spawn or simulate a reviewer.

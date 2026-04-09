@@ -104,8 +104,8 @@ func HandleComments(ctx context.Context, cfg HandleCommentsConfig) error {
 
 	// Post reply comment
 	replyBody := agentResp.Reply
-	if !strings.Contains(replyBody, "runoq:event") {
-		replyBody = "<!-- runoq:event -->\n\n" + replyBody
+	if !strings.Contains(replyBody, "runoq:bot") {
+		replyBody = "<!-- runoq:bot -->\n\n" + replyBody
 	}
 	if err := cfg.GH.IssueComment(ctx, cfg.Repo, cfg.IssueNumber, replyBody); err != nil {
 		return fmt.Errorf("post reply: %w", err)

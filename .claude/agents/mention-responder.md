@@ -62,12 +62,12 @@ Post your response as a PR comment using the pr-lifecycle skill:
 
 The comment body must include the audit marker:
 ```
-<!-- runoq:event -->
+<!-- runoq:bot -->
 ```
 
 ## Hard rules
 
 - Never edit code or PR state.
-- Always include the `<!-- runoq:event -->` audit marker in your reply.
+- Always include the `<!-- runoq:bot -->` audit marker in your reply.
 - Keep responses focused on the question asked — don't volunteer unsolicited reviews.
 - If the question is actually a change request, say so in your reply and note that the orchestrator should handle it as a change-request, not a question.

@@ -338,7 +338,7 @@ For `status: budget_exhausted`, include the current verified state and explain w
 
 - Post a PR comment after each verification failure via `pr-lifecycle`.
 - Read only actionable PR comments via `"$RUNOQ_ROOT/scripts/gh-pr-lifecycle.sh" read-actionable` — do not read the full PR audit trail back into context.
-- Preserve audit markers `<!-- runoq:event -->` and `<!-- runoq:payload:* -->` in all PR mutations.
+- Preserve audit markers `<!-- runoq:bot -->` and `<!-- runoq:payload:* -->` in all PR mutations.
 
 ## Logging
 

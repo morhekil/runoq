@@ -81,7 +81,7 @@ load test_helper
   [ "$status" -eq 0 ]
   run grep -n "Scenario: budget exhaustion" "$RUNOQ_ROOT/.claude/agents/github-orchestrator.md"
   [ "$status" -eq 0 ]
-  run grep -n "runoq:event" "$RUNOQ_ROOT/.claude/agents/github-orchestrator.md"
+  run grep -n "runoq:bot" "$RUNOQ_ROOT/.claude/agents/github-orchestrator.md"
   [ "$status" -eq 0 ]
   run grep -n "Never dispatch \`issue-runner\` with an ad hoc inline implementation prompt" "$RUNOQ_ROOT/.claude/agents/github-orchestrator.md"
   [ "$status" -eq 0 ]

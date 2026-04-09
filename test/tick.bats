@@ -255,7 +255,7 @@ EOF
   fixture_dir="$TEST_TMPDIR/fixtures"
   mkdir -p "$fixture_dir"
   cat >"$fixture_dir/plan-comment-responder.txt" <<'EOF'
-{"action":"question","reply":"<!-- runoq:event -->\n\nThe order is based on dependency reduction."}
+{"action":"question","reply":"<!-- runoq:bot -->\n\nThe order is based on dependency reduction."}
 EOF
   export RUNOQ_CLAUDE_BIN="$RUNOQ_ROOT/test/helpers/fixture-claude"
   export RUNOQ_TEST_AGENT_FIXTURE_DIR="$fixture_dir"

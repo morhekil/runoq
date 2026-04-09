@@ -41,8 +41,8 @@ func TestParseHumanCommentSelection(t *testing.T) {
 			issueViewJSON: `{"comments":[{"author":{"login":"runoq"},"body":"approve items 1, 2"}]}`,
 		},
 		{
-			name:          "event comments ignored",
-			issueViewJSON: `{"comments":[{"author":{"login":"human"},"body":"runoq:event approve items 1"}]}`,
+			name:          "bot marker comments ignored",
+			issueViewJSON: `{"comments":[{"author":{"login":"human"},"body":"<!-- runoq:bot -->\napprove items 1"}]}`,
 		},
 	}
 
@@ -94,14 +94,14 @@ func TestFindUnrespondedCommentIDs(t *testing.T) {
 			wantIDs:       []string{"IC1"},
 		},
 		{
-			name:          "event-tagged comment skipped",
-			issueViewJSON: `{"comments":[{"author":{"login":"human"},"body":"runoq:event done","id":"IC1","reactionGroups":[]}]}`,
+			name:          "bot-tagged comment skipped",
+			issueViewJSON: `{"comments":[{"author":{"login":"human"},"body":"<!-- runoq:bot -->\ndone","id":"IC1","reactionGroups":[]}]}`,
 		},
 		{
 			name: "multiple: one responded one not",
 			issueViewJSON: `{"comments":[
 				{"author":{"login":"human"},"body":"first","id":"IC1","reactionGroups":[{"content":"THUMBS_UP","users":{"totalCount":1}}]},
-				{"author":{"login":"runoq"},"body":"<!-- runoq:event -->\nreply","id":"IC2","reactionGroups":[]},
+				{"author":{"login":"runoq"},"body":"<!-- runoq:bot -->\nreply","id":"IC2","reactionGroups":[]},
 				{"author":{"login":"human"},"body":"second","id":"IC3","reactionGroups":[]}
 			]}`,
 			wantIDs: []string{"IC3"},

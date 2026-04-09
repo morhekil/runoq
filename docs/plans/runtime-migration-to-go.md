@@ -109,7 +109,7 @@ These should match exactly across implementations unless explicitly versioned:
 - CLI command shape
 - stdout JSON fields and meanings
 - exit-code behavior
-- audit markers such as `<!-- runoq:event -->` and `<!-- runoq:payload:* -->`
+- audit markers such as `<!-- runoq:bot -->` and `<!-- runoq:payload:* -->`
 - state transition semantics
 - issue and PR label semantics
 - GitHub-side effect meaning
