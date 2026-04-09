@@ -328,6 +328,7 @@ func (a *App) runFromDecide(ctx context.Context, root string, env []string, repo
 		return "", err
 	}
 	var decideState struct {
+		PRNumber        int    `json:"pr_number"`
 		Decision        string `json:"decision"`
 		NextPhase       string `json:"next_phase"`
 		ReviewChecklist string `json:"review_checklist"`
@@ -342,7 +343,13 @@ func (a *App) runFromDecide(ctx context.Context, root string, env []string, repo
 		if err != nil {
 			return "", err
 		}
-		return a.runFromDevelop(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+		// Post audit comment so next tick can derive state from PR
+		if decideState.PRNumber != 0 {
+			_ = a.postAuditCommentWithState(ctx, root, env, repo, decideState.PRNumber, "decide", stateJSON,
+				"Decision: iterate. Next round of development will address review feedback.")
+		}
+		// Tick boundary: return. Next tick resumes from DECIDE state → runFromDevelop.
+		return stateJSON, nil
 	}
 	return a.phaseFinalize(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 }

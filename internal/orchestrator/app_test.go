@@ -720,6 +720,109 @@ func TestRunFromReviewReturnsAfterReview(t *testing.T) {
 	}
 }
 
+// TestRunFromDecideReturnsOnIterate verifies that runFromDecide returns at the
+// tick boundary when the verdict is ITERATE, posting an audit comment so the
+// next tick can derive state. It should NOT chain to runFromDevelop.
+func TestRunFromDecideReturnsOnIterate(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var stderr bytes.Buffer
+	var calls []string
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, &stderr)
+	cfg := defaultOrchestratorConfig()
+	cfg.MaxRounds = 5
+	app.SetConfig(cfg)
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		calls:       &calls,
+		issueNumber: 42,
+		issueTitle:  "Implement queue",
+	}))
+
+	// State after REVIEW: verdict=ITERATE, round 1
+	stateJSON := `{"issue":42,"phase":"REVIEW","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":87,"round":1,"verdict":"ITERATE","score":"21","review_checklist":"- Fix error handling.","baseline_hash":"base","head_hash":"head"}`
+
+	result, err := app.runFromDecide(ctx, root, app.env, "owner/repo", 42, stateJSON, IssueMetadata{Number: 42, Type: "task"})
+	if err != nil {
+		t.Fatalf("runFromDecide: %v", err)
+	}
+
+	var state struct {
+		Phase    string `json:"phase"`
+		Decision string `json:"decision"`
+	}
+	if err := json.Unmarshal([]byte(result), &state); err != nil {
+		t.Fatalf("parse result: %v", err)
+	}
+
+	// Should return at DECIDE phase with iterate decision — not continue to DEVELOP
+	if state.Phase != "DECIDE" {
+		t.Errorf("expected phase DECIDE, got %q", state.Phase)
+	}
+	if state.Decision != "iterate" {
+		t.Errorf("expected decision iterate, got %q", state.Decision)
+	}
+
+	// Should post audit comment to PR so next tick can derive state
+	if !containsCall(calls, "pr comment 87") {
+		t.Errorf("expected audit comment posted to PR, got calls: %v", calls)
+	}
+
+	// Should NOT have invoked codex (develop) or finalize
+	for _, call := range calls {
+		if strings.Contains(call, "codex") {
+			t.Errorf("should not invoke codex on decide-iterate tick, got: %s", call)
+		}
+		if strings.Contains(call, "pr ready") || strings.Contains(call, "pr merge") {
+			t.Errorf("should not finalize on iterate, got: %s", call)
+		}
+	}
+}
+
+// TestRunFromDecideFinalizesSameTickOnPass verifies that when the verdict is
+// PASS, runFromDecide runs phaseFinalize in the same tick (no boundary).
+func TestRunFromDecideFinalizesSameTickOnPass(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var stderr bytes.Buffer
+	var calls []string
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, &stderr)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		calls:       &calls,
+		issueNumber: 42,
+		issueTitle:  "Implement queue",
+	}))
+
+	// State after REVIEW: verdict=PASS
+	stateJSON := `{"issue":42,"phase":"REVIEW","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":87,"round":1,"verdict":"PASS","score":"42","review_checklist":"- All good.","baseline_hash":"base","head_hash":"head","summary":"Ready"}`
+
+	result, err := app.runFromDecide(ctx, root, app.env, "owner/repo", 42, stateJSON, IssueMetadata{Number: 42, Type: "task"})
+	if err != nil {
+		t.Fatalf("runFromDecide: %v", err)
+	}
+
+	var state struct {
+		Phase string `json:"phase"`
+	}
+	if err := json.Unmarshal([]byte(result), &state); err != nil {
+		t.Fatalf("parse result: %v", err)
+	}
+
+	// Should have run finalize — terminal phase
+	if state.Phase != "DONE" {
+		t.Errorf("expected phase DONE (finalize ran in same tick), got %q", state.Phase)
+	}
+
+	// Should have called finalize-related commands
+	if !containsCall(calls, "pr ready") {
+		t.Errorf("expected pr ready (finalize), got calls: %v", calls)
+	}
+}
+
 func TestPhaseDecideIteratesSetsNextPhaseDevelop(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
