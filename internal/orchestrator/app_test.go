@@ -670,6 +670,56 @@ func TestPhaseFinalizeAutoMergesAndCleansUp(t *testing.T) {
 }
 
 // TestPhaseDecideIteratesSetsNextPhaseDevelop tests the decide phase with ITERATE verdict.
+// TestRunFromReviewReturnsAfterReview verifies that runFromReview returns
+// after the review phase without chaining to decide or finalize.
+// This is the tick boundary: review runs in one tick, decide in the next.
+func TestRunFromReviewReturnsAfterReview(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var stderr bytes.Buffer
+	var calls []string
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, &stderr)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		calls:       &calls,
+		issueNumber: 42,
+		issueTitle:  "Implement queue",
+	}))
+
+	// State after OPEN-PR: PR exists, ready for review
+	stateJSON := `{"issue":42,"phase":"OPEN-PR","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":87,"round":1,"baseline_hash":"base","head_hash":"head","commit_range":"base..head","changed_files":["main.go"],"related_files":[],"spec_requirements":"## AC","verification_passed":true}`
+
+	result, err := app.runFromReview(ctx, root, app.env, "owner/repo", 42, stateJSON, IssueMetadata{Number: 42, Type: "task"})
+	if err != nil {
+		t.Fatalf("runFromReview: %v", err)
+	}
+
+	// Should return with REVIEW phase, not DECIDE or DONE
+	var state struct {
+		Phase string `json:"phase"`
+	}
+	if err := json.Unmarshal([]byte(result), &state); err != nil {
+		t.Fatalf("parse result state: %v", err)
+	}
+	if state.Phase != "REVIEW" {
+		t.Errorf("expected phase REVIEW, got %q", state.Phase)
+	}
+
+	// Should NOT have called phaseDecide or phaseFinalize indicators
+	for _, call := range calls {
+		if strings.Contains(call, "pr ready") || strings.Contains(call, "pr merge") {
+			t.Errorf("should not call finalize-related commands, got: %s", call)
+		}
+	}
+
+	// Should have called the review agent (claude stream-json)
+	if !containsCall(calls, "stream-json") {
+		t.Errorf("expected review agent invocation (claude stream-json), got calls: %v", calls)
+	}
+}
+
 func TestPhaseDecideIteratesSetsNextPhaseDevelop(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
@@ -1217,13 +1267,17 @@ func TestRunIssueResumesFromDevelopState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunIssue failed: %v", err)
 	}
-	if !strings.Contains(stateJSON, `"phase":"DONE"`) {
-		t.Fatalf("expected DONE, got %s", stateJSON)
+	// Tick-per-phase: resuming from DEVELOP runs review then stops at REVIEW boundary
+	if !strings.Contains(stateJSON, `"phase":"REVIEW"`) {
+		t.Fatalf("expected REVIEW (tick boundary), got %s", stateJSON)
 	}
-	// Must NOT have called phaseInit
+	// Must NOT have called phaseInit or finalize
 	for _, call := range calls {
 		if strings.Contains(call, "pr create") && strings.Contains(call, "--draft") {
 			t.Fatalf("should not have created PR on resume, got: %v", calls)
+		}
+		if strings.Contains(call, "pr ready") || strings.Contains(call, "pr merge") {
+			t.Fatalf("should not have called finalize on review tick, got: %s", call)
 		}
 	}
 	if !strings.Contains(stderr.String(), "REVIEW:") {

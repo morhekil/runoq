@@ -317,11 +317,8 @@ func (a *App) runFromOpenPR(ctx context.Context, root string, env []string, repo
 }
 
 func (a *App) runFromReview(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
-	stateJSON, err := a.runFromReviewLoop(ctx, root, env, repo, issueNumber, stateJSON, metadata)
-	if err != nil {
-		return "", err
-	}
-	return a.phaseFinalize(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+	// Tick boundary: run review only, return. Next tick will run decide.
+	return a.phaseReview(ctx, root, env, repo, issueNumber, stateJSON)
 }
 
 func (a *App) runFromDecide(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
