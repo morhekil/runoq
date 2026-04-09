@@ -568,7 +568,7 @@ func TestRunLowComplexityDevelopFailureCompletesNeedsReviewHandoff(t *testing.T)
 	}))
 
 	stateJSON := `{"issue":42,"phase":"DEVELOP","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":87,"round":1,"status":"fail"}`
-	result, err := app2.phaseDevelopNeedsReview(ctx, root, app2.env, "owner/repo", 42, stateJSON)
+	result, err := app2.phaseDevelopNeedsReview(ctx, root, app2.env, "owner/repo", 42, stateJSON, "fail", "Verification failed after 3 rounds")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -580,6 +580,9 @@ func TestRunLowComplexityDevelopFailureCompletesNeedsReviewHandoff(t *testing.T)
 	}
 	if !containsCall(calls, "pr ready 87 --repo owner/repo") {
 		t.Fatalf("expected pr ready call, got %v", calls)
+	}
+	if !containsCall(calls, "pr comment") {
+		t.Fatalf("expected audit comment on PR, got %v", calls)
 	}
 	if !strings.Contains(stderr.String(), "DEVELOP: issue #42 requires deterministic needs-review handoff") {
 		t.Fatalf("expected develop handoff log, got %q", stderr.String())
@@ -626,7 +629,7 @@ func TestNeedsReviewHandoffCreatesPRWhenMissing(t *testing.T) {
 		t.Fatalf("expected pr_number in state after PR creation, got %q", stateJSON)
 	}
 
-	result, err := app.phaseDevelopNeedsReview(ctx, root, app.env, "owner/repo", 42, stateJSON)
+	result, err := app.phaseDevelopNeedsReview(ctx, root, app.env, "owner/repo", 42, stateJSON, "budget_exhausted", "Token budget exhausted after round 2")
 	if err != nil {
 		t.Fatalf("phaseDevelopNeedsReview: %v", err)
 	}

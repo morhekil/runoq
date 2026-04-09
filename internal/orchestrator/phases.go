@@ -691,7 +691,7 @@ func (a *App) phaseFinalize(ctx context.Context, root string, env []string, repo
 	return doneState, nil
 }
 
-func (a *App) phaseDevelopNeedsReview(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string) (string, error) {
+func (a *App) phaseDevelopNeedsReview(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, developStatus string, developSummary string) (string, error) {
 	a.ensureSubApps()
 	a.logInfo("DEVELOP: issue #%d requires deterministic needs-review handoff", issueNumber)
 
@@ -737,6 +737,13 @@ func (a *App) phaseDevelopNeedsReview(ctx context.Context, root string, env []st
 	})
 	if err != nil {
 		return "", err
+	}
+
+	if state.PRNumber != 0 {
+		body := fmt.Sprintf(
+			"## Needs review — issue #%d\n\n| Field | Value |\n|-------|-------|\n| **Develop status** | `%s` |\n| **Reason** | %s |\n",
+			issueNumber, developStatus, developSummary)
+		_ = a.postAuditCommentWithState(ctx, root, env, repo, state.PRNumber, "finalize", finalizeState, body)
 	}
 
 	doneState, err := updateStateJSON(finalizeState, func(state map[string]any) {

@@ -319,7 +319,7 @@ func (a *App) runFromDevelop(ctx context.Context, root string, env []string, rep
 		// Escalate after max retries.
 		if retries >= maxTransientRetries {
 			a.logInfo("DEVELOP: issue #%d transient errors exhausted (%d), escalating to needs-review", issueNumber, retries)
-			return a.phaseDevelopNeedsReview(ctx, root, env, repo, issueNumber, stateJSON)
+			return a.phaseDevelopNeedsReview(ctx, root, env, repo, issueNumber, stateJSON, developResult.Status, developResult.Summary)
 		}
 
 		backoff := a.transientBackoffDuration(retries)
@@ -360,7 +360,7 @@ func (a *App) runFromDevelop(ctx context.Context, root string, env []string, rep
 	}
 
 	if developResult.Status != "review_ready" {
-		return a.phaseDevelopNeedsReview(ctx, root, env, repo, issueNumber, stateJSON)
+		return a.phaseDevelopNeedsReview(ctx, root, env, repo, issueNumber, stateJSON, developResult.Status, developResult.Summary)
 	}
 
 	// Tick boundary: PR created, next tick runs review
