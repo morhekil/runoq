@@ -28,9 +28,17 @@ A TDD cycle is not complete until refactoring has been done and green state is c
 - Run the test suite — confirm all tests still pass.
 - If the refactor is non-trivial, commit it separately from the green step.
 
-### 4. Commit
+### 4. Commit Gate
 
-- Commit once tests are green, before moving to the next cycle.
+Before proceeding to the next requirement, you must do all of the following:
+
+1. Run the relevant tests and confirm they are green.
+2. Inspect `git status --short`.
+3. Commit the completed TDD cycle.
+
+Do not continue to the next TDD cycle until the green state is committed.
+The only exception is when the user explicitly instructs you not to commit.
+
 - Each commit must have tests green before and after.
 - Commit messages should describe the _what_ and _why_, not the mechanics of TDD.
 - Prefer many small, meaningful commits over large batches.
@@ -53,3 +61,6 @@ Go back to step 1 for the next requirement.
 - Never batch multiple unrelated changes into one commit.
 - Keep each TDD cycle small — one behavior per cycle.
 - When fixing a bug, first write a test that reproduces it (red), then fix (green).
+- A completed red/green/refactor cycle MUST end with a commit.
+- Do not start the next cycle while the previous green state is uncommitted.
+- If unrelated local changes exist, commit only the files for the completed cycle and leave unrelated changes unstaged.
