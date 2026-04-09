@@ -1,8 +1,0 @@
-{
-  "name": "runoq-live-smoke-target",
-  "private": true,
-  "scripts": {
-    "test": "node --test",
-    "build": "node scripts/build-check.js"
-  }
-}
