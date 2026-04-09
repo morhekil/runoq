@@ -32,11 +32,15 @@ This repository implements the deterministic runtime layer for GitHub-backed age
 
 ## Go code
 
-When writing, reviewing, or setting up Go code, use the skills in `.agents/skills/`:
+When editing or creating Go code, load and follow these skills from `.agents/skills/`:
 
-- **use-modern-go** — detect the project's Go version and use modern idioms up to that version.
-- **golang-linter** — configure golangci-lint, interpret output, and apply lint fixes.
-- **golang-data-structures** — choose and optimize slices, maps, containers, generics, and pointer types.
+- `use-modern-go`
+- `golang-linter`
+- `golang-data-structures`
+
+Rules:
+- Always load `use-modern-go` and `golang-linter` before making Go changes.
+- Load `golang-data-structures` whenever changing data structures, collection types, pointer usage, or performance-sensitive paths.
 
 # runoq runtime notes
 
