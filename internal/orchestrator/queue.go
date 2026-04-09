@@ -427,11 +427,11 @@ func (a *App) runFromDevelop(ctx context.Context, root string, env []string, rep
 		}
 	}
 
-	if developResult.Status != "review_ready" {
+	if developResult.Status != "completed" && developResult.Status != "review_ready" {
 		return a.phaseDevelopNeedsReview(ctx, root, env, repo, issueNumber, stateJSON, developResult.Status, developResult.Summary)
 	}
 
-	// Tick boundary: PR created, next tick runs review
+	// Tick boundary: PR created, next tick runs verify.
 	return stateJSON, nil
 }
 

@@ -13,11 +13,11 @@ Completed so far:
 - [x] `VERIFY` persists verifier inputs in PR state and re-runs deterministic verification from a fresh rehydrated branch worktree
 - [x] `DEVELOP`, `VERIFY`, and `REVIEW` rehydrate disposable worktrees from the pushed branch instead of trusting prior local paths
 - [x] `RESPOND` preempts every PR-backed phase when the PR has unprocessed non-audit comments
+- [x] `DEVELOP` now runs exactly one codex round and leaves deterministic verification to `VERIFY`
 - [x] Orchestrator tests and full `go test ./...` are green after the boundary refactor
 
 Still to do:
 
-- [ ] Move verification execution itself out of the issue-runner loop so `VERIFY` is a truly separate tick on a fresh machine
 - [ ] Remove `OPEN-PR` as a meaningful runtime phase and treat it as compatibility-only until old state/comments are gone
 - [ ] Remove the issue-runner as a top-level orchestration concept and keep only reusable helpers
 - [ ] Change phase comments from "next-state carriers" toward phase-result records and centralize routing logic fully in the orchestrator
@@ -108,7 +108,7 @@ Interrupt flow:
 
 ### `RESPOND`
 
-- read unprocessed human PR comments
+- read unprocessed PR comments
 - post replies
 - mark comments processed
 - do not advance implementation phases
@@ -154,7 +154,7 @@ Local workspace state is disposable. Each tick may create a worktree, use it, th
 
 ### B. Verification Extraction
 
-- [ ] Split verification execution out of `issue-runner` so `DEVELOP` no longer performs verification internally
+- [x] Split verification execution out of `issue-runner` so `DEVELOP` no longer performs verification internally
 - [x] Persist whatever inputs `VERIFY` needs in a GitHub-recoverable form
 - [x] Make `VERIFY` re-run deterministic verification on a fresh machine
 - [x] Update tests to prove `VERIFY` is independent of prior local temp files
@@ -191,6 +191,6 @@ Local workspace state is disposable. Each tick may create a worktree, use it, th
 
 The current landed slice is intentionally partial.
 
-It now establishes fresh-worktree execution for `DEVELOP`/`VERIFY`/`REVIEW` and makes `VERIFY` rerun deterministic verification from persisted state instead of trusting prior temp files.
+It now establishes fresh-worktree execution for `DEVELOP`/`VERIFY`/`REVIEW`, makes `VERIFY` rerun deterministic verification from persisted state instead of trusting prior temp files, and reduces `DEVELOP` to one coding round that persists payload state for a later `VERIFY` tick.
 
-The remaining architectural gap is that `issue-runner` still performs an internal verification loop to decide whether a `DEVELOP` round is review-ready. Fully removing that internal loop is still the next major slice.
+The remaining architectural gaps are mostly cleanup and compatibility work: removing `OPEN-PR` as a meaningful phase, shrinking `issue-runner` further, and updating smoke coverage and operator-facing contracts to the new cadence.

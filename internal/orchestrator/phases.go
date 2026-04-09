@@ -396,6 +396,11 @@ func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo 
 		Summary:              runnerResult.Summary,
 	}
 
+	payloadSchemaValid := false
+	if rawValid, ok := result.VerificationPayload["payload_schema_valid"].(bool); ok {
+		payloadSchemaValid = rawValid
+	}
+
 	nextState, err := updateStateJSON(stateJSON, func(state map[string]any) {
 		state["phase"] = "DEVELOP"
 		state["round"] = round
@@ -420,8 +425,8 @@ func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo 
 	}
 
 	developBody := fmt.Sprintf(
-		"## Develop - round %d\n\n| Field | Value |\n|-------|-------|\n| **Status** | %s |\n| **Commit range** | `%s` |\n| **Cumulative tokens** | %d |\n| **Verification** | %s |\n",
-		round, result.Status, result.CommitRange, result.CumulativeTokens, yesNo(result.VerificationPassed),
+		"## Develop - round %d\n\n| Field | Value |\n|-------|-------|\n| **Status** | %s |\n| **Commit range** | `%s` |\n| **Cumulative tokens** | %d |\n| **Payload schema valid** | %s |\n",
+		round, result.Status, result.CommitRange, result.CumulativeTokens, yesNo(payloadSchemaValid),
 	)
 	if strings.TrimSpace(result.Summary) != "" {
 		developBody += "\n**Summary**: " + result.Summary + "\n"
@@ -487,8 +492,18 @@ func (a *App) phaseVerify(ctx context.Context, root string, env []string, repo s
 		}
 		state.VerificationPassed = verifyResult.ReviewAllowed
 		state.VerificationFailures = verifyResult.Failures
+		changedFiles := changedFilesFromGroundTruth(verifyResult.Actual.FilesChanged, verifyResult.Actual.FilesAdded, verifyResult.Actual.FilesDeleted)
+		relatedFiles := a.expandReviewScope(ctx, state.Worktree, changedFiles)
 		if resolvedHead, resolveErr := gitops.OpenCLI(ctx, state.Worktree, a.execCommand).ResolveHEAD(); resolveErr == nil {
 			headHash = resolvedHead
+		}
+
+		stateJSON, err = updateStateJSON(stateJSON, func(s map[string]any) {
+			s["changed_files"] = changedFiles
+			s["related_files"] = relatedFiles
+		})
+		if err != nil {
+			return "", err
 		}
 	}
 
@@ -684,6 +699,88 @@ func (a *App) phaseReview(ctx context.Context, root string, env []string, repo s
 	_ = a.postAuditCommentWithState(ctx, root, env, repo, state.PRNumber, "review", reviewState, reviewBody)
 
 	return reviewState, nil
+}
+
+func changedFilesFromGroundTruth(changed []string, added []string, deleted []string) []string {
+	seen := make(map[string]bool)
+	var result []string
+	for _, paths := range [][]string{changed, added, deleted} {
+		for _, path := range paths {
+			if strings.TrimSpace(path) == "" || seen[path] {
+				continue
+			}
+			seen[path] = true
+			result = append(result, path)
+		}
+	}
+	return result
+}
+
+func (a *App) expandReviewScope(ctx context.Context, worktree string, changedFiles []string) []string {
+	if len(changedFiles) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]bool)
+	for _, path := range changedFiles {
+		seen[path] = true
+	}
+
+	var related []string
+	for _, changed := range changedFiles {
+		base := filepath.Base(changed)
+		ext := filepath.Ext(base)
+		nameNoExt := strings.TrimSuffix(base, ext)
+		if nameNoExt == "" {
+			continue
+		}
+
+		out, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
+			Name: "rg",
+			Args: []string{"-l", "--glob", "*.ts", "--glob", "*.js", "--glob", "*.py", "--glob", "*.go", nameNoExt, worktree},
+			Dir:  a.cwd,
+			Env:  a.env,
+		})
+		if err != nil || out == "" {
+			continue
+		}
+
+		for _, hit := range strings.Split(out, "\n") {
+			hit = strings.TrimSpace(hit)
+			if hit == "" {
+				continue
+			}
+			rel := strings.TrimPrefix(hit, worktree+"/")
+			if strings.HasPrefix(rel, "node_modules/") || strings.HasPrefix(rel, "vendor/") ||
+				strings.HasPrefix(rel, "dist/") || strings.HasPrefix(rel, "build/") {
+				continue
+			}
+			if isReviewTestFile(rel) {
+				continue
+			}
+			if !seen[rel] {
+				seen[rel] = true
+				related = append(related, rel)
+			}
+		}
+	}
+
+	return related
+}
+
+func isReviewTestFile(rel string) bool {
+	base := filepath.Base(rel)
+	for _, pat := range []string{".test.", ".spec.", "_test.", "_spec."} {
+		if strings.Contains(base, pat) {
+			return true
+		}
+	}
+	for _, prefix := range []string{"test/", "tests/", "__tests__/"} {
+		if strings.HasPrefix(rel, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *App) phaseDecide(ctx context.Context, root string, env []string, issueNumber int, stateJSON string) (string, error) {

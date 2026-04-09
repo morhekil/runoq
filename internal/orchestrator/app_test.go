@@ -1951,6 +1951,9 @@ func TestPhaseVerifyRerunsDeterministicVerificationFromStatePayload(t *testing.T
 	if !strings.Contains(result, `"verification_passed":false`) {
 		t.Fatalf("expected verification_passed=false after rerun, got %s", result)
 	}
+	if !strings.Contains(result, `"changed_files":["feature.txt"]`) {
+		t.Fatalf("expected VERIFY to persist ground-truth changed_files, got %s", result)
+	}
 }
 
 func TestPhaseInitDryRunNoPRCreation(t *testing.T) {
@@ -2166,6 +2169,73 @@ func TestRunFromDevelopResetsTransientRetriesOnSuccess(t *testing.T) {
 	}
 	if retryAfter, ok := state["transient_retry_after"].(string); ok && retryAfter != "" {
 		t.Errorf("transient_retry_after should be cleared, got %q", retryAfter)
+	}
+}
+
+func TestRunFromDevelopStopsAtDevelopOnCompletedRound(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var stderr bytes.Buffer
+	var calls []string
+	worktree := t.TempDir()
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, &stderr)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		calls:       &calls,
+		issueNumber: 42,
+		issueTitle:  "Implement queue",
+		customHandler: func(req shell.CommandRequest) (bool, error) {
+			args := strings.Join(req.Args, " ")
+			if req.Name == "codex" || strings.HasSuffix(req.Name, "/codex") {
+				if req.Stdout != nil {
+					_, _ = io.WriteString(req.Stdout, `{"type":"thread.started","thread_id":"t1"}`+"\n")
+					_, _ = io.WriteString(req.Stdout, `{"tokens": 500}`+"\n")
+				}
+				for i, arg := range req.Args {
+					if arg == "-o" && i+1 < len(req.Args) {
+						if err := os.WriteFile(req.Args[i+1], []byte("fake output"), 0o644); err != nil {
+							t.Fatalf("write fake output: %v", err)
+						}
+						break
+					}
+				}
+				return true, nil
+			}
+			if strings.HasSuffix(req.Name, "/state.sh") {
+				_, _ = io.WriteString(req.Stdout, `{"payload_schema_valid":true,"files_changed":["src/queue.ts"],"files_added":[],"files_deleted":[]}`)
+				return true, nil
+			}
+			if req.Name == "git" && strings.Contains(args, "rev-parse") && strings.Contains(args, "HEAD") {
+				_, _ = io.WriteString(req.Stdout, "abc123\n")
+				return true, nil
+			}
+			return false, nil
+		},
+	}))
+
+	stateJSON := fmt.Sprintf(`{"issue":42,"phase":"DEVELOP","branch":"runoq/42-implement-queue","worktree":%q,"pr_number":87,"round":0}`, worktree)
+	meta := IssueMetadata{Number: 42, Title: "Implement queue"}
+
+	result, err := app.runFromDevelop(ctx, root, app.env, "owner/repo", 42, stateJSON, meta)
+	if err != nil {
+		t.Fatalf("runFromDevelop: %v", err)
+	}
+
+	if !strings.Contains(result, `"phase":"DEVELOP"`) {
+		t.Fatalf("expected DEVELOP phase, got %s", result)
+	}
+	if !strings.Contains(result, `"status":"completed"`) {
+		t.Fatalf("expected completed develop status, got %s", result)
+	}
+	if strings.Contains(result, `"phase":"DONE"`) || strings.Contains(result, `"needs-review"`) {
+		t.Fatalf("did not expect needs-review escalation, got %s", result)
+	}
+	for _, call := range calls {
+		if strings.Contains(call, "pr ready") {
+			t.Fatalf("should not call needs-review/finalize path for completed develop round, got %v", calls)
+		}
 	}
 }
 

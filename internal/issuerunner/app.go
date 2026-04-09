@@ -132,139 +132,90 @@ func (a *App) runIssue(ctx context.Context, payloadPath string) int {
 }
 
 func (a *App) developmentLoop(ctx context.Context, input *inputPayload, state *roundState, specRequirements string, repo gitops.Repo) *outputPayload {
-	startRound := state.round
+	round := state.round
 
-	for round := startRound; round <= input.MaxRounds; round++ {
-		state.round = round
-
-		// Budget check before starting a round.
-		if input.MaxTokenBudget > 0 && state.cumulativeTokens >= input.MaxTokenBudget {
-			a.logAgent("issue-runner", input, "budget exhausted before round %d", round)
-			return a.emitResult("budget_exhausted", input, state, specRequirements,
-				nil,
-				false, nil, nil, nil,
-				fmt.Sprintf("Token budget exhausted before round %d", round),
-				[]string{"Token budget exhausted"})
-		}
-
-		// Build prompt and invoke codex.
-		a.logAgent("codex", input, "round %d/%d — starting", round, input.MaxRounds)
-		prompt := a.buildCodexPrompt(input, state, specRequirements)
-		eventLog, lastMsgFile := a.roundPaths(state, round, "")
-		payloadFile := filepath.Join(state.logDir, fmt.Sprintf("round-%d-payload.json", round))
-
-		codexErr := a.invokeCodex(ctx, input, state, prompt, eventLog, lastMsgFile)
-
-		a.logAgent("codex", input, "round %d — finished", round)
-
-		// Short-circuit on transient errors — don't burn the round.
-		if isTransient, reason := a.classifyTransientError(eventLog, codexErr); isTransient {
-			a.logAgent("codex", input, "round %d — transient error: %s", round, reason)
-			return a.emitResult("transient_error", input, state, specRequirements,
-				nil,
-				false, nil, nil, nil,
-				reason, []string{reason})
-		}
-
-		threadID := a.extractThreadID(eventLog)
-		state.threadID = threadID
-
-		// Validate payload schema.
-		payloadValid := a.validatePayload(ctx, input.Worktree, state.baseline, lastMsgFile, payloadFile)
-		roundTokens := a.extractTokens(eventLog)
-
-		// Schema retry loop.
-		const maxSchemaRetries = 2
-		schemaRetryCount := 0
-		for !payloadValid && threadID != "" && schemaRetryCount < maxSchemaRetries {
-			schemaRetryCount++
-			retryEventLog, retryLastMsg := a.roundPaths(state, round, fmt.Sprintf("schema-retry-%d", schemaRetryCount))
-			retryPrompt := a.buildSchemaRetryPrompt()
-
-			_ = a.resumeCodex(ctx, input, state, threadID, retryPrompt, retryEventLog, retryLastMsg)
-
-			if tid := a.extractThreadID(retryEventLog); tid != "" {
-				threadID = tid
-				state.threadID = tid
-			}
-
-			payloadValid = a.validatePayload(ctx, input.Worktree, state.baseline, retryLastMsg, payloadFile)
-			roundTokens += a.extractTokens(retryEventLog)
-		}
-
-		// Extract commits.
-		a.extractCommits(ctx, input, state, repo)
-
-		// Track tokens.
-		state.cumulativeTokens += roundTokens
-
-		// Post-round budget check.
-		if input.MaxTokenBudget > 0 && state.cumulativeTokens >= input.MaxTokenBudget {
-			return a.emitResult("budget_exhausted", input, state, specRequirements,
-				nil,
-				false, nil, nil, nil,
-				fmt.Sprintf("Token budget exhausted after round %d", round),
-				[]string{"Token budget exhausted"})
-		}
-
-		// Verification.
-		var verificationPayload map[string]any
-		var vr verifyResult
-		if !payloadValid {
-			reason := "codex payload schema invalid"
-			if threadID != "" {
-				reason += fmt.Sprintf(" after %d resume attempt(s)", schemaRetryCount)
-			} else {
-				reason += " and thread_id missing from codex events"
-			}
-			vr = verifyResult{
-				ReviewAllowed: false,
-				Failures:      []string{reason},
-			}
-		} else {
-			verificationPayload, _ = a.readPayload(payloadFile)
-			vr, _ = a.runVerification(ctx, input.Worktree, input.Branch, state.baseline, payloadFile)
-		}
-
-		if !vr.ReviewAllowed {
-			// Verification failed.
-			a.logAgent("verifier", input, "round %d — failed: %v", round, vr.Failures)
-
-			if round >= input.MaxRounds {
-				return a.emitResult("fail", input, state, specRequirements,
-					verificationPayload,
-					false, vr.Failures, nil, nil,
-					fmt.Sprintf("Verification failed after %d rounds", round),
-					vr.Failures)
-			}
-
-			// Feed failures to next round.
-			parts := make([]string, len(vr.Failures))
-			for i, f := range vr.Failures {
-				parts[i] = "- " + f
-			}
-			state.previousChecklist = strings.Join(parts, "\n")
-			continue
-		}
-
-		// Verification passed — expand review scope.
-		a.logAgent("verifier", input, "round %d — passed, ready for review", round)
-		changedFiles := a.mergeChangedFiles(vr)
-		relatedFiles := a.expandReviewScope(ctx, input.Worktree, changedFiles)
-
-		return a.emitResult("review_ready", input, state, specRequirements,
-			verificationPayload,
-			true, nil, changedFiles, relatedFiles,
-			fmt.Sprintf("Verification passed on round %d; ready for review", round),
-			nil)
+	// Budget check before starting a round.
+	if input.MaxTokenBudget > 0 && state.cumulativeTokens >= input.MaxTokenBudget {
+		a.logAgent("issue-runner", input, "budget exhausted before round %d", round)
+		return a.emitResult("budget_exhausted", input, state, specRequirements,
+			nil,
+			false, nil, nil, nil,
+			fmt.Sprintf("Token budget exhausted before round %d", round),
+			[]string{"Token budget exhausted"})
 	}
 
-	// Exhausted all rounds.
-	return a.emitResult("fail", input, state, specRequirements,
-		nil,
-		false, nil, nil, nil,
-		fmt.Sprintf("Failed to converge after %d rounds", input.MaxRounds),
-		nil)
+	a.logAgent("codex", input, "round %d/%d — starting", round, input.MaxRounds)
+	prompt := a.buildCodexPrompt(input, state, specRequirements)
+	eventLog, lastMsgFile := a.roundPaths(state, round, "")
+	payloadFile := filepath.Join(state.logDir, fmt.Sprintf("round-%d-payload.json", round))
+
+	codexErr := a.invokeCodex(ctx, input, state, prompt, eventLog, lastMsgFile)
+
+	a.logAgent("codex", input, "round %d — finished", round)
+
+	// Short-circuit on transient errors — don't burn the round.
+	if isTransient, reason := a.classifyTransientError(eventLog, codexErr); isTransient {
+		a.logAgent("codex", input, "round %d — transient error: %s", round, reason)
+		return a.emitResult("transient_error", input, state, specRequirements,
+			nil,
+			false, nil, nil, nil,
+			reason, []string{reason})
+	}
+
+	threadID := a.extractThreadID(eventLog)
+	state.threadID = threadID
+
+	payloadValid := a.validatePayload(ctx, input.Worktree, state.baseline, lastMsgFile, payloadFile)
+	roundTokens := a.extractTokens(eventLog)
+
+	const maxSchemaRetries = 2
+	schemaRetryCount := 0
+	for !payloadValid && threadID != "" && schemaRetryCount < maxSchemaRetries {
+		schemaRetryCount++
+		retryEventLog, retryLastMsg := a.roundPaths(state, round, fmt.Sprintf("schema-retry-%d", schemaRetryCount))
+		retryPrompt := a.buildSchemaRetryPrompt()
+
+		_ = a.resumeCodex(ctx, input, state, threadID, retryPrompt, retryEventLog, retryLastMsg)
+
+		if tid := a.extractThreadID(retryEventLog); tid != "" {
+			threadID = tid
+			state.threadID = tid
+		}
+
+		payloadValid = a.validatePayload(ctx, input.Worktree, state.baseline, retryLastMsg, payloadFile)
+		roundTokens += a.extractTokens(retryEventLog)
+	}
+
+	a.extractCommits(ctx, input, state, repo)
+	state.cumulativeTokens += roundTokens
+
+	if input.MaxTokenBudget > 0 && state.cumulativeTokens >= input.MaxTokenBudget {
+		return a.emitResult("budget_exhausted", input, state, specRequirements,
+			nil,
+			false, nil, nil, nil,
+			fmt.Sprintf("Token budget exhausted after round %d", round),
+			[]string{"Token budget exhausted"})
+	}
+
+	verificationPayload, _ := a.readPayload(payloadFile)
+	changedFiles := a.changedFilesFromPayload(verificationPayload)
+	caveats := []string{}
+	summary := fmt.Sprintf("Development round %d completed; ready for VERIFY", round)
+	if !payloadValid {
+		reason := "codex payload schema invalid"
+		if threadID != "" {
+			reason += fmt.Sprintf(" after %d resume attempt(s)", schemaRetryCount)
+		} else {
+			reason += " and thread_id missing from codex events"
+		}
+		caveats = append(caveats, reason)
+		summary = fmt.Sprintf("Development round %d completed with schema issues; VERIFY should record the failure", round)
+	}
+
+	return a.emitResult("completed", input, state, specRequirements,
+		verificationPayload,
+		false, nil, changedFiles, nil,
+		summary, caveats)
 }
 
 // runoqRoot returns the RUNOQ_ROOT path from the environment.
@@ -703,6 +654,30 @@ func short(hash string) string {
 		return hash[:7]
 	}
 	return hash
+}
+
+func (a *App) changedFilesFromPayload(payload map[string]any) []string {
+	if len(payload) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]bool)
+	var result []string
+	for _, key := range []string{"files_changed", "files_added", "files_deleted"} {
+		values, ok := payload[key].([]any)
+		if !ok {
+			continue
+		}
+		for _, value := range values {
+			path, ok := value.(string)
+			if !ok || strings.TrimSpace(path) == "" || seen[path] {
+				continue
+			}
+			seen[path] = true
+			result = append(result, path)
+		}
+	}
+	return result
 }
 
 // mergeChangedFiles combines all file lists from a verify result into a deduplicated slice.

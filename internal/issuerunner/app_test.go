@@ -141,8 +141,8 @@ func TestRunValidPayload(t *testing.T) {
 		t.Fatalf("failed to parse output JSON: %v\nraw=%s", err, stdout.String())
 	}
 
-	if output.Status != "fail" {
-		t.Errorf("status = %q, want %q", output.Status, "fail")
+	if output.Status != "completed" {
+		t.Errorf("status = %q, want %q", output.Status, "completed")
 	}
 	if output.BaselineHash != fakeHash {
 		t.Errorf("baselineHash = %q, want %q", output.BaselineHash, fakeHash)
@@ -153,9 +153,8 @@ func TestRunValidPayload(t *testing.T) {
 	if output.TotalRounds != 5 {
 		t.Errorf("totalRounds = %d, want 5", output.TotalRounds)
 	}
-	// Loop runs through all maxRounds when verification never passes.
-	if output.Round != 5 {
-		t.Errorf("round = %d, want 5", output.Round)
+	if output.Round != 1 {
+		t.Errorf("round = %d, want 1", output.Round)
 	}
 	if output.SpecRequirements != "implement feature X" {
 		t.Errorf("specRequirements = %q, want %q", output.SpecRequirements, "implement feature X")
@@ -205,9 +204,8 @@ func TestPayloadDefaults(t *testing.T) {
 	if output.TotalRounds != 3 {
 		t.Errorf("maxRounds default: got %d, want 3", output.TotalRounds)
 	}
-	// Loop exhausts all rounds when verification never passes.
-	if output.Round != 3 {
-		t.Errorf("round default: got %d, want 3", output.Round)
+	if output.Round != 1 {
+		t.Errorf("round default: got %d, want 1", output.Round)
 	}
 }
 
@@ -258,6 +256,7 @@ func TestDevelopmentLoop_SingleRoundSuccess(t *testing.T) {
 	specFile := filepath.Join(dir, "spec.md")
 	mustWriteFile(t, specFile, []byte("implement X"))
 
+	verifyCount := 0
 	fe := &fakeExecutor{t: t, handlers: map[string]func(shell.CommandRequest) error{
 		"git": func(req shell.CommandRequest) error {
 			if req.Stdout != nil {
@@ -288,9 +287,7 @@ func TestDevelopmentLoop_SingleRoundSuccess(t *testing.T) {
 			return nil
 		},
 		"verify.sh": func(req shell.CommandRequest) error {
-			if req.Stdout != nil {
-				mustWriteReqStdout(t, req, `{"review_allowed":true,"failures":[],"actual":{"files_changed":["main.go"],"files_added":[],"files_deleted":[]}}`)
-			}
+			verifyCount++
 			return nil
 		},
 	}}
@@ -323,17 +320,20 @@ func TestDevelopmentLoop_SingleRoundSuccess(t *testing.T) {
 		t.Fatalf("parse output: %v; raw=%s", err, stdout.String())
 	}
 
-	if out.Status != "review_ready" {
-		t.Errorf("status = %q, want %q", out.Status, "review_ready")
+	if out.Status != "completed" {
+		t.Errorf("status = %q, want %q", out.Status, "completed")
 	}
 	if out.Round != 1 {
 		t.Errorf("round = %d, want 1", out.Round)
 	}
-	if !out.VerificationPassed {
-		t.Error("verificationPassed should be true")
+	if verifyCount != 0 {
+		t.Errorf("verify.sh called %d times, want 0", verifyCount)
 	}
-	if len(out.ChangedFiles) == 0 {
-		t.Error("changedFiles should not be empty")
+	if out.VerificationPassed {
+		t.Error("verificationPassed should remain false until VERIFY tick")
+	}
+	if len(out.VerificationFailures) != 0 {
+		t.Errorf("verificationFailures = %v, want empty", out.VerificationFailures)
 	}
 }
 
@@ -500,8 +500,8 @@ func TestDevelopmentLoop_LogsProgressToStderr(t *testing.T) {
 	if !strings.Contains(stderrOutput, "[codex]") {
 		t.Errorf("stderr should tag codex invocation with [codex], got:\n%s", stderrOutput)
 	}
-	if !strings.Contains(stderrOutput, "[verifier]") {
-		t.Errorf("stderr should tag verification with [verifier], got:\n%s", stderrOutput)
+	if strings.Contains(stderrOutput, "[verifier]") {
+		t.Errorf("stderr should not log verifier activity during DEVELOP, got:\n%s", stderrOutput)
 	}
 }
 
@@ -550,7 +550,7 @@ func TestDevelopmentLoop_BudgetExhausted(t *testing.T) {
 	}
 }
 
-func TestDevelopmentLoop_MaxRoundsExhausted(t *testing.T) {
+func TestDevelopmentLoop_NoVerificationLoop(t *testing.T) {
 	dir := t.TempDir()
 	worktree := filepath.Join(dir, "wt")
 	mustMkdirAll(t, worktree)
@@ -562,7 +562,7 @@ func TestDevelopmentLoop_MaxRoundsExhausted(t *testing.T) {
 	specFile := filepath.Join(dir, "spec.md")
 	mustWriteFile(t, specFile, []byte("spec"))
 
-	roundCount := 0
+	verifyCount := 0
 	fe := &fakeExecutor{t: t, handlers: map[string]func(shell.CommandRequest) error{
 		"git": func(req shell.CommandRequest) error {
 			if req.Stdout != nil {
@@ -589,13 +589,7 @@ func TestDevelopmentLoop_MaxRoundsExhausted(t *testing.T) {
 			return nil
 		},
 		"verify.sh": func(req shell.CommandRequest) error {
-			roundCount++
-			if req.Stdout != nil {
-				mustWriteReqStdout(t, req, `{"review_allowed":false,"failures":["test failed"],"actual":{"files_changed":[],"files_added":[],"files_deleted":[]}}`)
-			}
-			return nil
-		},
-		"gh-pr-lifecycle.sh": func(req shell.CommandRequest) error {
+			verifyCount++
 			return nil
 		},
 	}}
@@ -628,17 +622,17 @@ func TestDevelopmentLoop_MaxRoundsExhausted(t *testing.T) {
 		t.Fatalf("parse output: %v; raw=%s", err, stdout.String())
 	}
 
-	if out.Status != "fail" {
-		t.Errorf("status = %q, want %q", out.Status, "fail")
+	if out.Status != "completed" {
+		t.Errorf("status = %q, want %q", out.Status, "completed")
 	}
-	if out.Round != 2 {
-		t.Errorf("round = %d, want 2 (maxRounds)", out.Round)
+	if out.Round != 1 {
+		t.Errorf("round = %d, want 1", out.Round)
 	}
-	if roundCount != 2 {
-		t.Errorf("verify.sh called %d times, want 2", roundCount)
+	if verifyCount != 0 {
+		t.Errorf("verify.sh called %d times, want 0", verifyCount)
 	}
-	if len(out.VerificationFailures) == 0 {
-		t.Error("verificationFailures should not be empty")
+	if len(out.VerificationFailures) != 0 {
+		t.Errorf("verificationFailures = %v, want empty", out.VerificationFailures)
 	}
 }
 
