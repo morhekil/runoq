@@ -29,8 +29,8 @@ func (e fakeExitError) ExitCode() int {
 
 func TestParseStateFromCommentsExtractsLatest(t *testing.T) {
 	comments := `[
-		{"body": "<!-- runoq:bot -->\n<!-- runoq:state:{\"phase\":\"INIT\",\"pr_number\":87} -->\n> Posted by orchestrator"},
-		{"body": "<!-- runoq:bot -->\n<!-- runoq:state:{\"phase\":\"DEVELOP\",\"round\":1,\"pr_number\":87} -->\n> Posted by orchestrator"}
+		{"body": "<!-- runoq:bot:orchestrator:init -->\n<!-- runoq:state:{\"phase\":\"INIT\",\"pr_number\":87} -->\n> Posted by orchestrator"},
+		{"body": "<!-- runoq:bot:orchestrator:develop -->\n<!-- runoq:state:{\"phase\":\"DEVELOP\",\"round\":1,\"pr_number\":87} -->\n> Posted by orchestrator"}
 	]`
 	stateJSON, err := parseStateFromComments(comments)
 	if err != nil {
@@ -46,7 +46,7 @@ func TestParseStateFromCommentsExtractsLatest(t *testing.T) {
 
 func TestParseStateFromCommentsNoStateBlock(t *testing.T) {
 	comments := `[
-		{"body": "<!-- runoq:bot -->\n> Posted by orchestrator — init phase\n\nOrchestrator initialized."}
+		{"body": "<!-- runoq:bot:orchestrator:init -->\n> Posted by orchestrator — init phase\n\nOrchestrator initialized."}
 	]`
 	stateJSON, err := parseStateFromComments(comments)
 	if err != nil {
@@ -60,8 +60,8 @@ func TestParseStateFromCommentsNoStateBlock(t *testing.T) {
 func TestAuditCommentFormatsStateBlock(t *testing.T) {
 	// formatAuditComment should embed state JSON when provided
 	body := formatAuditComment("develop", `{"phase":"DEVELOP","round":1}`, "## Develop\n| Field | Value |")
-	if !strings.Contains(body, `<!-- runoq:bot -->`) {
-		t.Fatalf("expected event marker, got %q", body)
+	if !strings.Contains(body, `<!-- runoq:bot:orchestrator:develop -->`) {
+		t.Fatalf("expected bot marker, got %q", body)
 	}
 	if !strings.Contains(body, `<!-- runoq:state:{"phase":"DEVELOP","round":1} -->`) {
 		t.Fatalf("expected state block, got %q", body)
@@ -76,7 +76,7 @@ func TestAuditCommentAlwaysIncludesStateBlock(t *testing.T) {
 	if !strings.Contains(body, `<!-- runoq:state:{"phase":"INIT"} -->`) {
 		t.Fatalf("expected state block, got %q", body)
 	}
-	if !strings.Contains(body, `<!-- runoq:bot -->`) {
+	if !strings.Contains(body, `<!-- runoq:bot:orchestrator:init -->`) {
 		t.Fatalf("expected bot marker, got %q", body)
 	}
 }
@@ -114,7 +114,7 @@ func TestDeriveStateFromGitHubFindsLinkedPR(t *testing.T) {
 			_, _ = io.WriteString(req.Stdout, `[{"number":87,"headRefName":"runoq/42-implement-queue"}]`)
 			return nil
 		case req.Name == "gh" && strings.Contains(args, "pr view 87") && strings.Contains(args, "comments"):
-			_, _ = io.WriteString(req.Stdout, `{"comments":[{"body":"<!-- runoq:bot -->\n<!-- runoq:state:{\"phase\":\"INIT\",\"pr_number\":87,\"branch\":\"runoq/42-implement-queue\",\"worktree\":\"/tmp/runoq-wt-42\"} -->\n> Posted by orchestrator"},{"body":"<!-- runoq:bot -->\n<!-- runoq:state:{\"phase\":\"DEVELOP\",\"round\":1,\"pr_number\":87,\"branch\":\"runoq/42-implement-queue\",\"worktree\":\"/tmp/runoq-wt-42\",\"cumulative_tokens\":12} -->\n> Posted by orchestrator"}]}`)
+			_, _ = io.WriteString(req.Stdout, `{"comments":[{"body":"<!-- runoq:bot:orchestrator:init -->\n<!-- runoq:state:{\"phase\":\"INIT\",\"pr_number\":87,\"branch\":\"runoq/42-implement-queue\",\"worktree\":\"/tmp/runoq-wt-42\"} -->\n> Posted by orchestrator"},{"body":"<!-- runoq:bot:orchestrator:develop -->\n<!-- runoq:state:{\"phase\":\"DEVELOP\",\"round\":1,\"pr_number\":87,\"branch\":\"runoq/42-implement-queue\",\"worktree\":\"/tmp/runoq-wt-42\",\"cumulative_tokens\":12} -->\n> Posted by orchestrator"}]}`)
 			return nil
 		default:
 			t.Fatalf("unexpected command: %s %s", req.Name, args)
@@ -190,7 +190,7 @@ func TestDeriveStateFromGitHubNoStateBlock(t *testing.T) {
 			_, _ = io.WriteString(req.Stdout, `[{"number":87,"headRefName":"runoq/42-implement-queue"}]`)
 			return nil
 		case req.Name == "gh" && strings.Contains(args, "pr view 87") && strings.Contains(args, "comments"):
-			_, _ = io.WriteString(req.Stdout, `{"comments":[{"body":"<!-- runoq:bot -->\n> Posted by orchestrator — init phase\n\nOrchestrator initialized. Branch: runoq/42"}]}`)
+			_, _ = io.WriteString(req.Stdout, `{"comments":[{"body":"<!-- runoq:bot:orchestrator:init -->\n> Posted by orchestrator — init phase\n\nOrchestrator initialized. Branch: runoq/42"}]}`)
 			return nil
 		default:
 			t.Fatalf("unexpected command: %s %s", req.Name, args)
@@ -1430,7 +1430,7 @@ func TestRunIssueResumesFromDevelopState(t *testing.T) {
 			}
 			// deriveStateFromGitHub: PR comments with state blocks
 			if strings.Contains(ghArgs, "pr view 87") && strings.Contains(ghArgs, "comments") {
-				_, _ = io.WriteString(req.Stdout, `{"comments":[{"body":"<!-- runoq:bot -->\n<!-- runoq:state:`+strings.ReplaceAll(developState, `"`, `\"`)+` -->\n> develop"}]}`)
+				_, _ = io.WriteString(req.Stdout, `{"comments":[{"body":"<!-- runoq:bot:orchestrator:develop -->\n<!-- runoq:state:`+strings.ReplaceAll(developState, `"`, `\"`)+` -->\n> develop"}]}`)
 				return true, nil
 			}
 			return false, nil

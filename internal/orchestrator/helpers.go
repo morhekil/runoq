@@ -261,7 +261,7 @@ func (a *App) configureGitBotRemote(ctx context.Context, env []string, dir strin
 // formatAuditComment builds the comment body with event marker, optional state block, and human-readable content.
 func formatAuditComment(event string, stateJSON string, body string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "<!-- runoq:bot -->\n")
+	fmt.Fprintf(&b, "<!-- runoq:bot:orchestrator:%s -->\n", event)
 	fmt.Fprintf(&b, "%s%s%s\n", markerStatePrefix, stateJSON, markerStateSuffix)
 	fmt.Fprintf(&b, "> Posted by `orchestrator` — %s phase\n\n%s\n", event, body)
 	return b.String()
