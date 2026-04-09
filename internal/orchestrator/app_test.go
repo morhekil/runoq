@@ -391,6 +391,29 @@ CHECKLIST:
 	}
 }
 
+func TestFormatAuditCommentWithAgent(t *testing.T) {
+	result := formatAuditComment("develop", `{"phase":"DEVELOP"}`, "## Develop\n\nBody", "issue-runner")
+	if !strings.Contains(result, "<!-- runoq:bot:orchestrator:develop -->") {
+		t.Fatalf("expected orchestrator event marker, got %q", result)
+	}
+	if !strings.Contains(result, "<!-- runoq:agent:issue-runner -->") {
+		t.Fatalf("expected agent marker, got %q", result)
+	}
+	if !strings.Contains(result, "> Posted by `orchestrator` via `issue-runner`") {
+		t.Fatalf("expected agent attribution, got %q", result)
+	}
+}
+
+func TestFormatAuditCommentWithoutAgent(t *testing.T) {
+	result := formatAuditComment("open-pr", `{"phase":"OPEN-PR"}`, "PR created.")
+	if !strings.Contains(result, "> Posted by `orchestrator` — open-pr phase") {
+		t.Fatalf("expected default attribution, got %q", result)
+	}
+	if strings.Contains(result, "runoq:agent:") {
+		t.Fatalf("expected no agent marker, got %q", result)
+	}
+}
+
 func TestReplaceMarkerContent(t *testing.T) {
 	body := "## Summary\n<!-- runoq:summary:start -->\nPending.\n<!-- runoq:summary:end -->\n\n## Linked Issue\nCloses #42\n"
 	updated := replaceMarkerContent(body, "<!-- runoq:summary:start -->", "<!-- runoq:summary:end -->", "Implemented queue processing.")

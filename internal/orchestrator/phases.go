@@ -403,7 +403,7 @@ func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo 
 		developBody += "\n**Summary**: " + result.Summary + "\n"
 	}
 	if state.PRNumber != 0 {
-		_ = a.postAuditCommentWithState(ctx, root, env, repo, state.PRNumber, "develop", nextState, developBody)
+		_ = a.postAuditCommentWithState(ctx, root, env, repo, state.PRNumber, "develop", nextState, developBody, "issue-runner")
 	}
 
 	return nextState, result, nil

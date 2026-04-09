@@ -249,16 +249,24 @@ func (a *App) configureGitBotRemote(ctx context.Context, env []string, dir strin
 }
 
 // formatAuditComment builds the comment body with event marker, optional state block, and human-readable content.
-func formatAuditComment(event string, stateJSON string, body string) string {
+// When agent is provided, the comment is attributed to "orchestrator via {agent}" and an agent marker is added.
+func formatAuditComment(event string, stateJSON string, body string, agent ...string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "<!-- runoq:bot:orchestrator:%s -->\n", event)
+	if len(agent) > 0 && agent[0] != "" {
+		fmt.Fprintf(&b, "<!-- runoq:agent:%s -->\n", agent[0])
+	}
 	fmt.Fprintf(&b, "%s%s%s\n", markerStatePrefix, stateJSON, markerStateSuffix)
-	fmt.Fprintf(&b, "> Posted by `orchestrator` — %s phase\n\n%s\n", event, body)
+	if len(agent) > 0 && agent[0] != "" {
+		fmt.Fprintf(&b, "> Posted by `orchestrator` via `%s`\n\n%s\n", agent[0], body)
+	} else {
+		fmt.Fprintf(&b, "> Posted by `orchestrator` — %s phase\n\n%s\n", event, body)
+	}
 	return b.String()
 }
 
-func (a *App) postAuditCommentWithState(ctx context.Context, root string, env []string, repo string, prNumber int, event string, stateJSON string, body string) error {
-	content := formatAuditComment(event, stateJSON, body)
+func (a *App) postAuditCommentWithState(ctx context.Context, root string, env []string, repo string, prNumber int, event string, stateJSON string, body string, agent ...string) error {
+	content := formatAuditComment(event, stateJSON, body, agent...)
 	return a.commentPR(ctx, repo, prNumber, content)
 }
 
