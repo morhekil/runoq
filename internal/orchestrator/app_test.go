@@ -2070,6 +2070,73 @@ func TestRunFromDevelopEscalatesAfterMaxTransientRetries(t *testing.T) {
 	}
 }
 
+func TestRunFromDevelopTransientErrorPostsDiagnosticComment(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var stderr bytes.Buffer
+	var calls []string
+	var commentBody string
+
+	worktree := t.TempDir()
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, &stderr)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		calls: &calls, issueNumber: 42, issueTitle: "Implement queue",
+		customHandler: func(req shell.CommandRequest) (bool, error) {
+			if req.Name == "codex" || strings.HasSuffix(req.Name, "/codex") {
+				if req.Stdout != nil {
+					req.Stdout.Write([]byte(`{"type":"turn.failed","error":"Selected model is at capacity"}` + "\n"))
+				}
+				return true, fmt.Errorf("exit status 1")
+			}
+			if req.Name == "git" && strings.Contains(strings.Join(req.Args, " "), "rev-parse") {
+				if req.Stdout != nil {
+					_, _ = io.WriteString(req.Stdout, "abc123\n")
+				}
+				return true, nil
+			}
+			return false, nil
+		},
+		ghHandler: func(ghArgs string, req shell.CommandRequest) (bool, error) {
+			if strings.Contains(ghArgs, "pr comment 87") && strings.Contains(ghArgs, "--body-file") {
+				// Capture the comment body from the body file
+				for i, arg := range req.Args {
+					if arg == "--body-file" && i+1 < len(req.Args) {
+						data, _ := os.ReadFile(req.Args[i+1])
+						commentBody = string(data)
+						break
+					}
+				}
+				return true, nil
+			}
+			return false, nil
+		},
+	}))
+
+	stateJSON := fmt.Sprintf(`{"issue":42,"phase":"DEVELOP","branch":"runoq/42-implement-queue","worktree":%q,"pr_number":87,"round":0}`, worktree)
+	meta := IssueMetadata{Number: 42, Title: "Implement queue"}
+
+	_, err := app.runFromDevelop(ctx, root, app.env, "owner/repo", 42, stateJSON, meta)
+	if err != nil {
+		t.Fatalf("runFromDevelop: %v", err)
+	}
+
+	if commentBody == "" {
+		t.Fatal("expected diagnostic comment to be posted on PR")
+	}
+	if !strings.Contains(commentBody, "Transient codex error") {
+		t.Errorf("comment should mention transient error, got %q", commentBody)
+	}
+	if !strings.Contains(commentBody, "develop-transient") {
+		t.Errorf("comment should contain develop-transient marker, got %q", commentBody)
+	}
+	if !strings.Contains(commentBody, "capacity") {
+		t.Errorf("comment should mention the error reason, got %q", commentBody)
+	}
+}
+
 func defaultOrchestratorConfig() OrchestratorConfig {
 	return OrchestratorConfig{
 		MaxRounds:        5,

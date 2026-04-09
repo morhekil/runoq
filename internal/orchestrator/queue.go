@@ -333,6 +333,18 @@ func (a *App) runFromDevelop(ctx context.Context, root string, env []string, rep
 		if err != nil {
 			return "", err
 		}
+
+		// Post diagnostic comment if PR exists.
+		var prState struct {
+			PRNumber int `json:"pr_number"`
+		}
+		if json.Unmarshal([]byte(stateJSON), &prState) == nil && prState.PRNumber != 0 {
+			commentBody := fmt.Sprintf(
+				"Transient codex error (attempt %d/%d): %s\n\nBacking off for %v — next tick will retry automatically.",
+				retries, maxTransientRetries, developResult.Summary, backoff)
+			_ = a.postAuditCommentWithState(ctx, root, env, repo, prState.PRNumber, "develop-transient", stateJSON, commentBody)
+		}
+
 		return stateJSON, nil
 	}
 
