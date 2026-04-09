@@ -611,6 +611,52 @@ func TestTickSelectsTaskAndCallsRunIssue(t *testing.T) {
 	}
 }
 
+func TestDispatchTaskRespectsIssueStatusFromState(t *testing.T) {
+	t.Parallel()
+
+	// When RunIssue returns state with issue_status="needs-review" and phase="DONE",
+	// dispatchTask must NOT override it with "done". The issue_status field set by
+	// phaseFinalize/phaseDevelopNeedsReview is authoritative.
+
+	tests := []struct {
+		name           string
+		stateJSON      string
+		wantSetStatus  string // expected status arg to issueSetStatus, "" means no call
+	}{
+		{
+			name:          "needs-review state should not become done",
+			stateJSON:     `{"phase":"DONE","issue_status":"needs-review"}`,
+			wantSetStatus: "", // phaseDevelopNeedsReview already set it
+		},
+		{
+			name:          "done state sets done",
+			stateJSON:     `{"phase":"DONE","issue_status":"done"}`,
+			wantSetStatus: "done",
+		},
+		{
+			name:          "legacy state without issue_status sets done",
+			stateJSON:     `{"phase":"DONE"}`,
+			wantSetStatus: "done",
+		},
+		{
+			name:          "non-terminal phase skips set-status",
+			stateJSON:     `{"phase":"DEVELOP"}`,
+			wantSetStatus: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := issueStatusFromDoneState(tt.stateJSON)
+			if got != tt.wantSetStatus {
+				t.Errorf("issueStatusFromDoneState() = %q, want %q", got, tt.wantSetStatus)
+			}
+		})
+	}
+}
+
 func TestExtractJSONFromCodeFence(t *testing.T) {
 	t.Parallel()
 	body := "## Title\n\n<details>\n<summary>Raw JSON payload</summary>\n\n```json\n{\"key\":\"value\"}\n```\n\n</details>\n"

@@ -673,9 +673,11 @@ func (t *tickRunner) dispatchTask(ctx context.Context, task *issue) int {
 		}
 	}
 
-	// If the issue reached a terminal phase, ensure GitHub issue is closed
-	if phase == "DONE" || phase == "FINALIZE" {
-		t.issueSetStatus(ctx, t.cfg.Repo, fmt.Sprintf("%d", task.Number), "done")
+	// If the issue reached a terminal phase, set the appropriate status.
+	// Phases like phaseDevelopNeedsReview already set status on the issue;
+	// only call set-status here when the state indicates it's needed.
+	if status := issueStatusFromDoneState(stateJSON); status != "" {
+		t.issueSetStatus(ctx, t.cfg.Repo, fmt.Sprintf("%d", task.Number), status)
 	}
 
 	t.success(fmt.Sprintf("Issue #%d — phase: %s", task.Number, phase))
@@ -731,6 +733,32 @@ func (t *tickRunner) handleMilestoneComplete(ctx context.Context, epicNumber int
 	t.success(fmt.Sprintf("Milestone #%d reviewed. Adjustments on #%s", epicNumber, adjNumber))
 	fmt.Fprintf(t.cfg.Stdout, "Milestone #%d review complete. Adjustments proposed on #%s\n", epicNumber, adjNumber)
 	return 0
+}
+
+// issueStatusFromDoneState extracts the status to set on the GitHub issue
+// from the final state JSON. Returns "" if no set-status call is needed
+// (either non-terminal phase or the phase already handled status itself).
+func issueStatusFromDoneState(stateJSON string) string {
+	var state struct {
+		Phase       string `json:"phase"`
+		IssueStatus string `json:"issue_status"`
+	}
+	if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
+		return ""
+	}
+	if state.Phase != "DONE" && state.Phase != "FINALIZE" {
+		return ""
+	}
+	// If the phase machine set an explicit issue_status, respect it.
+	// "needs-review" means the phase already called set-status — don't override.
+	if state.IssueStatus == "needs-review" {
+		return ""
+	}
+	// Explicit "done" or legacy states without issue_status default to "done".
+	if state.IssueStatus == "done" || state.IssueStatus == "" {
+		return "done"
+	}
+	return state.IssueStatus
 }
 
 // --- Issue queries ---
