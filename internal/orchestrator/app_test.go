@@ -585,6 +585,59 @@ func TestRunLowComplexityDevelopFailureCompletesNeedsReviewHandoff(t *testing.T)
 	}
 }
 
+// TestNeedsReviewHandoffCreatesPRWhenMissing verifies that when develop fails
+// and pr_number is 0, ensurePRCreated + phaseDevelopNeedsReview creates a PR
+// before the needs-review handoff (matching what runFromDevelop does).
+func TestNeedsReviewHandoffCreatesPRWhenMissing(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var stderr bytes.Buffer
+	var calls []string
+
+	app := New(nil, []string{
+		"RUNOQ_ROOT=" + root,
+		"TARGET_ROOT=" + root,
+	}, root, io.Discard, &stderr)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		calls:       &calls,
+		issueNumber: 42,
+		issueTitle:  "Implement queue",
+	}))
+
+	// pr_number is 0 — no PR exists yet
+	stateJSON := `{"issue":42,"phase":"DEVELOP","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":0,"round":1,"status":"fail"}`
+
+	// This mirrors what runFromDevelop now does: ensure PR then handoff
+	stateJSON, err := app.ensurePRCreated(ctx, root, app.env, "owner/repo", 42, stateJSON, "Implement queue")
+	if err != nil {
+		t.Fatalf("ensurePRCreated: %v", err)
+	}
+
+	// PR should have been created
+	if !containsCall(calls, "pr create") {
+		t.Fatalf("expected PR to be created when pr_number is 0, got calls: %v", calls)
+	}
+
+	// State should now have a pr_number
+	if !strings.Contains(stateJSON, `"pr_number"`) {
+		t.Fatalf("expected pr_number in state after PR creation, got %q", stateJSON)
+	}
+
+	result, err := app.phaseDevelopNeedsReview(ctx, root, app.env, "owner/repo", 42, stateJSON)
+	if err != nil {
+		t.Fatalf("phaseDevelopNeedsReview: %v", err)
+	}
+
+	if !strings.Contains(result, `"phase":"DONE"`) {
+		t.Fatalf("expected DONE state, got %q", result)
+	}
+	if !strings.Contains(result, `"finalize_verdict":"needs-review"`) {
+		t.Fatalf("expected needs-review finalize verdict, got %q", result)
+	}
+}
+
 // TestPhaseFinalizeAutoMergesAndCleansUp tests the finalize phase with auto-merge enabled and PASS verdict.
 func TestPhaseFinalizeAutoMergesAndCleansUp(t *testing.T) {
 	ctx := t.Context()

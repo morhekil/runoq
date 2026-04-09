@@ -250,6 +250,11 @@ func (a *App) runFromDevelop(ctx context.Context, root string, env []string, rep
 		}
 
 		if developResult.Status != "review_ready" {
+			// Create PR before handoff so the work is visible and reviewable
+			stateJSON, err = a.ensurePRCreated(ctx, root, env, repo, issueNumber, stateJSON, metadata.Title)
+			if err != nil {
+				return "", err
+			}
 			return a.phaseDevelopNeedsReview(ctx, root, env, repo, issueNumber, stateJSON)
 		}
 
