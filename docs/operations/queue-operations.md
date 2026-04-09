@@ -106,7 +106,8 @@ Single-issue mode still performs the full phase sequence:
 - eligibility checks
 - INIT: label transition to `runoq:in-progress`, worktree creation, draft PR creation
 - CRITERIA: bar-setter writes acceptance tests/specs (skipped for low complexity)
-- DEVELOP: issue-runner drives a Codex dev round
+- DEVELOP: one bounded Codex dev round runs
+- VERIFY: deterministic verification reruns from the pushed branch
 - REVIEW: diff-reviewer evaluates the diff
 - DECIDE: route to another DEVELOP round, FINALIZE, or INTEGRATE
 - FINALIZE: PR finalization, label transition, worktree cleanup

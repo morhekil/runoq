@@ -44,23 +44,39 @@ Same repo and fixture infrastructure as the planning smoke. After tasks are mate
 
 And a **fixture diff-reviewer** response for the `claude stream-json --agent diff-reviewer` invocation that returns a PASS verdict with a score.
 
-### Scenario: Happy path (3 ticks)
+### Scenario: Happy path (6 ticks)
 
-**Tick 1 — Develop + Open PR:**
+**Tick 1 — Init:**
 ```
 tick_once
 ```
 Verify on GitHub:
 - [ ] Issue has `runoq:in-progress` label (not `runoq:ready`)
 - [ ] A draft PR for correct branch exists with `Closes #<issue>` in body
-- [ ] PR audit comment contains `<!-- runoq:state:{...} -->` with `"phase":"OPEN-PR"` and implementor agent attribution
+- [ ] PR audit comment contains `<!-- runoq:state:{...} -->` with `"phase":"INIT"`
+- [ ] No code commits are pushed yet
+
+**Tick 2 — Develop:**
+```
+tick_once
+```
+Verify on GitHub:
 - [ ] Code commits are pushed to PR
-- [ ] Verification result posted as PR comment with verifier attribution
-- [ ] No review comments or other activity on PR yet
+- [ ] PR has a new `DEVELOP` audit comment with implementor attribution
+- [ ] No `VERIFY` or `REVIEW` comments are posted yet
 
 Verify correct output on terminal.
 
-**Tick 2 — Review:**
+**Tick 3 — Verify:**
+```
+tick_once
+```
+Verify on GitHub:
+- [ ] PR has a new `VERIFY` audit comment with verifier attribution
+- [ ] Verification result is posted separately from `DEVELOP`
+- [ ] Issue still has `runoq:in-progress` label
+
+**Tick 4 — Review:**
 ```
 tick_once
 ```
@@ -74,7 +90,16 @@ Verify on GitHub:
 
 Verify correct output on terminal.
 
-**Tick 3 — Decide + Finalize (PASS path):**
+**Tick 5 — Decide:**
+```
+tick_once
+```
+Verify on GitHub:
+- [ ] PR has a new `DECIDE` audit comment
+- [ ] The decision comment does not also finalize in the same tick
+- [ ] Issue still has `runoq:in-progress` label
+
+**Tick 6 — Finalize (PASS path):**
 ```
 tick_once
 ```
@@ -171,30 +196,14 @@ Fixture reviewer returns `PASS` but finalize routes to needs-review due to confi
 - [ ] Issue has `runoq:needs-human-review`
 - [ ] PR finalize comment shows reason: auto-merge disabled
 
-### Scenario: Verification comment during DEVELOP
+### Scenario: Verification failure drives iteration across ticks
 
-After codex runs, the issue-runner runs verification against acceptance criteria.
+Verification fails on the first `VERIFY` tick. A later round succeeds after `DECIDE(iterate)` sends the issue back through `DEVELOP`.
 
-- [ ] Verification result posted as a comment on PR with verifier agent attribution
-- [ ] Verification checklist is carried forward to next round on iterate
-
-### Scenario: Verification-driven iteration inside DEVELOP
-
-Verification fails on the first internal developer round, then succeeds on a later internal round without leaving the DEVELOP tick.
-
-- [ ] First failed verification posts a verifier PR comment with concrete failures
-- [ ] The next internal developer round receives the carried-forward verification checklist
-- [ ] A later internal round succeeds and the overall tick exits at `OPEN-PR`
-- [ ] The PR shows both the failed verification artefact and the later successful develop/open-PR artefacts
-
-### Scenario: Verification max-rounds exhaustion inside DEVELOP
-
-Verification fails on every internal developer round until `maxRounds` is reached.
-
-- [ ] Verifier PR comments are posted for each failed internal round
-- [ ] The final tick escalates to `runoq:needs-human-review`
-- [ ] PR is marked ready for review
-- [ ] PR has durable handoff audit comment explaining max-rounds exhaustion from verification failures
+- [ ] Failed `VERIFY` posts a verifier PR comment with concrete failures
+- [ ] `DECIDE` records an `iterate` decision instead of finalizing
+- [ ] The next `DEVELOP` tick carries the prior checklist into the codex prompt
+- [ ] A later round succeeds through the normal `DEVELOP -> VERIFY -> REVIEW -> DECIDE` cadence
 
 ### Scenario: Invalid payload schema recovery
 
@@ -204,23 +213,32 @@ Fixture codex writes an invalid final payload block but includes a valid `thread
 - [ ] `state validate-payload` fails for the first payload
 - [ ] Same-thread schema retry is attempted
 - [ ] The corrected payload is accepted without re-running development commands
-- [ ] Tick continues through normal verification and PR flow
+- [ ] Tick stops in `DEVELOP`; verification still happens later in the separate `VERIFY` tick
 
 **Schema retry fails**
 - [ ] `state validate-payload` remains invalid after bounded retries
-- [ ] Issue escalates to `runoq:needs-human-review`
-- [ ] PR has durable handoff audit comment explaining payload/schema failure
+- [ ] `DEVELOP` still completes and persists the invalid payload state
+- [ ] The later `VERIFY` tick records the deterministic failure
 - [ ] Tick does not loop indefinitely
 
 ### Scenario: Resume from crash (idempotency)
 
-Process crashes after tick 1 (DEVELOP + OPEN-PR complete, state persisted in PR comment). A new `tick_once` call starts fresh.
+Process crashes after tick 2 (`DEVELOP` complete, state persisted in a PR comment). A new `tick_once` call starts fresh.
 
-**Tick 2** — Derives state from PR comments, resumes correctly
+**Next tick** — Derives state from PR comments, resumes correctly
 - [ ] `deriveStateFromGitHub` finds existing PR and extracts state from audit comment
-- [ ] Tick resumes from OPEN-PR phase (runs REVIEW), does NOT re-run INIT or DEVELOP
+- [ ] Tick resumes from `DEVELOP` state and runs `VERIFY`, not `INIT` or `DEVELOP`
 - [ ] No duplicate PR created
-- [ ] Review proceeds normally
+- [ ] Later ticks continue through `REVIEW`, `DECIDE`, and `FINALIZE`
+
+### Scenario: RESPOND preempts progress
+
+An unprocessed PR comment exists before a normal implementation phase starts.
+
+- [ ] The next tick runs `RESPOND` only
+- [ ] The comment is acknowledged and marked processed
+- [ ] The implementation phase does not advance in the same tick
+- [ ] The following tick resumes the interrupted target phase
 
 ### Scenario: Resume after DECIDE(iterate) crash
 

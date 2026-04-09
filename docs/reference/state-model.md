@@ -342,7 +342,7 @@ GitHub comments are the audit trail. The runtime uses machine-recognizable marke
 | --- | --- | --- |
 | `<!-- runoq:bot -->` | human-readable operational event | issue comments, PR comments, maintenance tracking issue comments |
 | `<!-- runoq:bot:<phase> -->` | phase-specific event posted by the orchestrator (e.g., `runoq:bot:init`, `runoq:bot:criteria`, `runoq:bot:review`, `runoq:bot:finalize`) | PR and issue comments |
-| `<!-- runoq:bot:verification-failure -->` | verification failure posted by `issue-runner` after a failed round | PR comment |
+| `<!-- runoq:bot:verify -->` | deterministic verification result posted by the orchestrator during the `VERIFY` tick | PR comment |
 | `<!-- runoq:payload:codex-return -->` | normalized or reconstructed dev-round payload | PR comment |
 
 ### PR body markers
@@ -385,7 +385,7 @@ Check local state first:
 Then check GitHub:
 
 - issue comments for `Skipped: ...`, escalation events, and stale-label resets
-- PR comments for dispatch payloads, normalized payloads, verification failures, and final verdicts
+- PR comments for develop, verify, review, decide, finalize, and normalized payload artifacts
 - PR body summary and attention sections for the latest operator summary
 
 ## Related Docs

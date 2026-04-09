@@ -96,10 +96,11 @@ During a successful run, `runoq` drives the issue through a deterministic phase 
 
 1. **INIT** — eligibility check, label transition to `runoq:in-progress`, worktree and draft PR creation
 2. **CRITERIA** — for medium/high complexity issues, the `bar-setter` agent writes acceptance tests and specs in the worktree before development begins. Low-complexity issues skip this phase.
-3. **DEVELOP** — the `issue-runner` script drives a Codex dev round in the worktree
-4. **REVIEW** — the `diff-reviewer` agent evaluates the diff against the spec
-5. **DECIDE** — the orchestrator routes to another DEVELOP round (if the review verdict is `ITERATE` and rounds remain), to FINALIZE, or to INTEGRATE for epics
-6. **FINALIZE** — PR finalization, label transition, worktree cleanup
+3. **DEVELOP** — one bounded Codex dev round runs in the worktree and posts its result to the PR
+4. **VERIFY** — deterministic verification reruns from the pushed branch on a fresh worktree
+5. **REVIEW** — the `diff-reviewer` agent evaluates the diff against the spec
+6. **DECIDE** — the orchestrator routes to another DEVELOP round (if the review verdict is `ITERATE` and rounds remain), to FINALIZE, or to INTEGRATE for epics
+7. **FINALIZE** — PR finalization, label transition, worktree cleanup
 
 State is saved to `.runoq/state/42.json` after each phase so interrupted runs can be reconciled.
 

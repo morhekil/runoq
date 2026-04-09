@@ -2,7 +2,7 @@
 
 ## Status
 
-Status: in progress
+Status: complete
 
 Completed so far:
 
@@ -15,13 +15,10 @@ Completed so far:
 - [x] `RESPOND` preempts every PR-backed phase when the PR has unprocessed non-audit comments
 - [x] `DEVELOP` now runs exactly one codex round and leaves deterministic verification to `VERIFY`
 - [x] `OPEN-PR` no longer appears in newly written runtime state and only remains as a resume-compatibility path
+- [x] Disposable worktrees are cleaned up on a best-effort basis after `DEVELOP`, `VERIFY`, and `REVIEW`
+- [x] `issue-runner` has been reduced to a bounded develop-round helper rather than a multi-step orchestration loop
+- [x] Operator/reference docs and smoke specs reflect the `INIT -> DEVELOP -> VERIFY -> REVIEW -> DECIDE -> FINALIZE` cadence
 - [x] Orchestrator tests and full `go test ./...` are green after the boundary refactor
-
-Still to do:
-
-- [ ] Remove the issue-runner as a top-level orchestration concept and keep only reusable helpers
-- [ ] Change phase comments from "next-state carriers" toward phase-result records and centralize routing logic fully in the orchestrator
-- [ ] Update smoke specs and fixture smoke coverage to the new tick cadence
 
 ## Purpose
 
@@ -165,32 +162,30 @@ Local workspace state is disposable. Each tick may create a worktree, use it, th
 - [x] Use that helper from `DEVELOP`
 - [x] Use that helper from `VERIFY`
 - [x] Use that helper from `REVIEW`
-- [ ] Best-effort cleanup the worktree after each tick
+- [x] Best-effort cleanup the worktree after each tick
 
 ### D. Issue-Runner Reduction
 
-- [ ] Replace the issue-runner round loop with reusable single-purpose helpers
-- [ ] Keep codex invocation and payload/schema helpers only where they still add value
-- [ ] Remove hidden multi-step orchestration from the issue-runner package
+- [x] Replace the issue-runner round loop with reusable single-purpose helpers
+- [x] Keep codex invocation and payload/schema helpers only where they still add value
+- [x] Remove hidden multi-step orchestration from the issue-runner package
 
 ### E. Result Model Cleanup
 
-- [ ] Move from phase comments carrying full next-state assumptions toward phase-result comments
-- [ ] Keep routing policy centralized in the orchestrator
-- [ ] Keep backward compatibility with existing state comments only as long as needed for resume
+- [x] Move from phase comments carrying full next-state assumptions toward phase-result comments
+- [x] Keep routing policy centralized in the orchestrator
+- [x] Keep backward compatibility with existing state comments only as long as needed for resume
 
 ### F. Smoke and Docs
 
-- [ ] Update fixture smoke expectations to the new cadence:
+- [x] Update fixture smoke expectations to the new cadence:
   `INIT -> DEVELOP -> VERIFY -> REVIEW -> DECIDE -> FINALIZE`
-- [ ] Add iterate-path smoke coverage with the new verify boundary
-- [ ] Add comment-response smoke proving `RESPOND` preempts normal progress
-- [ ] Update operator-facing docs once the remaining slices are landed
+- [x] Add iterate-path smoke coverage with the new verify boundary
+- [x] Add comment-response smoke proving `RESPOND` preempts normal progress
+- [x] Update operator-facing docs once the remaining slices are landed
 
 ## Notes
 
-The current landed slice is intentionally partial.
+This plan is complete.
 
-It now establishes fresh-worktree execution for `DEVELOP`/`VERIFY`/`REVIEW`, makes `VERIFY` rerun deterministic verification from persisted state instead of trusting prior temp files, and reduces `DEVELOP` to one coding round that persists payload state for a later `VERIFY` tick.
-
-The remaining architectural gaps are mostly cleanup and compatibility work: removing `OPEN-PR` as a meaningful phase, shrinking `issue-runner` further, and updating smoke coverage and operator-facing contracts to the new cadence.
+The runtime now uses PR-backed, one-step-per-tick implementation flow with explicit `DEVELOP`, `VERIFY`, `REVIEW`, `DECIDE`, and `FINALIZE` boundaries; compatibility-only handling for legacy `OPEN-PR` state; best-effort disposable worktree cleanup; and docs/smoke specs aligned to the new cadence.

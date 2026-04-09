@@ -1954,6 +1954,19 @@ func TestPhaseVerifyRerunsDeterministicVerificationFromStatePayload(t *testing.T
 	if !strings.Contains(result, `"changed_files":["feature.txt"]`) {
 		t.Fatalf("expected VERIFY to persist ground-truth changed_files, got %s", result)
 	}
+
+	var verifyState struct {
+		Worktree string `json:"worktree"`
+	}
+	if err := json.Unmarshal([]byte(result), &verifyState); err != nil {
+		t.Fatalf("parse verify state: %v", err)
+	}
+	if verifyState.Worktree == "" {
+		t.Fatal("expected verify state to retain worktree path")
+	}
+	if _, err := os.Stat(verifyState.Worktree); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected rehydrated verify worktree to be cleaned up, stat err=%v", err)
+	}
 }
 
 func TestPhaseInitDryRunNoPRCreation(t *testing.T) {

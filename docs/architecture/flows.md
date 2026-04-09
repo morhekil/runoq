@@ -2,7 +2,7 @@
 
 This document describes the major runtime sequences in `runoq`: iterative planning, execution, reconciliation, mention handling, and maintenance review.
 
-For `runoq run`, the orchestrator and issue-runner are now shell scripts (`orchestrator.sh` and `issue-runner.sh`), not agents. The orchestrator drives phase transitions (INIT, CRITERIA, DEVELOP, REVIEW, DECIDE, FINALIZE, INTEGRATE), spawns agents for bounded reasoning tasks, and handles mention triage. The issue-runner drives codex rounds within the DEVELOP phase.
+For `runoq run`, the orchestrator owns the phase machine and uses a bounded develop-round helper for `DEVELOP`. The orchestrator drives phase transitions (INIT, CRITERIA, DEVELOP, VERIFY, REVIEW, DECIDE, FINALIZE, INTEGRATE), spawns agents for bounded reasoning tasks, and handles mention triage. The develop helper runs one codex round and leaves deterministic checks to the separate `VERIFY` phase.
 
 ## `runoq tick`
 

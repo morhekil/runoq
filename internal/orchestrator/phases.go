@@ -296,6 +296,7 @@ func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo 
 		return "", issueRunnerResult{}, fmt.Errorf("rehydrate worktree: %w", err)
 	}
 	state.Worktree = worktreeResult.Worktree
+	defer a.bestEffortCleanupWorktree(ctx, issueNumber, "DEVELOP")
 
 	bodyOut, err := a.ghOutput(ctx, env, "issue", "view", strconv.Itoa(issueNumber), "--repo", repo, "--json", "body")
 	if err != nil {
@@ -470,6 +471,7 @@ func (a *App) phaseVerify(ctx context.Context, root string, env []string, repo s
 			return "", fmt.Errorf("rehydrate worktree: %w", err)
 		}
 		state.Worktree = worktreeResult.Worktree
+		defer a.bestEffortCleanupWorktree(ctx, issueNumber, "VERIFY")
 
 		payloadFile, err := os.CreateTemp("", "runoq-verify-payload.*")
 		if err != nil {
@@ -579,6 +581,7 @@ func (a *App) phaseReview(ctx context.Context, root string, env []string, repo s
 		return "", fmt.Errorf("rehydrate worktree: %w", err)
 	}
 	state.Worktree = worktreeResult.Worktree
+	defer a.bestEffortCleanupWorktree(ctx, issueNumber, "REVIEW")
 
 	round := max(state.Round, 1)
 	a.logInfo("REVIEW: spawning diff-reviewer for issue #%d round %d", issueNumber, round)
@@ -781,6 +784,14 @@ func isReviewTestFile(rel string) bool {
 		}
 	}
 	return false
+}
+
+func (a *App) bestEffortCleanupWorktree(ctx context.Context, issueNumber int, phase string) {
+	if err := a.worktreeApp.RemoveWorktree(ctx, issueNumber); err != nil {
+		a.logInfo("%s: best-effort worktree cleanup failed for issue #%d: %v", phase, issueNumber, err)
+		return
+	}
+	a.logInfo("%s: cleaned up disposable worktree for issue #%d", phase, issueNumber)
 }
 
 func (a *App) phaseDecide(ctx context.Context, root string, env []string, issueNumber int, stateJSON string) (string, error) {

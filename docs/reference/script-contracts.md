@@ -183,27 +183,25 @@ Notes:
 
 ## `issue-runner.sh`
 
-Purpose: drive codex development rounds within the DEVELOP phase.
+Purpose: compatibility entrypoint for the Go-backed develop-round helper used by `DEVELOP`.
 
 Primary callers: `orchestrator.sh`, tests.
 
 | Subcommand | Arguments | JSON/stdout contract | Side effects |
 | --- | --- | --- | --- |
-| `run` | `<payload-json-file>` | JSON object with `status` (`review_ready`, `fail`, `budget_exhausted`), `issueNumber`, `prNumber`, `round`, `verificationPassed`, `verificationFailures`, `changedFiles`, `relatedFiles`, `cumulativeTokens`, `summary`, `caveats` | invokes codex in worktree, captures codex JSON events plus final assistant message separately, persists per-round `thread_id`, validates payload via `state.sh`, performs bounded same-thread schema retries via `codex exec resume <thread_id> ...` when payload schema is invalid, calls `verify.sh round` (including criteria tamper check when `criteria_commit` is present in payload), iterates on failure up to `maxRounds`, posts verification failure comments to PR |
+| `run` | `<payload-json-file>` | JSON object with `status` (`completed`, `transient_error`, `budget_exhausted`), `round`, `logDir`, `baselineHash`, `headHash`, `commitRange`, `changedFiles`, `cumulativeTokens`, `verificationPayload`, `summary`, `caveats` | invokes codex in worktree, captures codex JSON events plus final assistant message separately, persists per-round `thread_id`, validates payload via `state.sh`, performs bounded same-thread schema retries via `codex exec resume <thread_id> ...` when payload schema is invalid |
 
 The payload JSON file must include: `issueNumber`, `prNumber`, `worktree`, `branch`, `specPath`, `repo`, `maxRounds`, `maxTokenBudget`. Optional fields: `round`, `logDir`, `previousChecklist`, `cumulativeTokens`, `guidelines`, `criteria_commit`.
 
 Notes:
 
-- `issue-runner.sh` is the one remaining shell-owned component; it does not dispatch through the Go runtime.
-- `RUNOQ_ISSUE_RUNNER_IMPLEMENTATION` defaults to `shell`; `runtime` is accepted only as a compatibility alias and runs the same shell path. All other subcommands (state, verify, worktree, dispatch-safety, issue-queue, orchestrator) are Go-owned via exec dispatch.
+- `DEVELOP` now performs exactly one codex round per tick. Deterministic verification moved to the separate `VERIFY` phase via `verify.sh`.
+- `issue-runner` is no longer a top-level orchestration loop. It is a bounded helper that packages one develop round for the orchestrator.
 - Invokes codex with `--json -o <last-message-file>` and keeps separate event/message artifacts.
 - Persists round `thread_id` from `thread.started` events and includes it in normalized payload artifacts.
 - Performs bounded schema retries in the same codex session (`codex exec resume <thread_id> ...`) when `payload_schema_valid` is false.
-- Injects `criteria_commit` into the payload file before verification when present, enabling the tamper check.
-- Tracks cumulative token usage across rounds and checks budget before and after each round.
-- Expands review scope by finding files that import changed files.
-- Returns `review_ready` on verification success, `fail` on max-rounds exhaustion, or `budget_exhausted` when the token budget is exceeded.
+- Tracks cumulative token usage across rounds and checks budget before and after the round.
+- Returns `completed` even when schema validation failed; the later `VERIFY` tick records that deterministic failure against the persisted payload.
 - Each Codex invocation is captured under the issue log directory as `codex-round-<n>/` with `argv.txt`, `context.log`, `request.txt`, `stdout.log`, `stderr.log`, and `response.txt`.
 
 ## `gh-pr-lifecycle.sh`

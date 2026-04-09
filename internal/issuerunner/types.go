@@ -51,14 +51,3 @@ type roundState struct {
 	commitSubjects    []string
 	threadID          string
 }
-
-// verifyResult holds the parsed output from verify.sh.
-type verifyResult struct {
-	ReviewAllowed bool     `json:"review_allowed"`
-	Failures      []string `json:"failures"`
-	Actual        struct {
-		FilesChanged []string `json:"files_changed"`
-		FilesAdded   []string `json:"files_added"`
-		FilesDeleted []string `json:"files_deleted"`
-	} `json:"actual"`
-}

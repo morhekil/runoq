@@ -16,7 +16,6 @@ The shell entrypoint handles only argument forwarding and exit-code propagation.
 
 | Component | Reason |
 | --- | --- |
-| `issue-runner.sh` | Drives codex development rounds; tightly coupled to codex CLI invocation, streaming output capture, and per-round thread management |
 | `scripts/lib/common.sh` (`runoq::gh()`) | Global bot auth: auto-mints app installation token on first `gh` call |
 | `gh-auth.sh` | CLI bootstrap token export |
 | `plan.sh` | Orchestrates agent invocation for plan decomposition |

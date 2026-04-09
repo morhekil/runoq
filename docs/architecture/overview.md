@@ -90,7 +90,7 @@ flowchart LR
   pr[gh-pr-lifecycle.sh]
   run[run.sh]
   orchestrator[orchestrator.sh]
-  issuerunner[issue-runner.sh]
+  issuerunner[internal/issuerunner helper]
   verify[verify.sh]
   state[state.sh]
   maint[maintenance.sh]
@@ -113,9 +113,8 @@ flowchart LR
   orchestrator --> issuerunner
   orchestrator --> state
   orchestrator --> agents
-  issuerunner --> verify
+  orchestrator --> verify
   issuerunner --> state
-  issuerunner --> watchdog
   run --> queue
   run --> safety
   maint --> state
@@ -148,8 +147,8 @@ flowchart LR
 | `scripts/state.sh` | Atomic state writes, phase transition validation, payload extraction/normalization, processed-mention tracking | GitHub audit comments, verification commands |
 | `scripts/verify.sh` | Ground-truth diff checks, branch push checks, test/build execution, payload consistency checks, criteria tamper check, epic integration verification | Final PR or issue decisions |
 | `scripts/run.sh` | End-to-end issue execution flow, queue loop, circuit breaker, audit comment sequencing | Phase dispatch, criteria authoring, review reasoning |
-| `scripts/orchestrator.sh` | Phase dispatch state machine (INIT, CRITERIA, DEVELOP, REVIEW, DECIDE, FINALIZE, INTEGRATE), mention triage via haiku classification, agent spawning, decision table | Implementation, review reasoning, criteria authoring |
-| `scripts/issue-runner.sh` | Drive codex rounds, track token budget, call verify.sh, package payloads, pass criteria_commit to verification | Phase dispatch, PR lifecycle, queue decisions |
+| `scripts/orchestrator.sh` | Phase dispatch state machine (INIT, CRITERIA, DEVELOP, VERIFY, REVIEW, DECIDE, FINALIZE, INTEGRATE), mention triage via haiku classification, agent spawning, decision table | Implementation, review reasoning, criteria authoring |
+| `internal/issuerunner` (via orchestrator) | Execute one bounded codex develop round, capture artifacts, normalize payloads, track token budget for the round | Verification routing, PR lifecycle, queue decisions |
 | `scripts/maintenance.sh` | Partition derivation, maintenance tracking issue lifecycle, findings storage, triage-to-issue filing | Code modification |
 | `scripts/mentions.sh` | Mention polling, permission gating, deny comments, deduplication via state | Queue dispatch decisions |
 | Claude skills and agents | Planning decomposition and review (`milestone-decomposer`, `task-decomposer`, `plan-reviewer-*`, `milestone-reviewer`), acceptance criteria authoring (bar-setter, opus), code review (diff-reviewer, opus), mention response (mention-responder, sonnet), maintenance review reasoning (maintenance-reviewer, opus) | Deterministic GitHub or filesystem contracts already defined in scripts |
@@ -160,8 +159,8 @@ flowchart LR
 
 The core architectural rule is that durable behavior belongs in Go packages and JSON contracts, not in prompts.
 
-- The Go runtime owns queue ordering, label transitions, worktree paths, PR creation, verification gates, state transitions, mention authorization, maintenance triage side effects, phase dispatch (orchestrator), and most dispatch logic. Shell entrypoints remain for auth, setup, and issue-runner.
-- The orchestrator and issue-runner are deterministic dispatch, not agents. Their work is state machine transitions, not reasoning. The orchestrator dispatches to Go; issue-runner remains shell-owned.
+- The Go runtime owns queue ordering, label transitions, worktree paths, PR creation, verification gates, state transitions, mention authorization, maintenance triage side effects, phase dispatch (orchestrator), and the develop-round helper logic.
+- The orchestrator and issuerunner helper are deterministic dispatch, not agents. Their work is state machine transitions and payload normalization, not reasoning.
 - Agents and skills are intentionally thin. They consume typed inputs, make bounded decisions, and are expected to call repository scripts instead of issuing ad hoc `gh` commands. Current agents: bar-setter (opus, criteria authoring), diff-reviewer (opus, code review), mention-responder (sonnet, PR question answering), maintenance-reviewer (opus, code health review).
 - Mention triage uses a haiku structured-output call for classification (question, change-request, approval, irrelevant), not a full agent.
 
@@ -202,7 +201,7 @@ Use this table when deciding where a change belongs:
 | Plan decomposition and issue creation | `tick.sh` and `plan-dispatch.sh` for iterative planning, `plan.sh` for deprecated one-shot compatibility, `milestone-decomposer` and `task-decomposer` for decomposition, `plan-reviewer-*` and `milestone-reviewer` for gated review, `gh-issue-queue.sh` for milestone/task materialization |
 | Queue logic and dependency ordering | `gh-issue-queue.sh`, `dispatch-safety.sh`, `run.sh` |
 | Phase dispatch and decision table | `orchestrator.sh` |
-| Dev-round execution and codex loop | `issue-runner.sh` |
+| Dev-round execution and codex loop | `internal/issuerunner` via orchestrator |
 | Acceptance criteria authoring | `bar-setter` agent (opus), invoked by `orchestrator.sh` during CRITERIA phase |
 | PR lifecycle | `gh-pr-lifecycle.sh`, `orchestrator.sh` |
 | Auth and token minting | `runoq::gh()` in `common.sh` (auto-mints app installation token globally on first call), `gh-auth.sh`, `.runoq/identity.json`, `GH_TOKEN` |
