@@ -34,6 +34,11 @@ type StreamConfig struct {
 	Progress io.Writer
 }
 
+// StreamResult reports metadata recovered from a Claude stream-json invocation.
+type StreamResult struct {
+	ThreadID string
+}
+
 // CaptureConfig describes a captured Claude CLI invocation.
 type CaptureConfig struct {
 	// WorkDir is the working directory for the process.
@@ -51,17 +56,27 @@ type CaptureConfig struct {
 // Stream runs claude --print --verbose --output-format stream-json, captures
 // the raw stream to a log directory, emits progress to StreamConfig.Progress,
 // and writes the extracted final text to StreamConfig.OutputFile.
-func Stream(ctx context.Context, exec shell.CommandExecutor, cfg StreamConfig) error {
+func Stream(ctx context.Context, exec shell.CommandExecutor, cfg StreamConfig) (StreamResult, error) {
+	return stream(ctx, exec, cfg, nil)
+}
+
+// ResumeStream resumes an existing Claude thread/session and captures the same
+// stream metadata as Stream.
+func ResumeStream(ctx context.Context, exec shell.CommandExecutor, threadID string, cfg StreamConfig) (StreamResult, error) {
+	return stream(ctx, exec, cfg, []string{"--resume", threadID})
+}
+
+func stream(ctx context.Context, exec shell.CommandExecutor, cfg StreamConfig, prefixArgs []string) (StreamResult, error) {
 	claudeBin := resolveClaudeBin(cfg.Env)
 
 	captureDir, err := makeCaptureDir(cfg.Env, "claude", captureNameFromArgs(cfg.Args))
 	if err != nil {
-		return fmt.Errorf("create capture dir: %w", err)
+		return StreamResult{}, fmt.Errorf("create capture dir: %w", err)
 	}
 
 	stderrFile, err := os.Create(filepath.Join(captureDir, "stderr.log"))
 	if err != nil {
-		return err
+		return StreamResult{}, err
 	}
 	defer func() {
 		_ = stderrFile.Close()
@@ -69,7 +84,7 @@ func Stream(ctx context.Context, exec shell.CommandExecutor, cfg StreamConfig) e
 
 	streamFile, err := os.Create(filepath.Join(captureDir, "stdout.log"))
 	if err != nil {
-		return err
+		return StreamResult{}, err
 	}
 	defer func() {
 		_ = streamFile.Close()
@@ -77,7 +92,7 @@ func Stream(ctx context.Context, exec shell.CommandExecutor, cfg StreamConfig) e
 
 	progressLog, err := os.Create(filepath.Join(captureDir, "progress.log"))
 	if err != nil {
-		return err
+		return StreamResult{}, err
 	}
 	defer func() {
 		_ = progressLog.Close()
@@ -101,7 +116,8 @@ func Stream(ctx context.Context, exec shell.CommandExecutor, cfg StreamConfig) e
 	}
 	stderrTee := io.MultiWriter(stderrFile, stderrWriter)
 
-	fullArgs := append([]string{"--print", "--verbose", "--output-format", "stream-json"}, cfg.Args...)
+	fullArgs := append(append([]string(nil), prefixArgs...), "--print", "--verbose", "--output-format", "stream-json")
+	fullArgs = append(fullArgs, cfg.Args...)
 
 	// Run claude in background, writing to the pipe.
 	errCh := make(chan error, 1)
@@ -123,11 +139,12 @@ func Stream(ctx context.Context, exec shell.CommandExecutor, cfg StreamConfig) e
 	scanner := bufio.NewScanner(io.TeeReader(pr, streamFile))
 	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
 
-	var resultText, assistantText string
+	var resultText, assistantText, threadID string
 	for scanner.Scan() {
 		line := scanner.Text()
 		emitProgress(line, progress, progressLog)
 		extractText(line, &resultText, &assistantText)
+		extractThreadID(line, &threadID)
 	}
 
 	claudeErr := <-errCh
@@ -143,7 +160,7 @@ func Stream(ctx context.Context, exec shell.CommandExecutor, cfg StreamConfig) e
 		_ = os.WriteFile(filepath.Join(captureDir, "response.txt"), nil, 0o644)
 	}
 
-	return claudeErr
+	return StreamResult{ThreadID: threadID}, claudeErr
 }
 
 // CapturedExec runs the claude CLI with stdout/stderr captured to log files.
@@ -370,6 +387,31 @@ func extractText(line string, resultText *string, assistantText *string) {
 					*assistantText = block.Text
 				}
 			}
+		}
+	}
+}
+
+func extractThreadID(line string, threadID *string) {
+	var event map[string]any
+	if err := json.Unmarshal([]byte(line), &event); err != nil {
+		return
+	}
+
+	for _, key := range []string{"thread_id", "session_id"} {
+		if value, ok := event[key].(string); ok && strings.TrimSpace(value) != "" {
+			*threadID = value
+			return
+		}
+	}
+
+	if thread, ok := event["thread"].(map[string]any); ok {
+		if value, ok := thread["id"].(string); ok && strings.TrimSpace(value) != "" {
+			*threadID = value
+		}
+	}
+	if session, ok := event["session"].(map[string]any); ok {
+		if value, ok := session["id"].(string); ok && strings.TrimSpace(value) != "" {
+			*threadID = value
 		}
 	}
 }
