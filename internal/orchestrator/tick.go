@@ -43,6 +43,7 @@ type TickConfig struct {
 	BlockedLabel         string
 	BranchPrefix         string
 	WorktreePrefix       string
+	MaxPlanningRounds    int
 	LastCompletedIssue   int
 	DryRunImplementation bool // when true, implementation dispatch is dry-run only (no worktree/codex)
 	Env                  []string
@@ -50,6 +51,8 @@ type TickConfig struct {
 	Stdout               io.Writer
 	Stderr               io.Writer
 }
+
+var runPlanningDispatch = planning.RunDispatch
 
 // issue represents a GitHub issue from the issue list.
 type issue struct {
@@ -385,11 +388,11 @@ func (t *tickRunner) handleBootstrap(ctx context.Context) int {
 	invoker := agents.NewInvoker(agents.InvokerConfig{
 		LogRoot: filepath.Join(t.cfg.RunoqRoot, "log"),
 	})
-	result, err := planning.RunDispatch(ctx, planning.DispatchConfig{
+	result, err := runPlanningDispatch(ctx, planning.DispatchConfig{
 		ReviewType: "milestone",
 		PlanFile:   t.cfg.PlanFile,
 		RunoqRoot:  t.cfg.RunoqRoot,
-		MaxRounds:  3,
+		MaxRounds:  t.planningMaxRounds(),
 		ClaudeBin:  envOrDefault(t.cfg.Env, "RUNOQ_CLAUDE_BIN", "claude"),
 		Invoker:    invoker,
 		Stderr:     t.cfg.Stderr,
@@ -709,12 +712,12 @@ func (t *tickRunner) handlePlanningDispatch(ctx context.Context, planningChild *
 		milestoneFile = tmpPath
 	}
 
-	result, err := planning.RunDispatch(ctx, planning.DispatchConfig{
+	result, err := runPlanningDispatch(ctx, planning.DispatchConfig{
 		ReviewType:    mode,
 		PlanFile:      t.cfg.PlanFile,
 		MilestoneFile: milestoneFile,
 		RunoqRoot:     t.cfg.RunoqRoot,
-		MaxRounds:     3,
+		MaxRounds:     t.planningMaxRounds(),
 		ClaudeBin:     envOrDefault(t.cfg.Env, "RUNOQ_CLAUDE_BIN", "claude"),
 		Invoker:       invoker,
 		Stderr:        t.cfg.Stderr,
@@ -1042,6 +1045,13 @@ func (t *tickRunner) countOpenChildren(epicNumber int) (int, bool) {
 		}
 	}
 	return count, hasTask
+}
+
+func (t *tickRunner) planningMaxRounds() int {
+	if t.cfg.MaxPlanningRounds > 0 {
+		return t.cfg.MaxPlanningRounds
+	}
+	return 3
 }
 
 func (t *tickRunner) issueNodeID(ctx context.Context, issueNum string) string {

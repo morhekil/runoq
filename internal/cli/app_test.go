@@ -554,6 +554,19 @@ func TestPlanPrintsRemovedNotice(t *testing.T) {
 	}
 }
 
+func TestPlanningMaxRoundsReadsPlanningConfig(t *testing.T) {
+	t.Parallel()
+
+	app := New(nil, []string{"RUNOQ_ROOT=/runoq"}, "/tmp/project", io.Discard, io.Discard, "")
+	app.configRaw = map[string]json.RawMessage{
+		"planning": json.RawMessage(`{"maxDecompositionRounds":7}`),
+	}
+
+	if got := app.planningMaxRounds(); got != 7 {
+		t.Fatalf("planningMaxRounds() = %d, want 7", got)
+	}
+}
+
 func TestUnknownSubcommandPrintsUsage(t *testing.T) {
 	t.Parallel()
 

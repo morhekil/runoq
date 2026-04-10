@@ -579,6 +579,23 @@ func (a *App) orchestratorConfig() orchestrator.OrchestratorConfig {
 	return cfg
 }
 
+func (a *App) planningMaxRounds() int {
+	maxRounds := 3
+	if a.configRaw == nil {
+		return maxRounds
+	}
+
+	if v, ok := a.configRaw["planning"]; ok {
+		var planning struct {
+			MaxDecompositionRounds int `json:"maxDecompositionRounds"`
+		}
+		if json.Unmarshal(v, &planning) == nil && planning.MaxDecompositionRounds > 0 {
+			maxRounds = planning.MaxDecompositionRounds
+		}
+	}
+	return maxRounds
+}
+
 func (a *App) runTick(ctx context.Context, env []string, runoqRoot string, args []string) int {
 	repo, _ := shell.EnvLookup(env, "REPO")
 	targetRoot, _ := shell.EnvLookup(env, "TARGET_ROOT")
@@ -617,6 +634,7 @@ func (a *App) runTick(ctx context.Context, env []string, runoqRoot string, args 
 		BlockedLabel:         a.labels.Blocked,
 		BranchPrefix:         a.branchPrefix,
 		WorktreePrefix:       a.worktreePrefix,
+		MaxPlanningRounds:    a.planningMaxRounds(),
 		DryRunImplementation: dryImpl == "1",
 		Env:                  env,
 		ExecCommand:          a.execCommand,
@@ -661,6 +679,7 @@ func (a *App) runTickWithCapture(ctx context.Context, env []string, runoqRoot st
 		BlockedLabel:        a.labels.Blocked,
 		BranchPrefix:        a.branchPrefix,
 		WorktreePrefix:      a.worktreePrefix,
+		MaxPlanningRounds:   a.planningMaxRounds(),
 		LastCompletedIssue:  lastCompleted,
 		Env:                 env,
 		ExecCommand:         a.execCommand,

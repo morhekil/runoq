@@ -13,6 +13,7 @@ import (
 
 	"github.com/saruman/runoq/comments"
 	"github.com/saruman/runoq/internal/shell"
+	"github.com/saruman/runoq/planning"
 )
 
 // stubExecutor returns a CommandExecutor that responds to gh commands with
@@ -1355,6 +1356,129 @@ func TestHandleApprovedAdjustmentFailsOnModifyWithoutTarget(t *testing.T) {
 	}
 	if closed {
 		t.Fatal("expected review and parent to remain open when modify adjustment is missing target milestone")
+	}
+}
+
+func TestHandleBootstrapUsesConfiguredPlanningMaxRounds(t *testing.T) {
+	t.Parallel()
+
+	runner := &tickRunner{
+		cfg: TickConfig{
+			Repo:              "owner/repo",
+			PlanFile:          "docs/plan.md",
+			RunoqRoot:         t.TempDir(),
+			ReadyLabel:        "runoq:ready",
+			InProgressLabel:   "runoq:in-progress",
+			DoneLabel:         "runoq:done",
+			NeedsReviewLabel:  "runoq:needs-human-review",
+			BlockedLabel:      "runoq:blocked",
+			MaxPlanningRounds: 7,
+			Stdout:            io.Discard,
+			Stderr:            io.Discard,
+		},
+	}
+
+	previous := runPlanningDispatch
+	t.Cleanup(func() {
+		runPlanningDispatch = previous
+	})
+
+	var gotMaxRounds int
+	runPlanningDispatch = func(_ context.Context, cfg planning.DispatchConfig) (planning.DispatchResult, error) {
+		gotMaxRounds = cfg.MaxRounds
+		return planning.DispatchResult{FormattedBody: "<!-- runoq:payload:plan-proposal -->\n"}, nil
+	}
+
+	runner.cfg.ExecCommand = func(_ context.Context, req shell.CommandRequest) error {
+		args := strings.Join(req.Args, " ")
+		switch {
+		case strings.Contains(args, "api user --jq .login"):
+			_, _ = io.WriteString(req.Stdout, "operator\n")
+		case strings.Contains(args, "api repos/owner/repo/issues/") && strings.Contains(args, "--jq .node_id"):
+			_, _ = io.WriteString(req.Stdout, "NODE_ID\n")
+		case strings.Contains(args, "api repos/owner/repo/issues/") && strings.Contains(args, "--jq .id"):
+			_, _ = io.WriteString(req.Stdout, "1\n")
+		case strings.Contains(args, "api repos/owner/repo/issues/") && strings.Contains(args, "/sub_issues") && strings.Contains(args, "--method POST"):
+			return nil
+		case strings.Contains(args, "api graphql"):
+			return nil
+		case strings.Contains(args, "issue edit") && strings.Contains(args, "--add-assignee"):
+			return nil
+		case strings.Contains(args, "issue view") && strings.Contains(args, "--jq .body //"):
+			_, _ = io.WriteString(req.Stdout, "")
+		case strings.Contains(args, "issue create"):
+			_, _ = io.WriteString(req.Stdout, "https://example.test/issues/1")
+		case strings.Contains(args, "issue edit"), strings.Contains(args, "issue comment"), strings.Contains(args, "issue view"):
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s %s", req.Name, args)
+		}
+		return nil
+	}
+
+	if result := runner.handleBootstrap(t.Context()); result != 0 {
+		t.Fatalf("handleBootstrap = %d, want 0", result)
+	}
+	if gotMaxRounds != 7 {
+		t.Fatalf("dispatch MaxRounds = %d, want 7", gotMaxRounds)
+	}
+}
+
+func TestHandlePlanningDispatchUsesConfiguredPlanningMaxRounds(t *testing.T) {
+	t.Parallel()
+
+	runner := &tickRunner{
+		cfg: TickConfig{
+			Repo:              "owner/repo",
+			PlanFile:          "docs/plan.md",
+			RunoqRoot:         t.TempDir(),
+			ReadyLabel:        "runoq:ready",
+			InProgressLabel:   "runoq:in-progress",
+			DoneLabel:         "runoq:done",
+			NeedsReviewLabel:  "runoq:needs-human-review",
+			BlockedLabel:      "runoq:blocked",
+			MaxPlanningRounds: 9,
+			Stdout:            io.Discard,
+			Stderr:            io.Discard,
+		},
+	}
+
+	previous := runPlanningDispatch
+	t.Cleanup(func() {
+		runPlanningDispatch = previous
+	})
+
+	var gotMaxRounds int
+	runPlanningDispatch = func(_ context.Context, cfg planning.DispatchConfig) (planning.DispatchResult, error) {
+		gotMaxRounds = cfg.MaxRounds
+		return planning.DispatchResult{FormattedBody: "<!-- runoq:payload:plan-proposal -->\n"}, nil
+	}
+
+	runner.cfg.ExecCommand = func(_ context.Context, req shell.CommandRequest) error {
+		args := strings.Join(req.Args, " ")
+		switch {
+		case strings.Contains(args, "api user --jq .login"):
+			_, _ = io.WriteString(req.Stdout, "operator\n")
+		case strings.Contains(args, "issue edit") && strings.Contains(args, "--add-assignee"):
+			return nil
+		case strings.Contains(args, "issue view 88") && strings.Contains(args, "--json body"):
+			_, _ = io.WriteString(req.Stdout, `{"body":""}`)
+		case strings.Contains(args, "issue edit"), strings.Contains(args, "issue comment"), strings.Contains(args, "api repos/owner/repo/issues/9/sub_issues"), strings.Contains(args, "api graphql"):
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s %s", req.Name, args)
+		}
+		return nil
+	}
+
+	planningChild := &issue{Number: 88, Title: "Break down milestone", State: "OPEN", IssueType: "planning", ParentEpic: 9}
+	epic := &issue{Number: 9, Title: "Milestone", State: "OPEN", IssueType: "epic"}
+
+	if result := runner.handlePlanningDispatch(t.Context(), planningChild, epic, epic.Title); result != 0 {
+		t.Fatalf("handlePlanningDispatch = %d, want 0", result)
+	}
+	if gotMaxRounds != 9 {
+		t.Fatalf("dispatch MaxRounds = %d, want 9", gotMaxRounds)
 	}
 }
 
