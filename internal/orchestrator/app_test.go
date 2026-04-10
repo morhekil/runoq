@@ -764,6 +764,90 @@ func TestPhaseFinalizeStopsWhenPRFinalizationFails(t *testing.T) {
 	}
 }
 
+func TestPhaseFinalizeFailsWhenIssueStatusUpdateFails(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var calls []string
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, io.Discard)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		calls:       &calls,
+		issueNumber: 42,
+		issueTitle:  "Implement queue",
+		ghHandler: func(ghArgs string, req shell.CommandRequest) (bool, error) {
+			if strings.Contains(ghArgs, "issue edit 42") {
+				return true, errors.New("issue edit failed")
+			}
+			return false, nil
+		},
+	}))
+
+	stateJSON := `{"issue":42,"phase":"DECIDE","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":87,"round":1,"verdict":"PASS","decision":"finalize","score":"42","summary":"Verification passed"}`
+	_, err := app.phaseFinalize(ctx, root, app.env, "owner/repo", 42, stateJSON, IssueMetadata{Number: 42, Type: "task"})
+	if err == nil {
+		t.Fatal("expected finalize failure when issue status update fails")
+	}
+	if !strings.Contains(err.Error(), "set issue status") {
+		t.Fatalf("expected set issue status error, got %v", err)
+	}
+}
+
+func TestPhaseFinalizeFailsWhenFinalizeAuditCommentFails(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, io.Discard)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		issueNumber: 42,
+		issueTitle:  "Implement queue",
+		ghHandler: func(ghArgs string, req shell.CommandRequest) (bool, error) {
+			if strings.Contains(ghArgs, "pr comment 87") {
+				return true, errors.New("comment failed")
+			}
+			return false, nil
+		},
+	}))
+
+	stateJSON := `{"issue":42,"phase":"DECIDE","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":87,"round":1,"verdict":"PASS","decision":"finalize","score":"42","summary":"Verification passed"}`
+	_, err := app.phaseFinalize(ctx, root, app.env, "owner/repo", 42, stateJSON, IssueMetadata{Number: 42, Type: "task"})
+	if err == nil {
+		t.Fatal("expected finalize failure when finalize audit comment fails")
+	}
+	if !strings.Contains(err.Error(), "post finalize audit comment") {
+		t.Fatalf("expected finalize audit comment error, got %v", err)
+	}
+}
+
+func TestPhaseFinalizeFailsWhenPRBodyUpdateFails(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, io.Discard)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		issueNumber: 42,
+		issueTitle:  "Implement queue",
+		ghHandler: func(ghArgs string, req shell.CommandRequest) (bool, error) {
+			if strings.Contains(ghArgs, "pr edit 87") && strings.Contains(ghArgs, "--body-file") {
+				return true, errors.New("body edit failed")
+			}
+			return false, nil
+		},
+	}))
+
+	stateJSON := `{"issue":42,"phase":"DECIDE","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":87,"round":1,"verdict":"PASS","decision":"finalize","score":"42","summary":"Verification passed"}`
+	_, err := app.phaseFinalize(ctx, root, app.env, "owner/repo", 42, stateJSON, IssueMetadata{Number: 42, Type: "task"})
+	if err == nil {
+		t.Fatal("expected finalize failure when PR body update fails")
+	}
+	if !strings.Contains(err.Error(), "update PR body") {
+		t.Fatalf("expected update PR body error, got %v", err)
+	}
+}
+
 // TestPhaseDecideIteratesSetsNextPhaseDevelop tests the decide phase with ITERATE verdict.
 // TestRunFromReviewReturnsAfterReview verifies that runFromReview returns
 // after the review phase without chaining to decide or finalize.

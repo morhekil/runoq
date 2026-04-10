@@ -818,11 +818,11 @@ func (a *App) phaseFinalize(ctx context.Context, root string, env []string, repo
 	}
 
 	a.logInfo("FINALIZE: setting issue #%d status to %s", issueNumber, issueStatus)
-	if code := a.issueQueueApp.SetStatus(ctx, repo, strconv.Itoa(issueNumber), issueStatus); code == 0 {
-		a.logInfo("FINALIZE: set-status succeeded for issue #%d", issueNumber)
-	} else {
+	if code := a.issueQueueApp.SetStatus(ctx, repo, strconv.Itoa(issueNumber), issueStatus); code != 0 {
 		a.logInfo("FINALIZE: set-status failed for issue #%d", issueNumber)
+		return "", fmt.Errorf("set issue status: issue-queue set-status exited %d", code)
 	}
+	a.logInfo("FINALIZE: set-status succeeded for issue #%d", issueNumber)
 
 	if finalizeVerdict == "auto-merge" {
 		a.logInfo("FINALIZE: removing worktree for issue #%d (auto-merged)", issueNumber)
@@ -859,10 +859,13 @@ func (a *App) phaseFinalize(ctx context.Context, root string, env []string, repo
 		return "", err
 	}
 
-	_ = a.postAuditCommentWithState(ctx, root, env, repo, state.PRNumber, "finalize", finalizeState, finalizeBody)
+	if err := a.postAuditCommentWithState(ctx, root, env, repo, state.PRNumber, "finalize", finalizeState, finalizeBody); err != nil {
+		return "", fmt.Errorf("post finalize audit comment: %w", err)
+	}
 
 	if err := a.updatePRBody(ctx, env, repo, state.PRNumber, state.Summary, defaultString(strings.TrimSpace(state.Verdict), "FAIL"), defaultString(strings.TrimSpace(state.Score), "0"), max(state.Round, 1), cfg.MaxRounds, state.Caveats); err != nil {
 		a.logInfo("FINALIZE: PR body update failed: %v", err)
+		return "", fmt.Errorf("update PR body: %w", err)
 	}
 
 	doneState, err := updateStateJSON(finalizeState, func(state map[string]any) {
