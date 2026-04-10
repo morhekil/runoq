@@ -2,7 +2,7 @@
 
 ## Status
 
-Status: partially completed
+Status: completed
 
 ## Purpose
 

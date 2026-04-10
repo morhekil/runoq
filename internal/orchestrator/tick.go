@@ -28,6 +28,12 @@ type TickConfig struct {
 	PlanFile             string
 	RunoqRoot            string
 	PlanApprovedLabel    string
+	MaxRounds            int
+	MaxTokenBudget       int
+	AutoMergeEnabled     bool
+	AutoMergeConfigured  bool
+	Reviewers            []string
+	IdentityHandle       string
 	ReadyLabel           string
 	InProgressLabel      string
 	DoneLabel            string
@@ -252,7 +258,7 @@ func (t *tickRunner) handleActiveConversations(ctx context.Context) int {
 		// Check for unprocessed comments via the orchestrator App
 		orchApp := New(nil, t.cfg.Env, "", io.Discard, t.cfg.Stderr)
 		orchApp.SetCommandExecutor(t.cfg.ExecCommand)
-		orchApp.SetConfig(OrchestratorConfig{IdentityHandle: t.identityHandle()})
+		orchApp.SetConfig(t.orchestratorConfig())
 
 		comments, err := orchApp.findUnprocessedComments(ctx, t.cfg.Repo, "pr", prNumber)
 		if err != nil || len(comments) == 0 {
@@ -265,7 +271,7 @@ func (t *tickRunner) handleActiveConversations(ctx context.Context) int {
 		// Build state from the PR's audit comments and run phaseRespond
 		respondApp := New(nil, t.cfg.Env, "", t.cfg.Stdout, t.cfg.Stderr)
 		respondApp.SetCommandExecutor(t.cfg.ExecCommand)
-		respondApp.SetConfig(OrchestratorConfig{IdentityHandle: t.identityHandle()})
+		respondApp.SetConfig(t.orchestratorConfig())
 
 		stateJSON, _ := marshalJSON(map[string]any{
 			"issue":     iss.Number,
@@ -290,6 +296,9 @@ func (t *tickRunner) handleActiveConversations(ctx context.Context) int {
 }
 
 func (t *tickRunner) identityHandle() string {
+	if strings.TrimSpace(t.cfg.IdentityHandle) != "" {
+		return t.cfg.IdentityHandle
+	}
 	// Try to extract from env or config
 	for _, e := range t.cfg.Env {
 		if strings.HasPrefix(e, "RUNOQ_IDENTITY=") {
@@ -297,6 +306,33 @@ func (t *tickRunner) identityHandle() string {
 		}
 	}
 	return "runoq"
+}
+
+func (t *tickRunner) orchestratorConfig() OrchestratorConfig {
+	cfg := OrchestratorConfig{
+		MaxRounds:        5,
+		MaxTokenBudget:   500000,
+		AutoMergeEnabled: true,
+		Reviewers:        append([]string(nil), t.cfg.Reviewers...),
+		IdentityHandle:   t.identityHandle(),
+		ReadyLabel:       t.cfg.ReadyLabel,
+		InProgressLabel:  t.cfg.InProgressLabel,
+		DoneLabel:        t.cfg.DoneLabel,
+		NeedsReviewLabel: t.cfg.NeedsReviewLabel,
+		BlockedLabel:     t.cfg.BlockedLabel,
+		BranchPrefix:     t.cfg.BranchPrefix,
+		WorktreePrefix:   t.cfg.WorktreePrefix,
+	}
+	if t.cfg.MaxRounds > 0 {
+		cfg.MaxRounds = t.cfg.MaxRounds
+	}
+	if t.cfg.MaxTokenBudget > 0 {
+		cfg.MaxTokenBudget = t.cfg.MaxTokenBudget
+	}
+	if t.cfg.AutoMergeConfigured {
+		cfg.AutoMergeEnabled = t.cfg.AutoMergeEnabled
+	}
+	return cfg
 }
 
 func (t *tickRunner) handleBootstrap(ctx context.Context) int {
@@ -693,10 +729,7 @@ func (t *tickRunner) dispatchTask(ctx context.Context, task *issue) int {
 
 	runApp := New(nil, t.cfg.Env, "", t.cfg.Stdout, t.cfg.Stderr)
 	runApp.SetCommandExecutor(t.cfg.ExecCommand)
-	runApp.SetConfig(OrchestratorConfig{
-		BranchPrefix:   t.cfg.BranchPrefix,
-		WorktreePrefix: t.cfg.WorktreePrefix,
-	})
+	runApp.SetConfig(t.orchestratorConfig())
 	stateJSON, err := runApp.RunIssue(ctx, t.cfg.Repo, task.Number, t.cfg.DryRunImplementation, task.Title, metadata)
 	if err != nil {
 		return t.fail("issue #%d: %v", task.Number, err)

@@ -570,11 +570,18 @@ func (a *App) runTick(ctx context.Context, env []string, runoqRoot string) int {
 	}
 
 	dryImpl, _ := shell.EnvLookup(env, "RUNOQ_DRY_RUN_IMPL")
+	orchCfg := a.orchestratorConfig()
 	return orchestrator.RunTick(ctx, orchestrator.TickConfig{
 		Repo:                 repo,
 		PlanFile:             planFile,
 		RunoqRoot:            runoqRoot,
 		PlanApprovedLabel:    a.labels.PlanApproved,
+		MaxRounds:            orchCfg.MaxRounds,
+		MaxTokenBudget:       orchCfg.MaxTokenBudget,
+		AutoMergeEnabled:     orchCfg.AutoMergeEnabled,
+		AutoMergeConfigured:  true,
+		Reviewers:            orchCfg.Reviewers,
+		IdentityHandle:       orchCfg.IdentityHandle,
 		ReadyLabel:           a.labels.Ready,
 		InProgressLabel:      a.labels.InProgress,
 		DoneLabel:            a.labels.Done,
@@ -601,24 +608,31 @@ func (a *App) runTickWithCapture(ctx context.Context, env []string, runoqRoot st
 
 	var buf bytes.Buffer
 	teeStdout := io.MultiWriter(a.stdout, &buf)
+	orchCfg := a.orchestratorConfig()
 
 	code := orchestrator.RunTick(ctx, orchestrator.TickConfig{
-		Repo:               repo,
-		PlanFile:           planFile,
-		RunoqRoot:          runoqRoot,
-		PlanApprovedLabel:  a.labels.PlanApproved,
-		ReadyLabel:         a.labels.Ready,
-		InProgressLabel:    a.labels.InProgress,
-		DoneLabel:          a.labels.Done,
-		NeedsReviewLabel:   a.labels.NeedsReview,
-		BlockedLabel:       a.labels.Blocked,
-		BranchPrefix:       a.branchPrefix,
-		WorktreePrefix:     a.worktreePrefix,
-		LastCompletedIssue: lastCompleted,
-		Env:                env,
-		ExecCommand:        a.execCommand,
-		Stdout:             teeStdout,
-		Stderr:             a.stderr,
+		Repo:                repo,
+		PlanFile:            planFile,
+		RunoqRoot:           runoqRoot,
+		PlanApprovedLabel:   a.labels.PlanApproved,
+		MaxRounds:           orchCfg.MaxRounds,
+		MaxTokenBudget:      orchCfg.MaxTokenBudget,
+		AutoMergeEnabled:    orchCfg.AutoMergeEnabled,
+		AutoMergeConfigured: true,
+		Reviewers:           orchCfg.Reviewers,
+		IdentityHandle:      orchCfg.IdentityHandle,
+		ReadyLabel:          a.labels.Ready,
+		InProgressLabel:     a.labels.InProgress,
+		DoneLabel:           a.labels.Done,
+		NeedsReviewLabel:    a.labels.NeedsReview,
+		BlockedLabel:        a.labels.Blocked,
+		BranchPrefix:        a.branchPrefix,
+		WorktreePrefix:      a.worktreePrefix,
+		LastCompletedIssue:  lastCompleted,
+		Env:                 env,
+		ExecCommand:         a.execCommand,
+		Stdout:              teeStdout,
+		Stderr:              a.stderr,
 	})
 
 	completed := parseCompletedIssue(buf.String())

@@ -663,6 +663,68 @@ func TestDispatchTaskRespectsIssueStatusFromState(t *testing.T) {
 	}
 }
 
+func TestDispatchTaskUsesImplementationDefaultsForIterateDecision(t *testing.T) {
+	t.Parallel()
+
+	reviewState := `{"phase":"REVIEW","issue":42,"pr_number":87,"branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","round":1,"verdict":"ITERATE","score":"21","review_checklist":"- Add error handling","baseline_hash":"base","head_hash":"head","summary":"Needs another round"}`
+
+	var decisionComment string
+	runner := &tickRunner{
+		cfg: TickConfig{
+			Repo:   "owner/repo",
+			Env:    []string{"RUNOQ_ROOT=/tmp/runoq", "TARGET_ROOT=/tmp/target"},
+			Stdout: io.Discard,
+			Stderr: io.Discard,
+			ExecCommand: func(_ context.Context, req shell.CommandRequest) error {
+				args := strings.Join(req.Args, " ")
+				switch {
+				case req.Name == "gh" && strings.Contains(args, "pr list") && strings.Contains(args, "closes #42"):
+					_, _ = io.WriteString(req.Stdout, `[{"number":87,"headRefName":"runoq/42-implement-queue"}]`)
+					return nil
+				case req.Name == "gh" && strings.Contains(args, "pr view 87") && strings.Contains(args, "comments"):
+					_, _ = io.WriteString(req.Stdout, `{"comments":[{"body":"<!-- runoq:bot:orchestrator:review -->\n<!-- runoq:state:`+strings.ReplaceAll(reviewState, `"`, `\"`)+` -->\n> review"}]}`)
+					return nil
+				case req.Name == "gh" && strings.Contains(args, "api repos/owner/repo/issues/87/comments"):
+					_, _ = io.WriteString(req.Stdout, `[]`)
+					return nil
+				case req.Name == "gh" && strings.Contains(args, "pr comment 87"):
+					for i, arg := range req.Args {
+						if arg == "--body-file" && i+1 < len(req.Args) {
+							data, err := os.ReadFile(req.Args[i+1])
+							if err != nil {
+								t.Fatalf("read decision body: %v", err)
+							}
+							decisionComment = string(data)
+							break
+						}
+					}
+					return nil
+				default:
+					t.Fatalf("unexpected command: %s %s", req.Name, args)
+					return nil
+				}
+			},
+		},
+	}
+
+	result := runner.dispatchTask(t.Context(), &issue{
+		Number: 42,
+		Title:  "Implement queue",
+		State:  "OPEN",
+		Body:   "## Acceptance Criteria\n\n- [ ] Works.",
+		URL:    "https://example.test/issues/42",
+	})
+	if result != 0 {
+		t.Fatalf("dispatchTask = %d, want 0", result)
+	}
+	if !strings.Contains(decisionComment, "Decision: iterate.") {
+		t.Fatalf("expected iterate decision comment, got %q", decisionComment)
+	}
+	if strings.Contains(decisionComment, "finalize-needs-review") {
+		t.Fatalf("tick dispatch should not force finalize-needs-review for round 1 iterate state, got %q", decisionComment)
+	}
+}
+
 func TestExtractJSONFromCodeFence(t *testing.T) {
 	t.Parallel()
 	body := "## Title\n\n<details>\n<summary>Raw JSON payload</summary>\n\n```json\n{\"key\":\"value\"}\n```\n\n</details>\n"
