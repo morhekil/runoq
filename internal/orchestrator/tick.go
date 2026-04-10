@@ -409,7 +409,9 @@ func (t *tickRunner) handleBootstrap(ctx context.Context) int {
 	}
 
 	// Assign after proposal is posted
-	t.issueAssign(ctx, t.cfg.Repo, planningNumber)
+	if err := t.issueAssign(ctx, t.cfg.Repo, planningNumber); err != nil {
+		return t.fail("assign planning issue #%s: %v", planningNumber, err)
+	}
 
 	t.success("Proposal posted on #" + planningNumber)
 	_, _ = fmt.Fprintf(t.cfg.Stdout, "Created planning milestone. Proposal posted on #%s\n", planningNumber)
@@ -742,7 +744,9 @@ func (t *tickRunner) handlePlanningDispatch(ctx context.Context, planningChild *
 		return t.fail("update proposal on #%s: %v", issueNumber, err)
 	}
 
-	t.issueAssign(ctx, t.cfg.Repo, issueNumber)
+	if err := t.issueAssign(ctx, t.cfg.Repo, issueNumber); err != nil {
+		return t.fail("assign planning issue #%s: %v", issueNumber, err)
+	}
 	t.success(fmt.Sprintf("Proposal posted on #%d", planningChild.Number))
 	_, _ = fmt.Fprintf(t.cfg.Stdout, "Proposal posted on #%d\n", planningChild.Number)
 	return 0
@@ -885,7 +889,9 @@ func (t *tickRunner) handleMilestoneComplete(ctx context.Context, epicNumber int
 	if err != nil {
 		return t.fail("create adjustment issue: %v", err)
 	}
-	t.issueAssign(ctx, t.cfg.Repo, adjNumber)
+	if err := t.issueAssign(ctx, t.cfg.Repo, adjNumber); err != nil {
+		return t.fail("assign adjustment issue #%s: %v", adjNumber, err)
+	}
 
 	t.success(fmt.Sprintf("Milestone #%d reviewed. Adjustments on #%s", epicNumber, adjNumber))
 	_, _ = fmt.Fprintf(t.cfg.Stdout, "Milestone #%d review complete. Adjustments proposed on #%s\n", epicNumber, adjNumber)
@@ -1342,9 +1348,13 @@ func (t *tickRunner) issueSetStatus(ctx context.Context, repo, issueNumber, stat
 	return nil
 }
 
-func (t *tickRunner) issueAssign(ctx context.Context, repo, issueNumber string) {
+func (t *tickRunner) issueAssign(ctx context.Context, repo, issueNumber string) error {
 	app, _ := t.newIssueQueueApp()
-	app.Assign(ctx, repo, issueNumber)
+	code := app.Assign(ctx, repo, issueNumber)
+	if code != 0 {
+		return fmt.Errorf("issue-queue assign exited %d", code)
+	}
+	return nil
 }
 
 // --- GH helpers ---

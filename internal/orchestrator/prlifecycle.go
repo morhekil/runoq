@@ -125,8 +125,9 @@ func (a *App) finalizePR(ctx context.Context, repo string, prNumber int, verdict
 		}
 	case "needs-review":
 		if reviewer != "" {
-			// Best effort — assignment may fail if user lacks permissions
-			_, _ = a.ghOutput(ctx, a.env, "pr", "edit", prStr, "--repo", repo, "--add-reviewer", reviewer, "--add-assignee", reviewer)
+			if _, err := a.ghOutput(ctx, a.env, "pr", "edit", prStr, "--repo", repo, "--add-reviewer", reviewer, "--add-assignee", reviewer); err != nil {
+				return fmt.Errorf("pr assign reviewer %q: %w", reviewer, err)
+			}
 		}
 	}
 

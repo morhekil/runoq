@@ -893,6 +893,46 @@ func TestPhaseDevelopNeedsReviewFailsBeforeMutatingGitHubWhenFinalizeAuditCommen
 	}
 }
 
+func TestPhaseDevelopNeedsReviewFailsWhenReviewerAssignmentFails(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var calls []string
+	app := New(nil, []string{
+		"RUNOQ_ROOT=" + root,
+		"TARGET_ROOT=" + root,
+	}, root, io.Discard, io.Discard)
+	cfg := defaultOrchestratorConfig()
+	cfg.Reviewers = []string{"reviewer"}
+	app.SetConfig(cfg)
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		calls:       &calls,
+		issueNumber: 42,
+		issueTitle:  "Implement queue",
+		ghHandler: func(ghArgs string, req shell.CommandRequest) (bool, error) {
+			if strings.Contains(ghArgs, "pr edit 87") && strings.Contains(ghArgs, "--add-reviewer reviewer") {
+				return true, errors.New("assignment failed")
+			}
+			return false, nil
+		},
+	}))
+
+	stateJSON := `{"issue":42,"phase":"DEVELOP","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":87,"round":1,"status":"fail"}`
+	_, err := app.phaseDevelopNeedsReview(ctx, root, app.env, "owner/repo", 42, stateJSON, "fail", "Verification failed after round 1")
+	if err == nil {
+		t.Fatal("expected needs-review handoff failure when reviewer assignment fails")
+	}
+	if !strings.Contains(err.Error(), "assignment failed") {
+		t.Fatalf("expected reviewer assignment error, got %v", err)
+	}
+	if !containsCall(calls, "pr ready 87 --repo owner/repo") {
+		t.Fatalf("expected pr ready before reviewer assignment, got %v", calls)
+	}
+	if containsCall(calls, "issue edit 42") {
+		t.Fatalf("needs-review handoff should not advance issue state when reviewer assignment fails, got %v", calls)
+	}
+}
+
 // TestPhaseDecideIteratesSetsNextPhaseDevelop tests the decide phase with ITERATE verdict.
 // TestRunFromReviewReturnsAfterReview verifies that runFromReview returns
 // after the review phase without chaining to decide or finalize.

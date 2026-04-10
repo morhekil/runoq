@@ -1394,8 +1394,6 @@ func TestHandleApprovedAdjustmentFailsOnModifyWithoutTarget(t *testing.T) {
 }
 
 func TestHandleBootstrapUsesConfiguredPlanningMaxRounds(t *testing.T) {
-	t.Parallel()
-
 	runner := &tickRunner{
 		cfg: TickConfig{
 			Repo:              "owner/repo",
@@ -1459,8 +1457,6 @@ func TestHandleBootstrapUsesConfiguredPlanningMaxRounds(t *testing.T) {
 }
 
 func TestHandlePlanningDispatchUsesConfiguredPlanningMaxRounds(t *testing.T) {
-	t.Parallel()
-
 	runner := &tickRunner{
 		cfg: TickConfig{
 			Repo:              "owner/repo",
@@ -1513,6 +1509,68 @@ func TestHandlePlanningDispatchUsesConfiguredPlanningMaxRounds(t *testing.T) {
 	}
 	if gotMaxRounds != 9 {
 		t.Fatalf("dispatch MaxRounds = %d, want 9", gotMaxRounds)
+	}
+}
+
+func TestHandleBootstrapFailsWhenPlanningIssueAssignmentFails(t *testing.T) {
+	var stdout bytes.Buffer
+	runner := &tickRunner{
+		cfg: TickConfig{
+			Repo:              "owner/repo",
+			PlanFile:          "docs/plan.md",
+			RunoqRoot:         t.TempDir(),
+			ReadyLabel:        "runoq:ready",
+			InProgressLabel:   "runoq:in-progress",
+			DoneLabel:         "runoq:done",
+			NeedsReviewLabel:  "runoq:needs-human-review",
+			BlockedLabel:      "runoq:blocked",
+			MaxPlanningRounds: 7,
+			Stdout:            &stdout,
+			Stderr:            io.Discard,
+		},
+	}
+
+	previous := runPlanningDispatch
+	t.Cleanup(func() {
+		runPlanningDispatch = previous
+	})
+
+	runPlanningDispatch = func(_ context.Context, cfg planning.DispatchConfig) (planning.DispatchResult, error) {
+		return planning.DispatchResult{FormattedBody: "<!-- runoq:payload:plan-proposal -->\n"}, nil
+	}
+
+	runner.cfg.ExecCommand = func(_ context.Context, req shell.CommandRequest) error {
+		args := strings.Join(req.Args, " ")
+		switch {
+		case strings.Contains(args, "api user --jq .login"):
+			_, _ = io.WriteString(req.Stdout, "operator\n")
+		case strings.Contains(args, "api repos/owner/repo/issues/") && strings.Contains(args, "--jq .node_id"):
+			_, _ = io.WriteString(req.Stdout, "NODE_ID\n")
+		case strings.Contains(args, "api repos/owner/repo/issues/") && strings.Contains(args, "--jq .id"):
+			_, _ = io.WriteString(req.Stdout, "1\n")
+		case strings.Contains(args, "api repos/owner/repo/issues/") && strings.Contains(args, "/sub_issues") && strings.Contains(args, "--method POST"):
+			return nil
+		case strings.Contains(args, "api graphql"):
+			return nil
+		case strings.Contains(args, "issue edit 1") && strings.Contains(args, "--add-assignee"):
+			return errors.New("assignment failed")
+		case strings.Contains(args, "issue view") && strings.Contains(args, "--jq .body //"):
+			_, _ = io.WriteString(req.Stdout, "")
+		case strings.Contains(args, "issue create"):
+			_, _ = io.WriteString(req.Stdout, "https://example.test/issues/1")
+		case strings.Contains(args, "issue edit"), strings.Contains(args, "issue comment"), strings.Contains(args, "issue view"):
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s %s", req.Name, args)
+		}
+		return nil
+	}
+
+	if result := runner.handleBootstrap(t.Context()); result != 1 {
+		t.Fatalf("handleBootstrap = %d, want 1", result)
+	}
+	if strings.Contains(stdout.String(), "Created planning milestone") {
+		t.Fatalf("expected bootstrap to fail close before success output, got %q", stdout.String())
 	}
 }
 

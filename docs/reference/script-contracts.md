@@ -209,7 +209,7 @@ Primary callers: `run.sh`, `mentions.sh`, skills, tests.
 | `create` | `<repo> <branch> <issue-number> <title>` | `{ url, number }` | creates a draft PR from `templates/pr-template.md` |
 | `comment` | `<repo> <pr-number> <comment-body-file>` | `{ commented: true, pr }` | posts a PR comment using the file body |
 | `update-summary` | `<repo> <pr-number> <summary-file>` | `{ updated: true, pr }` | replaces only the `runoq:summary` and `runoq:attention` marker blocks in the PR body |
-| `finalize` | `<repo> <pr-number> <verdict> [--reviewer username]` | `{ pr, verdict, reviewer }` | `auto-merge`: ready PR then enable squash auto-merge; `needs-review`: ready PR and optionally assign reviewer/assignee |
+| `finalize` | `<repo> <pr-number> <verdict> [--reviewer username]` | `{ pr, verdict, reviewer }` | `auto-merge`: ready PR then enable squash auto-merge; `needs-review`: ready PR and, when `--reviewer` is provided, assign reviewer/assignee or fail |
 | `line-comment` | `<repo> <pr-number> <file> <start-line> <end-line> <body>` | `{ path, start_line, end_line }` | creates a GitHub review comment |
 | `read-actionable` | `<repo> <pr-number> <agent-handle>` | JSON array of actionable comments; issue comments include `id`, `author`, `body`, `html_url`, `comment_type`, review comments include `path` too | reads PR issue comments and review comments |
 | `poll-mentions` | `<repo> <agent-handle> [--since timestamp]` | JSON array of unprocessed mentions with `comment_id`, `author`, `body`, `created_at`, `context_type`, `pr_number`, `issue_number` | reads open issues and issue comments; skips already-recorded mention IDs |
