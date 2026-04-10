@@ -37,8 +37,18 @@ No epics exist yet, so the tick bootstraps the planning lane.
 A planning or adjustment review issue is open, unapproved, and has unanswered human comments.
 
 - [ ] The tick responds to the unanswered comments before doing other work
+- [ ] A responder `change-request` reply rewrites the proposal payload/body on the review issue
+- [ ] A responder `approve` reply adds the configured plan-approved label to the review issue
 - [ ] The tick exits after responding instead of continuing to implementation dispatch
 - [ ] Terminal output reports `Responded to comments on #<n>`
+
+### Scenario: Pending planning review comment handling failure
+
+Comment handling begins for a planning or adjustment review, but reacting, replying, or applying a side effect fails.
+
+- [ ] The tick exits with an error instead of reporting the comments as handled
+- [ ] The review issue remains open/unapproved
+- [ ] Terminal output reports `Comment handler failed for #<n>`
 
 ### Scenario: Pending planning review awaiting human decision
 
@@ -72,17 +82,34 @@ An approved planning review applies task issues under a milestone epic.
 - [ ] The tick creates task issues under the reviewed epic
 - [ ] Dependency metadata from the proposal is materialized onto the created tasks
 - [ ] The approved review issue is closed/moved to done
-- [ ] The parent planning issue is closed/moved to done
+- [ ] The parent milestone epic remains open
+
+### Scenario: Approved milestone task-planning fails closed on apply error
+
+Task creation or dependency linking fails while applying an approved milestone-scoped planning review.
+
+- [ ] The tick exits with an error instead of reporting success
+- [ ] The review issue remains open/unapproved
+- [ ] No partial-success terminal output claims the review was applied
+- [ ] Forward references in dependency keys are linked correctly when all task creation succeeds
 
 ### Scenario: Approved adjustment review
 
 An approved adjustment review applies milestone adjustments and advances planning.
 
 - [ ] The approved adjustment review issue is closed/moved to done
-- [ ] The parent milestone review issue is closed/moved to done
+- [ ] The parent milestone epic is closed/moved to done
 - [ ] The tick refreshes issue state after applying adjustments
 - [ ] The tick seeds a planning issue for the next open epic when one does not already exist
 - [ ] Terminal output reports `Applied adjustments from #<n>`
+
+### Scenario: Approved adjustment review rejects unsupported adjustment types
+
+An approved adjustment review contains an unsupported adjustment type.
+
+- [ ] The tick exits with an error instead of silently ignoring the adjustment
+- [ ] The review issue remains open/unapproved
+- [ ] The parent milestone epic remains open
 
 ### Scenario: Milestone completion produces adjustment review
 
@@ -317,6 +344,27 @@ Same as happy path but the fixture reviewer returns `ITERATE` on first review.
 
 - [ ] Same finalize checks as happy path tick 6
 
+### Scenario: Review FAIL verdict path
+
+The reviewer returns a valid `FAIL` verdict.
+
+**Review tick**
+
+- [ ] PR has a review comment with `FAIL` verdict, reviewer attribution, and a scorecard
+- [ ] The tick still stops at `REVIEW`; it does not decide or finalize in the same tick
+
+**Decide tick**
+
+- [ ] The `DECIDE` audit comment records a `finalize-needs-review` decision
+- [ ] The issue remains `runoq:in-progress` until the later finalize tick
+
+**Finalize tick**
+
+- [ ] PR is marked ready for review / human handoff
+- [ ] Issue moves to `runoq:needs-human-review`
+- [ ] Issue is not closed
+- [ ] PR body final status records the `FAIL` verdict
+
 ### Scenario: Needs-review path
 
 Two observable entry points exist:
@@ -543,6 +591,7 @@ An unprocessed non-audit PR comment exists while the issue is in-progress.
 
 - [ ] Bot detects unprocessed comment (no +1 reaction, not a bot comment)
 - [ ] Bot posts reply with agent attribution
+- [ ] The acknowledgement reply carries a `runoq:bot` marker so it is excluded from future RESPOND scans
 - [ ] Bot adds +1 reaction to original comment (marks as processed)
 - [ ] Bot-generated comments (with `runoq:bot` marker) are excluded from processing
 - [ ] `RESPOND` may preempt any PR-backed implementation tick (`DEVELOP`, `VERIFY`, `REVIEW`, `DECIDE`, `FINALIZE`) and the interrupted phase does not advance in that tick
@@ -668,15 +717,21 @@ Minimum observable scenarios:
 - [ ] Bootstrap path with no existing epics creates the planning epic and planning issue, then posts a proposal
 - [ ] A pending planning issue with no proposal payload yet is treated as needing planning dispatch rather than awaiting human decision
 - [ ] Pending planning review with unresolved human comments responds to those comments and does not advance in the same tick
+- [ ] Pending planning review comment `change-request` responses rewrite the proposal body, and `approve` responses add the plan-approved label
+- [ ] Comment-handling failures during pending review are surfaced as tick failures rather than reported as success
 - [ ] Planning review can remain in an awaiting-human-decision state across ticks without materializing milestones early
 - [ ] Approved top-level planning review materializes milestone issues, closes the review issue, and closes its parent `Project Planning` issue
 - [ ] Approved milestone-scoped task-planning review materializes task issues and closes the review issue without closing the milestone epic
+- [ ] Approved milestone-scoped task-planning fails closed if task creation or dependency linking fails
 - [ ] Approved top-level planning review seeds a planning issue only for the first newly created milestone
 - [ ] Proposal posting for that seeded task-planning issue happens on a later planning-dispatch tick, not during the approval-application tick
 - [ ] Approved adjustment review applies accepted adjustments, closes the adjustment review issue, and closes its parent milestone epic
+- [ ] Approved adjustment review fails closed on unsupported adjustment types
 - [ ] Approved adjustment review seeds the next planning issue only when the next open milestone does not already have a planning child
 - [ ] Approved adjustment terminal output reports that adjustments were applied, rather than always claiming new issues were created
 - [ ] When a milestone's child tasks drain, the tick runs milestone review and creates an adjustment review issue
+- [ ] RESPOND acknowledgement comments are bot-marked and therefore excluded from later comment scans
+- [ ] A valid reviewer `FAIL` verdict routes through `DECIDE` into needs-review finalization
 - [ ] When all milestones are complete, the terminal output reports that all milestones are complete
 
 ---
