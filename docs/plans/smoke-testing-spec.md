@@ -1,6 +1,8 @@
 # Smoke Testing Specification
 
-This is a guidance document for the design and implementation of smoke tests for the runoq system. It defines the scope, philosophy, and specific scenarios that the smoke tests should cover to validate the externally observable behavior of the system.
+This is a forward-looking guidance document for the design and implementation of smoke tests for the runoq system. It defines the scope, philosophy, and specific scenarios that future smoke suites should cover to validate the externally observable behavior of the current system.
+
+The runtime behavior described here is intended to come from the implemented system, even where the corresponding smoke harness, fixture lane, helper script, or test repo fixture has not yet been built. In other words: this document is a smoke-spec contract for future implementation, not a claim that every lane described below already exists as runnable smoke infrastructure in this repository.
 
 ## Philosophy
 
@@ -69,6 +71,8 @@ Operator provides `TargetIssue`, so the tick dispatches that specific implementa
 - [ ] Terminal output reports `Issue #<n> — phase: <PHASE>` for the targeted task
 - [ ] Queue walking is bypassed; the tick does not require epic or milestone selection to dispatch the targeted task
 - [ ] A closed targeted task reports `Issue #<n> already complete` and exits without reopening or redispatching it
+- [ ] A non-existent targeted issue reports `target issue #<n> not found` and exits with an error
+- [ ] A targeted epic/planning/adjustment issue reports `target issue #<n> is not an implementation task` and exits with an error
 
 ### Scenario: INIT dry-run mode
 
@@ -326,6 +330,18 @@ Fixture reviewer returns `PASS` but finalize routes to needs-review due to confi
 - [ ] Terminal output reports a finalize failure
 - [ ] The tick exits with an error instead of silently completing the issue
 
+**Issue status update fails** — PR finalization succeeds, but the issue label/status transition fails:
+
+- [ ] The tick exits with an error instead of returning `DONE`
+- [ ] The issue does not silently appear complete in terminal output
+- [ ] The failure is surfaced as an issue-status/finalize error
+
+**PR body final status update fails** — final audit comment may exist, but the PR body cannot be updated:
+
+- [ ] The tick exits with an error instead of returning `DONE`
+- [ ] The PR body is not allowed to silently miss the `## Final Status` table while the issue is reported complete
+- [ ] Terminal/log output surfaces the PR body update failure
+
 ### Scenario: Verification failure drives iteration across ticks
 
 Verification fails on the first `VERIFY` tick. A later round succeeds after `DECIDE(iterate)` sends the issue back through `DEVELOP`.
@@ -485,6 +501,23 @@ An issue already has a linked PR, but the PR comments do not contain a structure
 - [ ] The issue receives a skip comment explaining that an open PR already tracks the branch
 - [ ] Queue-mode terminal output reports the issue as skipped
 
+### Scenario: Recoverable work exists but PR is missing
+
+Recovered or legacy state reaches `DEVELOP` with a branch but no PR number.
+
+- [ ] The tick creates a draft PR for the existing branch instead of restarting from `INIT`
+- [ ] The PR receives a state-bearing audit comment using the current phase marker, not a legacy pseudo-phase
+- [ ] The resulting state includes the new `pr_number`
+- [ ] If the audit comment cannot be posted, the tick exits with an error instead of silently proceeding with unpersisted recovery state
+
+### Scenario: Audit-state persistence failures
+
+GitHub audit comments are the recoverable state carrier for implementation ticks.
+
+- [ ] If an `INIT`, `DEVELOP`, `VERIFY`, `REVIEW`, `DECIDE`, or recovery/backfill audit comment cannot be posted, the tick exits with an error
+- [ ] The runtime does not report success for a phase whose state could not be durably persisted to GitHub
+- [ ] Durable needs-review handoff comments are treated the same way: a failed handoff comment is an error, not a warning
+
 ### Scenario: All tasks blocked
 
 An epic has open child tasks, but none are dispatchable because dependencies or cycles block every candidate.
@@ -493,6 +526,17 @@ An epic has open child tasks, but none are dispatchable because dependencies or 
 - [ ] A dependency cycle is reported when one exists
 - [ ] Terminal output reports `All tasks blocked`
 - [ ] The tick returns a waiting result rather than dispatching work
+
+### Scenario: Loop driver behavior
+
+`runoq loop` is operator-visible behavior and should be validated separately from single-tick semantics.
+
+- [ ] Exit code `0` from `tick` causes the next loop iteration to start immediately without sleeping
+- [ ] Exit code `2` from `tick` increments the wait-cycle counter and sleeps for the configured backoff duration
+- [ ] `--max-wait-cycles <n>` stops the loop after `n` consecutive waiting ticks with terminal output explaining why it stopped
+- [ ] Exit code `3` from `tick` stops the loop cleanly because all work is complete
+- [ ] In targeted-issue mode, the loop exits once that issue reports complete
+- [ ] Invalid `--issue`, `--backoff`, and `--max-wait-cycles` values are rejected before the loop starts
 
 ### Scenario: Fixture Smoke — Planning Flow
 
