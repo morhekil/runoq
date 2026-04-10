@@ -37,9 +37,11 @@ No epics exist yet, so the tick bootstraps the planning lane.
 A planning or adjustment review issue is open, unapproved, and has unanswered human comments.
 
 - [ ] The tick responds to the unanswered comments before doing other work
+- [ ] Unanswered human comments receive an initial pickup reaction before the responder side effects run
 - [ ] A responder `question` reply posts a bot-marked answer without mutating proposal state or approval labels
 - [ ] A responder `change-request` reply rewrites the proposal payload/body on the review issue
 - [ ] A responder `approve` reply adds the configured plan-approved label to the review issue
+- [ ] Successfully handled human comments receive a final reaction marking them responded
 - [ ] The tick exits after responding instead of continuing to implementation dispatch
 - [ ] Terminal output reports `Responded to comments on #<n>`
 
@@ -448,6 +450,15 @@ Fixture simulates worktree creation or branch push failure during INIT.
 - [ ] Issue reverts to `runoq:ready` label (not `runoq:in-progress`)
 - [ ] No PR created
 - [ ] No worktree left behind
+
+### Scenario: INIT state persistence fails after PR creation
+
+`INIT` gets as far as creating the draft PR, but posting the durable init audit comment fails.
+
+- [ ] The tick exits with an error instead of reporting `INIT` success
+- [ ] The draft PR still exists, but no recoverable `<!-- runoq:state:... -->` comment was posted
+- [ ] The issue is still left in its pre-failure in-progress state
+- [ ] The later recovery path is the existing `PR exists but no recoverable state comment` behavior, rather than silent INIT replay
 
 ### Scenario: INIT eligibility rejection paths
 
