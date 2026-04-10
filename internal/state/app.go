@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -327,26 +328,34 @@ func (a *App) runValidatePayload(ctx context.Context, args []string) int {
 		return 1
 	}
 
-	worktree := args[0]
-	baseSHA := args[1]
-	source := args[2]
-
-	truth, err := a.groundTruth(ctx, worktree, baseSHA)
+	output, err := ValidatePayloadJSON(ctx, a.execCommand, a.cwd, args[0], args[1], args[2])
 	if err != nil {
 		return shell.Failf(a.stderr, "Failed to collect git ground truth: %v", err)
 	}
+	if _, err := a.stdout.Write(output); err != nil {
+		return shell.Failf(a.stderr, "Failed to write output: %v", err)
+	}
+	return 0
+}
+
+func ValidatePayloadJSON(ctx context.Context, exec shell.CommandExecutor, cwd string, worktree string, baseSHA string, source string) ([]byte, error) {
+	app := New(nil, nil, cwd, nil, io.Discard, io.Discard)
+	app.SetCommandExecutor(exec)
 
 	block, err := extractPayloadBlock(source)
-	threadID, threadErr := extractThreadID(source)
-	if threadErr != nil {
-		threadID = ""
+	threadID, _ := extractThreadID(source)
+
+	truth, err := app.groundTruth(ctx, worktree, baseSHA)
+	if err != nil {
+		return nil, err
 	}
+
 	if err != nil || block == "" {
 		synthesized := synthesizePayload(truth)
 		if threadID != "" {
 			synthesized.ThreadID = threadID
 		}
-		return writeJSON(a.stdout, a.stderr, synthesized)
+		return marshalPayloadJSON(synthesized)
 	}
 
 	var payload map[string]any
@@ -355,14 +364,25 @@ func (a *App) runValidatePayload(ctx context.Context, args []string) int {
 		if threadID != "" {
 			synthesized.ThreadID = threadID
 		}
-		return writeJSON(a.stdout, a.stderr, synthesized)
+		return marshalPayloadJSON(synthesized)
 	}
 
 	normalized := normalizePayload(payload, truth)
 	if threadID != "" {
 		normalized.ThreadID = threadID
 	}
-	return writeJSON(a.stdout, a.stderr, normalized)
+	return marshalPayloadJSON(normalized)
+}
+
+func marshalPayloadJSON(value any) ([]byte, error) {
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(value); err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
 }
 
 func (a *App) groundTruth(ctx context.Context, worktree string, baseSHA string) (groundTruth, error) {

@@ -14,6 +14,7 @@ import (
 
 	"github.com/saruman/runoq/internal/gitops"
 	"github.com/saruman/runoq/internal/shell"
+	"github.com/saruman/runoq/internal/state"
 )
 
 type App struct {
@@ -23,6 +24,8 @@ type App struct {
 	stdout      io.Writer
 	stderr      io.Writer
 	execCommand shell.CommandExecutor
+
+	validatePayloadFn func(ctx context.Context, worktree string, baseline string, lastMsgFile string, payloadFile string) bool
 }
 
 const usageText = `Usage:
@@ -491,18 +494,15 @@ func (a *App) extractTokens(logPath string) int {
 // validatePayload calls state.sh validate-payload and writes the result to payloadFile.
 // Returns true if the payload schema is valid.
 func (a *App) validatePayload(ctx context.Context, worktree, baseline, lastMsgFile, payloadFile string) bool {
+	if a.validatePayloadFn != nil {
+		return a.validatePayloadFn(ctx, worktree, baseline, lastMsgFile, payloadFile)
+	}
+
 	root := a.runoqRoot()
 	if root == "" {
 		return false
 	}
-	stateScript := filepath.Join(root, "scripts", "state.sh")
-
-	out, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
-		Name: stateScript,
-		Args: []string{"validate-payload", worktree, baseline, lastMsgFile},
-		Dir:  a.cwd,
-		Env:  a.env,
-	})
+	out, err := state.ValidatePayloadJSON(ctx, a.execCommand, a.cwd, worktree, baseline, lastMsgFile)
 	if err != nil {
 		return false
 	}

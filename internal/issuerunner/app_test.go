@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -36,6 +37,20 @@ func mustWriteFile(t *testing.T, path string, data []byte) {
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func codexPayloadOutput(status string, testsRun bool, testsPassed bool, testSummary string, buildPassed bool, blockers []string, notes string) string {
+	payload := map[string]any{
+		"status":       status,
+		"tests_run":    testsRun,
+		"tests_passed": testsPassed,
+		"test_summary": testSummary,
+		"build_passed": buildPassed,
+		"blockers":     blockers,
+		"notes":        notes,
+	}
+	data, _ := json.Marshal(payload)
+	return "<!-- runoq:payload:codex-return -->\n```json\n" + string(data) + "\n```\n"
 }
 
 func newTestApp(t *testing.T, args []string) *App {
@@ -210,6 +225,54 @@ func TestPayloadDefaults(t *testing.T) {
 	}
 }
 
+func TestValidatePayloadUsesStatePackageWithoutScript(t *testing.T) {
+	dir := t.TempDir()
+	worktree := filepath.Join(dir, "wt")
+	mustMkdirAll(t, worktree)
+	runoqRoot := filepath.Join(dir, "runoq")
+	mustMkdirAll(t, runoqRoot)
+
+	lastMsgFile := filepath.Join(dir, "last-message.md")
+	mustWriteFile(t, lastMsgFile, []byte(codexPayloadOutput("completed", true, true, "ok", true, []string{}, "")))
+	payloadFile := filepath.Join(dir, "payload.json")
+
+	var calls []string
+	app := New(nil, []string{"RUNOQ_ROOT=" + runoqRoot}, dir, io.Discard, io.Discard)
+	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
+		calls = append(calls, req.Name+" "+strings.Join(req.Args, " "))
+		if req.Name != "git" {
+			t.Fatalf("unexpected command: %s %v", req.Name, req.Args)
+		}
+
+		switch {
+		case slices.Contains(req.Args, "log"):
+			mustWriteReqStdout(t, req, "abc123 first commit\n")
+		case slices.Contains(req.Args, "diff"):
+			mustWriteReqStdout(t, req, "")
+		default:
+			mustWriteReqStdout(t, req, "abc123\n")
+		}
+		return nil
+	})
+
+	if ok := app.validatePayload(t.Context(), worktree, "base", lastMsgFile, payloadFile); !ok {
+		t.Fatal("validatePayload returned false, want true")
+	}
+
+	data, err := os.ReadFile(payloadFile)
+	if err != nil {
+		t.Fatalf("read payload file: %v", err)
+	}
+	if !strings.Contains(string(data), `"payload_schema_valid": true`) {
+		t.Fatalf("expected normalized payload output, got %s", data)
+	}
+	for _, call := range calls {
+		if strings.Contains(call, "state.sh") {
+			t.Fatalf("did not expect shell script call, got %q", call)
+		}
+	}
+}
+
 // fakeExecutor routes command calls to handler functions.
 type fakeExecutor struct {
 	t        *testing.T
@@ -379,15 +442,9 @@ func TestDevelopmentLoop_PersistsVerificationPayload(t *testing.T) {
 			}
 			for i, arg := range req.Args {
 				if arg == "-o" && i+1 < len(req.Args) {
-					mustWriteFile(t, req.Args[i+1], []byte("fake codex output"))
+					mustWriteFile(t, req.Args[i+1], []byte(codexPayloadOutput("completed", true, true, "ok", true, []string{}, "")))
 					break
 				}
-			}
-			return nil
-		},
-		"state.sh": func(req shell.CommandRequest) error {
-			if req.Stdout != nil {
-				mustWriteReqStdout(t, req, `{"payload_schema_valid":true}`)
 			}
 			return nil
 		},
@@ -687,13 +744,6 @@ func TestDevelopmentLoop_SchemaRetryUsesResumeWithSameThreadID(t *testing.T) {
 			}
 			return nil
 		},
-		"state.sh": func(req shell.CommandRequest) error {
-			validateCount++
-			if req.Stdout != nil {
-				mustWriteReqStdout(t, req, `{"payload_schema_valid":false}`)
-			}
-			return nil
-		},
 	}}
 
 	payloadFile := writePayloadFile(t, dir, inputPayload{
@@ -713,6 +763,11 @@ func TestDevelopmentLoop_SchemaRetryUsesResumeWithSameThreadID(t *testing.T) {
 		[]string{"RUNOQ_ROOT=" + runoqRoot, "RUNOQ_CODEX_BIN=codex"},
 		dir, &stdout, &stderr)
 	app.SetCommandExecutor(fe.exec)
+	app.validatePayloadFn = func(_ context.Context, _ string, _ string, _ string, payloadFile string) bool {
+		validateCount++
+		mustWriteFile(t, payloadFile, []byte("{\n  \"payload_schema_valid\": false\n}\n"))
+		return false
+	}
 
 	code := app.Run(t.Context())
 	if code != 0 {
