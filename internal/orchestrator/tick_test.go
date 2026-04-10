@@ -1191,9 +1191,14 @@ func TestHandlePendingReviewFailsWhenCommentHandlingFails(t *testing.T) {
 
 	runner := &tickRunner{
 		cfg: TickConfig{
-			Repo:   "owner/repo",
-			Stdout: io.Discard,
-			Stderr: io.Discard,
+			Repo:             "owner/repo",
+			ReadyLabel:       "runoq:ready",
+			InProgressLabel:  "runoq:in-progress",
+			DoneLabel:        "runoq:done",
+			NeedsReviewLabel: "runoq:needs-review",
+			BlockedLabel:     "runoq:blocked",
+			Stdout:           io.Discard,
+			Stderr:           io.Discard,
 		},
 	}
 	runner.cfg.ExecCommand = func(_ context.Context, req shell.CommandRequest) error {
@@ -1254,6 +1259,38 @@ func TestHandleApprovedAdjustmentFailsOnUnsupportedType(t *testing.T) {
 	}
 	if closed {
 		t.Fatal("expected review and parent to remain open on unsupported adjustment type")
+	}
+}
+
+func TestHandleApprovedAdjustmentFailsOnModifyWithoutTarget(t *testing.T) {
+	t.Parallel()
+
+	reviewView := "{\"body\":\"## Adjustment Review\\n\\n```json\\n{\\\"proposed_adjustments\\\":[{\\\"type\\\":\\\"modify\\\",\\\"description\\\":\\\"Tighten milestone scope\\\"}]}\\n```\"}"
+
+	var closed bool
+	runner := &tickRunner{
+		cfg: TickConfig{
+			Repo:   "owner/repo",
+			Stdout: io.Discard,
+			Stderr: io.Discard,
+		},
+	}
+	runner.cfg.ExecCommand = func(_ context.Context, req shell.CommandRequest) error {
+		args := strings.Join(req.Args, " ")
+		if strings.Contains(args, "issue edit 88") || strings.Contains(args, "issue close 88") || strings.Contains(args, "issue edit 9") || strings.Contains(args, "issue close 9") {
+			closed = true
+			return nil
+		}
+		t.Fatalf("unexpected command: %s %s", req.Name, args)
+		return nil
+	}
+
+	result := runner.handleApprovedAdjustment(t.Context(), reviewView, 88, "9", comments.ItemSelection{})
+	if result != 1 {
+		t.Fatalf("handleApprovedAdjustment = %d, want 1", result)
+	}
+	if closed {
+		t.Fatal("expected review and parent to remain open when modify adjustment is missing target milestone")
 	}
 }
 

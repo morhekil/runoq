@@ -37,6 +37,7 @@ No epics exist yet, so the tick bootstraps the planning lane.
 A planning or adjustment review issue is open, unapproved, and has unanswered human comments.
 
 - [ ] The tick responds to the unanswered comments before doing other work
+- [ ] A responder `question` reply posts a bot-marked answer without mutating proposal state or approval labels
 - [ ] A responder `change-request` reply rewrites the proposal payload/body on the review issue
 - [ ] A responder `approve` reply adds the configured plan-approved label to the review issue
 - [ ] The tick exits after responding instead of continuing to implementation dispatch
@@ -66,11 +67,21 @@ A planning review issue is pending, but the proposal payload has not been posted
 - [ ] The tick continues to the normal planning dispatch path for that planning issue
 - [ ] Terminal output ultimately reflects proposal posting rather than human-decision waiting
 
+### Scenario: Planning dispatch reaches max review rounds
+
+Planning decomposition does not get both reviewers to `PASS` before the configured round limit.
+
+- [ ] The tick still posts the latest proposal payload/body instead of failing the planning lane
+- [ ] The proposal body includes a warning that max review rounds were reached
+- [ ] The planning review remains pending for human decision after proposal posting
+- [ ] Terminal output still reports proposal posting rather than silently dropping the warning state
+
 ### Scenario: Approved planning review for the project-planning epic
 
 An approved planning review applies milestone epics.
 
 - [ ] The tick creates the selected milestone epics
+- [ ] If human selection comments approve only a subset, only the selected milestone items are materialized
 - [ ] The tick seeds a planning issue for the first open milestone epic when one does not already exist
 - [ ] The approved review issue is closed/moved to done
 - [ ] The parent `Project Planning` issue is closed/moved to done
@@ -80,6 +91,7 @@ An approved planning review applies milestone epics.
 An approved planning review applies task issues under a milestone epic.
 
 - [ ] The tick creates task issues under the reviewed epic
+- [ ] If human selection comments approve only a subset, only the selected task items are materialized
 - [ ] Dependency metadata from the proposal is materialized onto the created tasks
 - [ ] The approved review issue is closed/moved to done
 - [ ] The parent milestone epic remains open
@@ -97,6 +109,7 @@ Task creation or dependency linking fails while applying an approved milestone-s
 
 An approved adjustment review applies milestone adjustments and advances planning.
 
+- [ ] If human selection comments approve only a subset, only the selected adjustments are applied
 - [ ] The approved adjustment review issue is closed/moved to done
 - [ ] The parent milestone epic is closed/moved to done
 - [ ] The tick refreshes issue state after applying adjustments
@@ -110,6 +123,15 @@ An approved adjustment review contains an unsupported adjustment type.
 - [ ] The tick exits with an error instead of silently ignoring the adjustment
 - [ ] The review issue remains open/unapproved
 - [ ] The parent milestone epic remains open
+
+### Scenario: Approved adjustment review rejects malformed supported adjustments
+
+An approved adjustment review contains a supported adjustment type but omits required fields for applying it.
+
+- [ ] The tick exits with an error instead of silently treating the adjustment as applied
+- [ ] The review issue remains open/unapproved
+- [ ] The parent milestone epic remains open
+- [ ] No terminal output claims the adjustments were applied
 
 ### Scenario: Milestone completion produces adjustment review
 
@@ -717,16 +739,20 @@ Minimum observable scenarios:
 - [ ] Bootstrap path with no existing epics creates the planning epic and planning issue, then posts a proposal
 - [ ] A pending planning issue with no proposal payload yet is treated as needing planning dispatch rather than awaiting human decision
 - [ ] Pending planning review with unresolved human comments responds to those comments and does not advance in the same tick
+- [ ] Reply-only planning comment responses are bot-marked and do not mutate approval labels or proposal content
 - [ ] Pending planning review comment `change-request` responses rewrite the proposal body, and `approve` responses add the plan-approved label
 - [ ] Comment-handling failures during pending review are surfaced as tick failures rather than reported as success
 - [ ] Planning review can remain in an awaiting-human-decision state across ticks without materializing milestones early
+- [ ] Planning dispatch can hit max review rounds, still post the latest proposal, and surface a warning in the proposal body
 - [ ] Approved top-level planning review materializes milestone issues, closes the review issue, and closes its parent `Project Planning` issue
 - [ ] Approved milestone-scoped task-planning review materializes task issues and closes the review issue without closing the milestone epic
+- [ ] Approved planning and adjustment reviews honor partial human item selection when materializing only a subset of proposed items
 - [ ] Approved milestone-scoped task-planning fails closed if task creation or dependency linking fails
 - [ ] Approved top-level planning review seeds a planning issue only for the first newly created milestone
 - [ ] Proposal posting for that seeded task-planning issue happens on a later planning-dispatch tick, not during the approval-application tick
 - [ ] Approved adjustment review applies accepted adjustments, closes the adjustment review issue, and closes its parent milestone epic
 - [ ] Approved adjustment review fails closed on unsupported adjustment types
+- [ ] Approved adjustment review also fails closed when a supported adjustment payload is malformed and cannot be applied
 - [ ] Approved adjustment review seeds the next planning issue only when the next open milestone does not already have a planning child
 - [ ] Approved adjustment terminal output reports that adjustments were applied, rather than always claiming new issues were created
 - [ ] When a milestone's child tasks drain, the tick runs milestone review and creates an adjustment review issue

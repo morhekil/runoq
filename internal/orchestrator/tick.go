@@ -616,15 +616,16 @@ func (t *tickRunner) handleApprovedAdjustment(ctx context.Context, reviewView st
 	for _, adj := range filtered {
 		switch adj.Type {
 		case "modify":
-			if adj.TargetMilestoneNumber != nil {
-				t.info(fmt.Sprintf("modifying issue #%d", *adj.TargetMilestoneNumber))
-				target := fmt.Sprintf("%d", *adj.TargetMilestoneNumber)
-				targetIssue := t.findIssueByNumber(*adj.TargetMilestoneNumber)
-				if targetIssue != nil {
-					newBody := targetIssue.Body + "\n\n" + adj.Description
-					if err := t.ghEditBody(ctx, target, newBody); err != nil {
-						return t.fail("update issue #%s body: %v", target, err)
-					}
+			if adj.TargetMilestoneNumber == nil {
+				return t.fail("modify adjustment missing target milestone number")
+			}
+			t.info(fmt.Sprintf("modifying issue #%d", *adj.TargetMilestoneNumber))
+			target := fmt.Sprintf("%d", *adj.TargetMilestoneNumber)
+			targetIssue := t.findIssueByNumber(*adj.TargetMilestoneNumber)
+			if targetIssue != nil {
+				newBody := targetIssue.Body + "\n\n" + adj.Description
+				if err := t.ghEditBody(ctx, target, newBody); err != nil {
+					return t.fail("update issue #%s body: %v", target, err)
 				}
 			}
 		case "new_milestone":

@@ -2340,6 +2340,53 @@ func TestPhaseRespondAcknowledgesComments(t *testing.T) {
 	}
 }
 
+func TestPhaseRespondUsesGenericAcknowledgementText(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var commentBody string
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, io.Discard)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		issueNumber: 42,
+		issueTitle:  "Implement queue",
+		ghHandler: func(ghArgs string, req shell.CommandRequest) (bool, error) {
+			if strings.Contains(ghArgs, "api") && strings.Contains(ghArgs, "issues/87/comments") && !strings.Contains(ghArgs, "reactions") {
+				_, _ = io.WriteString(req.Stdout, `[
+					{"id": 300, "body": "Please add error handling", "user": {"login": "human1"}, "created_at": "2026-01-01T00:00:00Z", "reactions": {"+1": 0}}
+				]`)
+				return true, nil
+			}
+			if strings.Contains(ghArgs, "pr comment 87") && strings.Contains(ghArgs, "--body-file") {
+				for i, arg := range req.Args {
+					if arg == "--body-file" && i+1 < len(req.Args) {
+						data, _ := os.ReadFile(req.Args[i+1])
+						commentBody = string(data)
+						break
+					}
+				}
+				return true, nil
+			}
+			if strings.Contains(ghArgs, "api") && strings.Contains(ghArgs, "reactions") && strings.Contains(ghArgs, "+1") {
+				return true, nil
+			}
+			return false, nil
+		},
+	}))
+
+	stateJSON := `{"issue":42,"phase":"FINALIZE","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":87,"round":1}`
+	if _, err := app.phaseRespond(ctx, root, app.env, "owner/repo", 42, stateJSON); err != nil {
+		t.Fatalf("phaseRespond: %v", err)
+	}
+	if strings.Contains(commentBody, "next development round") {
+		t.Fatalf("expected generic acknowledgement text, got %q", commentBody)
+	}
+	if !strings.Contains(commentBody, "next runoq tick") {
+		t.Fatalf("expected generic tick wording in acknowledgement, got %q", commentBody)
+	}
+}
+
 func TestPhaseRespondNoPRSkips(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
