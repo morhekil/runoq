@@ -1,5 +1,7 @@
 # Smoke Testing Specification
 
+This is a guidance document for the design and implementation of smoke tests for the runoq system. It defines the scope, philosophy, and specific scenarios that the smoke tests should cover to validate the externally observable behavior of the system.
+
 ## Philosophy
 
 Smoke tests validate **externally observable behavior** — what the operator sees in the terminal and on GitHub. They don't test internal logic (unit tests do that). They answer: "if I run runoq against a real repo, does it produce the correct GitHub state and terminal output at each step?"
@@ -49,6 +51,14 @@ Before normal queue selection, the tick reconciles stale implementation state ag
 - [ ] A stale issue labeled `runoq:in-progress` with no linked PR is reset to `runoq:ready`
 - [ ] The issue receives a comment explaining that it was returned to the queue because no linked PR exists
 - [ ] The tick performs reconciliation before selecting the next implementation task
+
+### Scenario: In-progress task is resumed before new dispatch
+
+If an epic already contains an implementation task labeled `runoq:in-progress`, the tick resumes that task before considering any ready sibling.
+
+- [ ] The tick resumes the existing in-progress task before selecting from the ready queue
+- [ ] No new ready sibling is dispatched while an in-progress sibling exists
+- [ ] Terminal output identifies the resumed task rather than a newly selected task
 
 ### Scenario: Happy path (6 ticks)
 
@@ -421,7 +431,7 @@ Fixture codex returns a `turn.failed` event with capacity error.
 
 **Retry budget exhausted**
 
-- [ ] After 5 consecutive transient failures, the next transient failure escalates to deterministic needs-review handoff
+- [ ] The 5th consecutive transient failure escalates to deterministic needs-review handoff
 - [ ] PR is marked ready for review
 - [ ] Issue moves to `runoq:needs-human-review`
 - [ ] A durable finalize audit comment explains the transient-failure handoff
@@ -455,6 +465,15 @@ An issue already has a linked PR, but the PR comments do not contain a structure
 - [ ] The issue receives a skip comment explaining that an open PR already tracks the branch
 - [ ] Queue-mode terminal output reports the issue as skipped
 
+### Scenario: All tasks blocked
+
+An epic has open child tasks, but none are dispatchable because dependencies or cycles block every candidate.
+
+- [ ] The tick reports blocked reasons for non-dispatchable tasks
+- [ ] A dependency cycle is reported when one exists
+- [ ] Terminal output reports `All tasks blocked`
+- [ ] The tick returns a waiting result rather than dispatching work
+
 ### Scenario: Fixture Smoke — Planning Flow
 
 Planning smoke is part of the currently implemented externally observable behavior and should not remain undocumented.
@@ -465,7 +484,8 @@ Minimum observable scenarios:
 - [ ] Pending planning review with unresolved human comments responds to those comments and does not advance in the same tick
 - [ ] Planning review can remain in an awaiting-human-decision state across ticks without materializing milestones early
 - [ ] Approved planning review materializes milestone or task issues and closes the review issue
-- [ ] Approved planning review posts task proposals for newly created task-planning issues
+- [ ] Approved top-level planning review seeds a planning issue only for the first newly created milestone
+- [ ] Proposal posting for that seeded task-planning issue happens on a later planning-dispatch tick, not during the approval-application tick
 - [ ] Approved adjustment review applies accepted adjustments, closes the review issue, and seeds the next planning issue when appropriate
 - [ ] When a milestone's child tasks drain, the tick runs milestone review and creates an adjustment review issue
 - [ ] When all milestones are complete, the terminal output reports that all milestones are complete

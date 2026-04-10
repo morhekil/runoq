@@ -18,6 +18,20 @@ import (
 	"github.com/saruman/runoq/internal/worktree"
 )
 
+func codexPayloadOutput(status string, testsRun bool, testsPassed bool, testSummary string, buildPassed bool, blockers []string, notes string) string {
+	payload := map[string]any{
+		"status":       status,
+		"tests_run":    testsRun,
+		"tests_passed": testsPassed,
+		"test_summary": testSummary,
+		"build_passed": buildPassed,
+		"blockers":     blockers,
+		"notes":        notes,
+	}
+	data, _ := json.Marshal(payload)
+	return "<!-- runoq:payload:codex-return -->\n```json\n" + string(data) + "\n```\n"
+}
+
 func TestParseStateFromCommentsExtractsLatest(t *testing.T) {
 	comments := `[
 		{"body": "<!-- runoq:bot:orchestrator:init -->\n<!-- runoq:state:{\"phase\":\"INIT\",\"pr_number\":87} -->\n> Posted by orchestrator"},
@@ -1287,16 +1301,11 @@ func TestResumeFromInitSkipsCriteriaPhase(t *testing.T) {
 				}
 				for i, arg := range req.Args {
 					if arg == "-o" && i+1 < len(req.Args) {
-						if err := os.WriteFile(req.Args[i+1], []byte("fake codex output"), 0o644); err != nil {
+						if err := os.WriteFile(req.Args[i+1], []byte(codexPayloadOutput("completed", true, true, "ok", true, []string{}, "")), 0o644); err != nil {
 							return true, err
 						}
 						break
 					}
-				}
-				return true, nil
-			case strings.HasSuffix(req.Name, "/state.sh"):
-				if req.Stdout != nil {
-					_, _ = io.WriteString(req.Stdout, `{"payload_schema_valid":true}`)
 				}
 				return true, nil
 			}
@@ -1349,16 +1358,11 @@ func TestResumeFromDecideIterateRunsFreshRoundTwoDevelopWithChecklist(t *testing
 				}
 				for i, arg := range req.Args {
 					if arg == "-o" && i+1 < len(req.Args) {
-						if err := os.WriteFile(req.Args[i+1], []byte("fake codex output"), 0o644); err != nil {
+						if err := os.WriteFile(req.Args[i+1], []byte(codexPayloadOutput("completed", true, true, "ok", true, []string{}, "")), 0o644); err != nil {
 							return true, err
 						}
 						break
 					}
-				}
-				return true, nil
-			case strings.HasSuffix(req.Name, "/state.sh"):
-				if req.Stdout != nil {
-					_, _ = io.WriteString(req.Stdout, `{"payload_schema_valid":true}`)
 				}
 				return true, nil
 			}
@@ -2427,7 +2431,7 @@ func TestRunFromDevelopResetsTransientRetriesOnSuccess(t *testing.T) {
 				// Write fake last-message to -o path
 				for i, arg := range req.Args {
 					if arg == "-o" && i+1 < len(req.Args) {
-						if err := os.WriteFile(req.Args[i+1], []byte("fake output"), 0o644); err != nil {
+						if err := os.WriteFile(req.Args[i+1], []byte(codexPayloadOutput("completed", true, true, "ok", true, []string{}, "")), 0o644); err != nil {
 							t.Fatalf("write fake output: %v", err)
 						}
 						break
@@ -2491,16 +2495,12 @@ func TestRunFromDevelopStopsAtDevelopOnCompletedRound(t *testing.T) {
 				}
 				for i, arg := range req.Args {
 					if arg == "-o" && i+1 < len(req.Args) {
-						if err := os.WriteFile(req.Args[i+1], []byte("fake output"), 0o644); err != nil {
+						if err := os.WriteFile(req.Args[i+1], []byte(codexPayloadOutput("completed", true, true, "ok", true, []string{}, "")), 0o644); err != nil {
 							t.Fatalf("write fake output: %v", err)
 						}
 						break
 					}
 				}
-				return true, nil
-			}
-			if strings.HasSuffix(req.Name, "/state.sh") {
-				_, _ = io.WriteString(req.Stdout, `{"payload_schema_valid":true,"payload_schema_errors":[],"payload_source":"clean","files_changed":["src/queue.ts"],"files_added":[],"files_deleted":[]}`)
 				return true, nil
 			}
 			if req.Name == "git" && strings.Contains(args, "rev-parse") && strings.Contains(args, "HEAD") {
