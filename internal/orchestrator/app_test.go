@@ -798,9 +798,11 @@ func TestPhaseFinalizeFailsWhenFinalizeAuditCommentFails(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
 
+	var calls []string
 	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, io.Discard)
 	app.SetConfig(defaultOrchestratorConfig())
 	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		calls:       &calls,
 		issueNumber: 42,
 		issueTitle:  "Implement queue",
 		ghHandler: func(ghArgs string, req shell.CommandRequest) (bool, error) {
@@ -819,15 +821,20 @@ func TestPhaseFinalizeFailsWhenFinalizeAuditCommentFails(t *testing.T) {
 	if !strings.Contains(err.Error(), "post finalize audit comment") {
 		t.Fatalf("expected finalize audit comment error, got %v", err)
 	}
+	if containsCall(calls, "pr ready 87") || containsCall(calls, "pr merge 87") || containsCall(calls, "issue edit 42") {
+		t.Fatalf("finalize should not mutate PR or issue state before audit comment succeeds, got %v", calls)
+	}
 }
 
 func TestPhaseFinalizeFailsWhenPRBodyUpdateFails(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
 
+	var calls []string
 	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, io.Discard)
 	app.SetConfig(defaultOrchestratorConfig())
 	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		calls:       &calls,
 		issueNumber: 42,
 		issueTitle:  "Implement queue",
 		ghHandler: func(ghArgs string, req shell.CommandRequest) (bool, error) {
@@ -845,6 +852,44 @@ func TestPhaseFinalizeFailsWhenPRBodyUpdateFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "update PR body") {
 		t.Fatalf("expected update PR body error, got %v", err)
+	}
+	if containsCall(calls, "pr ready 87") || containsCall(calls, "pr merge 87") || containsCall(calls, "issue edit 42") {
+		t.Fatalf("finalize should not mutate PR or issue state before PR body update succeeds, got %v", calls)
+	}
+}
+
+func TestPhaseDevelopNeedsReviewFailsBeforeMutatingGitHubWhenFinalizeAuditCommentFails(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var calls []string
+	app := New(nil, []string{
+		"RUNOQ_ROOT=" + root,
+		"TARGET_ROOT=" + root,
+	}, root, io.Discard, io.Discard)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		calls:       &calls,
+		issueNumber: 42,
+		issueTitle:  "Implement queue",
+		ghHandler: func(ghArgs string, req shell.CommandRequest) (bool, error) {
+			if strings.Contains(ghArgs, "pr comment 87") {
+				return true, errors.New("comment failed")
+			}
+			return false, nil
+		},
+	}))
+
+	stateJSON := `{"issue":42,"phase":"DEVELOP","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":87,"round":1,"status":"fail"}`
+	_, err := app.phaseDevelopNeedsReview(ctx, root, app.env, "owner/repo", 42, stateJSON, "fail", "Verification failed after round 1")
+	if err == nil {
+		t.Fatal("expected needs-review handoff failure when finalize audit comment fails")
+	}
+	if !strings.Contains(err.Error(), "post finalize audit comment") {
+		t.Fatalf("expected finalize audit comment error, got %v", err)
+	}
+	if containsCall(calls, "pr ready 87") || containsCall(calls, "issue edit 42") {
+		t.Fatalf("needs-review handoff should not mutate PR or issue state before audit comment succeeds, got %v", calls)
 	}
 }
 

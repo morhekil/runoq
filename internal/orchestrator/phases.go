@@ -819,28 +819,6 @@ func (a *App) phaseFinalize(ctx context.Context, root string, env []string, repo
 		reviewer = firstReviewer(cfg.Reviewers)
 	}
 
-	a.logInfo("FINALIZE: calling pr-lifecycle finalize verdict=%s pr=#%d", finalizeVerdict, state.PRNumber)
-	if err := a.finalizePR(ctx, repo, state.PRNumber, finalizeVerdict, reviewer); err != nil {
-		a.logInfo("FINALIZE: pr-lifecycle finalize failed")
-		return "", fmt.Errorf("pr finalize: %w", err)
-	}
-
-	a.logInfo("FINALIZE: setting issue #%d status to %s", issueNumber, issueStatus)
-	if code := a.issueQueueApp.SetStatus(ctx, repo, strconv.Itoa(issueNumber), issueStatus); code != 0 {
-		a.logInfo("FINALIZE: set-status failed for issue #%d", issueNumber)
-		return "", fmt.Errorf("set issue status: issue-queue set-status exited %d", code)
-	}
-	a.logInfo("FINALIZE: set-status succeeded for issue #%d", issueNumber)
-
-	if finalizeVerdict == "auto-merge" {
-		a.logInfo("FINALIZE: removing worktree for issue #%d (auto-merged)", issueNumber)
-		if err := a.worktreeApp.RemoveWorktree(ctx, issueNumber); err == nil {
-			a.logInfo("FINALIZE: worktree removed successfully")
-		} else {
-			a.logInfo("FINALIZE: worktree removal failed")
-		}
-	}
-
 	finalizeBody := fmt.Sprintf(
 		"## Finalize - issue #%d\n\n| Field | Value |\n|-------|-------|\n| **Decision** | `%s` |\n| **Issue status** | `%s` |\n| **Review verdict** | %s |\n| **Review score** | %s |\n| **Auto-merge enabled** | %t |\n| **Round** | %d / %d |\n",
 		issueNumber,
@@ -874,6 +852,28 @@ func (a *App) phaseFinalize(ctx context.Context, root string, env []string, repo
 	if err := a.updatePRBody(ctx, env, repo, state.PRNumber, state.Summary, defaultString(strings.TrimSpace(state.Verdict), "FAIL"), defaultString(strings.TrimSpace(state.Score), "0"), max(state.Round, 1), cfg.MaxRounds, state.Caveats); err != nil {
 		a.logInfo("FINALIZE: PR body update failed: %v", err)
 		return "", fmt.Errorf("update PR body: %w", err)
+	}
+
+	a.logInfo("FINALIZE: calling pr-lifecycle finalize verdict=%s pr=#%d", finalizeVerdict, state.PRNumber)
+	if err := a.finalizePR(ctx, repo, state.PRNumber, finalizeVerdict, reviewer); err != nil {
+		a.logInfo("FINALIZE: pr-lifecycle finalize failed")
+		return "", fmt.Errorf("pr finalize: %w", err)
+	}
+
+	a.logInfo("FINALIZE: setting issue #%d status to %s", issueNumber, issueStatus)
+	if code := a.issueQueueApp.SetStatus(ctx, repo, strconv.Itoa(issueNumber), issueStatus); code != 0 {
+		a.logInfo("FINALIZE: set-status failed for issue #%d", issueNumber)
+		return "", fmt.Errorf("set issue status: issue-queue set-status exited %d", code)
+	}
+	a.logInfo("FINALIZE: set-status succeeded for issue #%d", issueNumber)
+
+	if finalizeVerdict == "auto-merge" {
+		a.logInfo("FINALIZE: removing worktree for issue #%d (auto-merged)", issueNumber)
+		if err := a.worktreeApp.RemoveWorktree(ctx, issueNumber); err == nil {
+			a.logInfo("FINALIZE: worktree removed successfully")
+		} else {
+			a.logInfo("FINALIZE: worktree removal failed")
+		}
 	}
 
 	doneState, err := updateStateJSON(finalizeState, func(state map[string]any) {
@@ -913,17 +913,6 @@ func (a *App) phaseDevelopNeedsReview(ctx context.Context, root string, env []st
 		return "", err
 	}
 
-	cfg := a.cfg
-	reviewer := firstReviewer(cfg.Reviewers)
-	if state.PRNumber != 0 {
-		if err := a.finalizePR(ctx, repo, state.PRNumber, "needs-review", reviewer); err != nil {
-			return "", err
-		}
-	}
-	if code := a.issueQueueApp.SetStatus(ctx, repo, strconv.Itoa(issueNumber), "needs-review"); code != 0 {
-		return "", fmt.Errorf("failed to set issue #%d status to needs-review", issueNumber)
-	}
-
 	finalizeState, err := updateStateJSON(decideState, func(state map[string]any) {
 		state["phase"] = "FINALIZE"
 		state["finalize_verdict"] = "needs-review"
@@ -940,6 +929,17 @@ func (a *App) phaseDevelopNeedsReview(ctx context.Context, root string, env []st
 		if err := a.postAuditCommentWithState(ctx, root, env, repo, state.PRNumber, "finalize", finalizeState, body); err != nil {
 			return "", fmt.Errorf("post finalize audit comment: %w", err)
 		}
+	}
+
+	cfg := a.cfg
+	reviewer := firstReviewer(cfg.Reviewers)
+	if state.PRNumber != 0 {
+		if err := a.finalizePR(ctx, repo, state.PRNumber, "needs-review", reviewer); err != nil {
+			return "", err
+		}
+	}
+	if code := a.issueQueueApp.SetStatus(ctx, repo, strconv.Itoa(issueNumber), "needs-review"); code != 0 {
+		return "", fmt.Errorf("failed to set issue #%d status to needs-review", issueNumber)
 	}
 
 	doneState, err := updateStateJSON(finalizeState, func(state map[string]any) {
