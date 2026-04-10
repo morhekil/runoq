@@ -633,25 +633,22 @@ func validatePhaseTransition(from string, to string) error {
 		return nil
 	}
 	allowed := map[string]struct{}{
-		"INIT:DEVELOP":     {},
-		"INIT:FINALIZE":    {},
-		"INIT:FAILED":      {},
-		"DEVELOP:VERIFY":   {},
-		"DEVELOP:FAILED":   {},
-		"VERIFY:REVIEW":    {},
-		"VERIFY:DECIDE":    {},
-		"VERIFY:FAILED":    {},
-		"REVIEW:DECIDE":    {},
-		"REVIEW:FAILED":    {},
-		"DECIDE:DEVELOP":   {},
-		"DECIDE:FINALIZE":  {},
-		"DECIDE:INTEGRATE": {},
-		"DECIDE:FAILED":    {},
-		"FINALIZE:DONE":    {},
-		"FINALIZE:FAILED":  {},
-		"INTEGRATE:DONE":   {},
-		"INTEGRATE:FAILED": {},
-		"FAILED:INIT":      {}, // retry from scratch
+		"INIT:DEVELOP":    {},
+		"INIT:FINALIZE":   {},
+		"INIT:FAILED":     {},
+		"DEVELOP:VERIFY":  {},
+		"DEVELOP:FAILED":  {},
+		"VERIFY:REVIEW":   {},
+		"VERIFY:DECIDE":   {},
+		"VERIFY:FAILED":   {},
+		"REVIEW:DECIDE":   {},
+		"REVIEW:FAILED":   {},
+		"DECIDE:DEVELOP":  {},
+		"DECIDE:FINALIZE": {},
+		"DECIDE:FAILED":   {},
+		"FINALIZE:DONE":   {},
+		"FINALIZE:FAILED": {},
+		"FAILED:INIT":     {}, // retry from scratch
 	}
 	key := from + ":" + to
 	if _, ok := allowed[key]; ok {

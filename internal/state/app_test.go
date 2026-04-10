@@ -94,6 +94,26 @@ func TestSaveAllowsVerifyToReviewTransition(t *testing.T) {
 	}
 }
 
+func TestSaveRejectsDecideToIntegrateTransition(t *testing.T) {
+	t.Parallel()
+
+	stateDir := filepath.Join(t.TempDir(), "state")
+	env := []string{"RUNOQ_STATE_DIR=" + stateDir}
+
+	firstCode, _, firstErr := runApp(t, []string{"save", "42"}, env, ".", `{"phase":"DECIDE","round":1}`, nil)
+	if firstCode != 0 {
+		t.Fatalf("first save code=%d stderr=%q", firstCode, firstErr)
+	}
+
+	secondCode, _, secondErr := runApp(t, []string{"save", "42"}, env, ".", `{"phase":"INTEGRATE","round":1}`, nil)
+	if secondCode == 0 {
+		t.Fatal("expected DECIDE->INTEGRATE transition to be rejected")
+	}
+	if !strings.Contains(secondErr, "Invalid phase transition: DECIDE -> INTEGRATE") {
+		t.Fatalf("unexpected stderr: %q", secondErr)
+	}
+}
+
 func TestRecordAndHasMention(t *testing.T) {
 	t.Parallel()
 

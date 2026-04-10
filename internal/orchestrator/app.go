@@ -15,7 +15,6 @@ import (
 
 const usageText = `Usage:
   orchestrator.sh run <repo> --issue N [--dry-run]
-  orchestrator.sh mention-triage <repo> <pr-number>
 `
 
 // OrchestratorConfig holds the config values the orchestrator needs.
@@ -26,14 +25,14 @@ type OrchestratorConfig struct {
 	AutoMergeEnabled bool
 	Reviewers        []string
 	IdentityHandle   string
-	ReadyLabel string
+	ReadyLabel       string
 
 	// Label config for sub-apps (issuequeue, dispatchsafety).
 	// When empty, sub-apps fall back to loading config from RUNOQ_CONFIG.
-	InProgressLabel string
-	DoneLabel       string
+	InProgressLabel  string
+	DoneLabel        string
 	NeedsReviewLabel string
-	BlockedLabel    string
+	BlockedLabel     string
 
 	// Naming config for worktree and branch creation.
 	BranchPrefix   string
@@ -187,8 +186,6 @@ func (a *App) Run(ctx context.Context) int {
 	switch a.args[0] {
 	case "run":
 		return a.runCommandEntry(ctx, root, env, a.args[1:])
-	case "mention-triage":
-		return a.mentionTriageEntry(ctx, root, env, a.args[1:])
 	case "-h", "--help", "help":
 		a.printUsage(a.stdout)
 		return 0

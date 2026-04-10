@@ -17,108 +17,6 @@ import (
 	"github.com/saruman/runoq/internal/shell"
 )
 
-func (a *App) phaseIntegrate(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, title string) (string, error) {
-	a.ensureSubApps()
-	a.logInfo("INTEGRATE: checking epic #%d", issueNumber)
-
-	epicStatus, err := a.issueQueueApp.EpicStatusDirect(ctx, repo, issueNumber)
-	if err != nil {
-		return "", fmt.Errorf("epic-status check failed: %v", err)
-	}
-	if !epicStatus.AllDone {
-		a.logInfo("INTEGRATE: not all children done for epic #%d", issueNumber)
-		nextState, err := updateStateJSON(stateJSON, func(state map[string]any) {
-			state["phase"] = "DECIDE"
-			state["decision"] = "integrate-pending"
-			state["next_phase"] = "INTEGRATE"
-		})
-		if err != nil {
-			return "", err
-		}
-		return nextState, nil
-	}
-
-	var state struct {
-		Worktree       string `json:"worktree"`
-		CriteriaCommit string `json:"criteria_commit"`
-	}
-	if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
-		return "", fmt.Errorf("failed to parse state for integrate: %v", err)
-	}
-
-	resolvedTitle, titleErr := a.issueTitle(ctx, env, repo, issueNumber)
-	if titleErr == nil && strings.TrimSpace(resolvedTitle) != "" {
-		title = resolvedTitle
-	}
-
-	integrateTitle := strings.TrimSpace(title)
-	if integrateTitle == "" {
-		integrateTitle = "untitled"
-	}
-	integrateWorktree := ""
-	wtResult, worktreeErr := a.worktreeApp.CreateWorktree(ctx, issueNumber, integrateTitle+"-integrate")
-	if worktreeErr == nil {
-		integrateWorktree = strings.TrimSpace(wtResult.Worktree)
-	}
-	if integrateWorktree == "" {
-		integrateWorktree = strings.TrimSpace(state.Worktree)
-	}
-
-	if strings.TrimSpace(state.CriteriaCommit) != "" {
-		verifyResult, _ := a.verifyApp.IntegrateVerify(ctx, integrateWorktree, strings.TrimSpace(state.CriteriaCommit))
-
-		if verifyResult.OK {
-			_ = a.issueQueueApp.SetStatus(ctx, repo, strconv.Itoa(issueNumber), "done")
-			integrateState, err := updateStateJSON(stateJSON, func(state map[string]any) {
-				state["phase"] = "INTEGRATE"
-			})
-			if err != nil {
-				return "", err
-			}
-			doneState, err := updateStateJSON(integrateState, func(state map[string]any) {
-				state["phase"] = "DONE"
-			})
-			if err != nil {
-				return "", err
-			}
-			return doneState, nil
-		}
-
-		failures := strings.Join(verifyResult.Failures, ", ")
-		a.logError("INTEGRATE: verification failed for epic #%d: %s", issueNumber, failures)
-		_ = a.issueQueueApp.SetStatus(ctx, repo, strconv.Itoa(issueNumber), "needs-review")
-		integrateState, err := updateStateJSON(stateJSON, func(state map[string]any) {
-			state["phase"] = "INTEGRATE"
-			state["integrate_failures"] = failures
-		})
-		if err != nil {
-			return "", err
-		}
-		failedState, err := updateStateJSON(integrateState, func(state map[string]any) {
-			state["phase"] = "FAILED"
-		})
-		if err != nil {
-			return "", err
-		}
-		return failedState, nil
-	}
-
-	_ = a.issueQueueApp.SetStatus(ctx, repo, strconv.Itoa(issueNumber), "done")
-	integrateState, err := updateStateJSON(stateJSON, func(state map[string]any) {
-		state["phase"] = "INTEGRATE"
-	})
-	if err != nil {
-		return "", err
-	}
-	doneState, err := updateStateJSON(integrateState, func(state map[string]any) {
-		state["phase"] = "DONE"
-	})
-	if err != nil {
-		return "", err
-	}
-	return doneState, nil
-}
-
 func (a *App) phaseInit(ctx context.Context, root string, env []string, repo string, issueNumber int, dryRun bool, title string) (string, error) {
 	a.ensureSubApps()
 	a.logInfo("INIT: issue #%d", issueNumber)
@@ -126,6 +24,13 @@ func (a *App) phaseInit(ctx context.Context, root string, env []string, repo str
 	eligibility, eligibilityErr := a.dispatchSafetyApp.CheckEligibility(ctx, repo, issueNumber)
 	if eligibilityErr != nil {
 		return "", fmt.Errorf("eligibility check failed: %v", eligibilityErr)
+	}
+	if !eligibility.Allowed {
+		a.logInfo("INIT: issue #%d is not eligible: %s", issueNumber, strings.Join(eligibility.Reasons, "; "))
+		return "", ineligibleIssueError{
+			IssueNumber: issueNumber,
+			Reasons:     append([]string(nil), eligibility.Reasons...),
+		}
 	}
 
 	branch := eligibility.Branch
@@ -952,6 +857,7 @@ func (a *App) phaseFinalize(ctx context.Context, root string, env []string, repo
 	a.logInfo("FINALIZE: calling pr-lifecycle finalize verdict=%s pr=#%d", finalizeVerdict, state.PRNumber)
 	if err := a.finalizePR(ctx, repo, state.PRNumber, finalizeVerdict, reviewer); err != nil {
 		a.logInfo("FINALIZE: pr-lifecycle finalize failed")
+		return "", fmt.Errorf("pr finalize: %w", err)
 	}
 
 	a.logInfo("FINALIZE: setting issue #%d status to %s", issueNumber, issueStatus)

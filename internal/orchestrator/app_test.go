@@ -18,18 +18,6 @@ import (
 	"github.com/saruman/runoq/internal/worktree"
 )
 
-type fakeExitError struct {
-	code int
-}
-
-func (e fakeExitError) Error() string {
-	return "command failed"
-}
-
-func (e fakeExitError) ExitCode() int {
-	return e.code
-}
-
 func TestParseStateFromCommentsExtractsLatest(t *testing.T) {
 	comments := `[
 		{"body": "<!-- runoq:bot:orchestrator:init -->\n<!-- runoq:state:{\"phase\":\"INIT\",\"pr_number\":87} -->\n> Posted by orchestrator"},
@@ -515,6 +503,49 @@ func TestPhaseInitPRCreateFailureRollsBackAndCleansUp(t *testing.T) {
 	}
 }
 
+func TestPhaseInitRejectsIneligibleIssueWithoutStartingWork(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var stderr bytes.Buffer
+	var calls []string
+
+	app := New(nil, []string{
+		"RUNOQ_ROOT=" + root,
+		"TARGET_ROOT=" + root,
+	}, root, io.Discard, &stderr)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		calls:       &calls,
+		issueNumber: 42,
+		issueTitle:  "Implement queue",
+		ghHandler: func(ghArgs string, req shell.CommandRequest) (bool, error) {
+			if strings.Contains(ghArgs, "issue view 42") && strings.Contains(ghArgs, "number,title,body,labels,url") {
+				_, _ = io.WriteString(req.Stdout, `{"number":42,"title":"Implement queue","body":"No AC here","labels":[{"name":"runoq:ready"}],"url":"https://example.test/issues/42"}`)
+				return true, nil
+			}
+			return false, nil
+		},
+	}))
+
+	_, err := app.phaseInit(ctx, root, app.env, "owner/repo", 42, false, "Implement queue")
+	if err == nil {
+		t.Fatal("expected init rejection for ineligible issue")
+	}
+	if !strings.Contains(err.Error(), "is not eligible") {
+		t.Fatalf("expected ineligible error, got %v", err)
+	}
+	if containsCall(calls, "issue edit 42") {
+		t.Fatalf("should not change issue status for ineligible issue, got %v", calls)
+	}
+	if containsCall(calls, "pr create") {
+		t.Fatalf("should not create PR for ineligible issue, got %v", calls)
+	}
+	if strings.Contains(stderr.String(), "INIT: worktree=") {
+		t.Fatalf("should not start worktree flow for ineligible issue, got %q", stderr.String())
+	}
+}
+
 func TestRunLowComplexityDevelopFailureCompletesNeedsReviewHandoff(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
@@ -679,6 +710,43 @@ func TestPhaseFinalizeAutoMergesAndCleansUp(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "FINALIZE: removing worktree for issue #42 (auto-merged)") {
 		t.Fatalf("expected finalize cleanup log, got %q", stderr.String())
+	}
+}
+
+func TestPhaseFinalizeStopsWhenPRFinalizationFails(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var stderr bytes.Buffer
+	var calls []string
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root, "RUNOQ_BASE_REF=main"}, root, io.Discard, &stderr)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		calls:       &calls,
+		issueNumber: 42,
+		issueTitle:  "Implement queue",
+		ghHandler: func(ghArgs string, req shell.CommandRequest) (bool, error) {
+			if strings.Contains(ghArgs, "pr merge 87") {
+				return true, errors.New("merge failed")
+			}
+			return false, nil
+		},
+	}))
+
+	stateJSON := `{"issue":42,"phase":"DECIDE","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":87,"round":1,"verdict":"PASS","decision":"finalize","score":"42","summary":"Verification passed on round 1; ready for review"}`
+	_, err := app.phaseFinalize(ctx, root, app.env, "owner/repo", 42, stateJSON, IssueMetadata{Number: 42, Type: "task"})
+	if err == nil {
+		t.Fatal("expected finalize failure when pr finalization fails")
+	}
+	if !strings.Contains(err.Error(), "pr finalize") {
+		t.Fatalf("expected pr finalize error, got %v", err)
+	}
+	if containsCall(calls, "issue edit 42") {
+		t.Fatalf("should not mark issue done when PR finalization fails, got %v", calls)
+	}
+	if strings.Contains(stderr.String(), "FINALIZE: set-status succeeded") {
+		t.Fatalf("should not log successful set-status on finalize failure, got %q", stderr.String())
 	}
 }
 
@@ -1408,192 +1476,7 @@ func TestRunCommandEntryRequiresIssueFlag(t *testing.T) {
 	}
 }
 
-func TestPhaseIntegratePendingPersistsIntegratePendingDecision(t *testing.T) {
-	ctx := t.Context()
-	root := t.TempDir()
-
-	var calls []string
-
-	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, io.Discard)
-	app.SetConfig(defaultOrchestratorConfig())
-	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
-		calls: &calls, issueNumber: 41, issueTitle: "Coordinate migration",
-		ghHandler: func(ghArgs string, req shell.CommandRequest) (bool, error) {
-			if strings.Contains(ghArgs, "sub_issues") {
-				_, _ = io.WriteString(req.Stdout, `[{"number":42,"labels":[{"name":"runoq:ready"}]}]`)
-				return true, nil
-			}
-			return false, nil
-		},
-	}))
-
-	stateJSON, err := app.phaseIntegrate(ctx, root, app.env, "owner/repo", 41, `{"phase":"DECIDE","next_phase":"INTEGRATE"}`, "Coordinate migration")
-	if err != nil {
-		t.Fatalf("phaseIntegrate returned error: %v", err)
-	}
-	if !strings.Contains(stateJSON, `"phase":"DECIDE"`) {
-		t.Fatalf("expected DECIDE phase, got %s", stateJSON)
-	}
-	if !strings.Contains(stateJSON, `"decision":"integrate-pending"`) {
-		t.Fatalf("expected integrate-pending decision, got %s", stateJSON)
-	}
-}
-
-func TestPhaseIntegrateSuccessWithCriteriaCommitMarksDone(t *testing.T) {
-	ctx := t.Context()
-	root := t.TempDir()
-
-	// Create config file for verify app
-	configDir := root + "/config"
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		t.Fatalf("mkdir config dir: %v", err)
-	}
-	if err := os.WriteFile(configDir+"/runoq.json", []byte(`{"verification":{"testCommand":"echo test","buildCommand":"echo build"},"branchPrefix":"runoq/","worktreePrefix":"runoq-wt-"}`), 0o644); err != nil {
-		t.Fatalf("write runoq.json: %v", err)
-	}
-
-	// Create worktree dir and criteria file so os.Stat passes
-	worktreeDir := t.TempDir()
-	if err := os.WriteFile(worktreeDir+"/criteria.md", []byte("criteria"), 0o644); err != nil {
-		t.Fatalf("write criteria: %v", err)
-	}
-
-	var calls []string
-
-	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, io.Discard)
-	app.SetConfig(defaultOrchestratorConfig())
-	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
-		calls: &calls, issueNumber: 41, issueTitle: "Coordinate migration",
-		ghHandler: func(ghArgs string, req shell.CommandRequest) (bool, error) {
-			if strings.Contains(ghArgs, "sub_issues") {
-				_, _ = io.WriteString(req.Stdout, `[{"number":42,"labels":[{"name":"runoq:done"}]}]`)
-				return true, nil
-			}
-			return false, nil
-		},
-		customHandler: func(req shell.CommandRequest) (bool, error) {
-			args := strings.Join(req.Args, " ")
-			// git diff-tree for criteria files
-			if req.Name == "git" && strings.Contains(args, "diff-tree") {
-				_, _ = io.WriteString(req.Stdout, "criteria.md\n")
-				return true, nil
-			}
-			// git diff for criteria tamper check - not tampered (empty output)
-			if req.Name == "git" && strings.Contains(args, "diff") && strings.Contains(args, "criteria-abc") && strings.Contains(args, "HEAD") {
-				return true, nil // empty output = no changes = not tampered
-			}
-			// test command (verify runs bash -lc 'cd ... && echo test')
-			if req.Name == "bash" && strings.Contains(args, "echo test") {
-				return true, nil
-			}
-			return false, nil
-		},
-	}))
-
-	stateJSON := `{"phase":"DECIDE","next_phase":"INTEGRATE","criteria_commit":"criteria-abc","worktree":"` + worktreeDir + `"}`
-	result, err := app.phaseIntegrate(ctx, root, app.env, "owner/repo", 41, stateJSON, "Coordinate migration")
-	if err != nil {
-		t.Fatalf("phaseIntegrate returned error: %v", err)
-	}
-	if !strings.Contains(result, `"phase":"DONE"`) {
-		t.Fatalf("expected DONE phase, got %s", result)
-	}
-}
-
-func TestPhaseIntegrateFailureMarksNeedsReviewAndFailed(t *testing.T) {
-	ctx := t.Context()
-	root := t.TempDir()
-
-	// Create a config file for the verify app to read
-	configDir := root + "/config"
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		t.Fatalf("mkdir config dir: %v", err)
-	}
-	if err := os.WriteFile(configDir+"/runoq.json", []byte(`{"verification":{"testCommand":"echo test","buildCommand":"echo build"},"branchPrefix":"runoq/","worktreePrefix":"runoq-wt-"}`), 0o644); err != nil {
-		t.Fatalf("write runoq.json: %v", err)
-	}
-
-	var calls []string
-
-	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root, "RUNOQ_CONFIG=" + configDir + "/runoq.json"}, root, io.Discard, io.Discard)
-	app.SetConfig(defaultOrchestratorConfig())
-	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
-		calls: &calls, issueNumber: 41, issueTitle: "Coordinate migration",
-		ghHandler: func(ghArgs string, req shell.CommandRequest) (bool, error) {
-			if strings.Contains(ghArgs, "sub_issues") {
-				_, _ = io.WriteString(req.Stdout, `[{"number":42,"labels":[{"name":"runoq:done"}]}]`)
-				return true, nil
-			}
-			return false, nil
-		},
-		customHandler: func(req shell.CommandRequest) (bool, error) {
-			args := strings.Join(req.Args, " ")
-			// git diff-tree for criteria files check
-			if req.Name == "git" && strings.Contains(args, "diff-tree") {
-				_, _ = io.WriteString(req.Stdout, "criteria.md\n")
-				return true, nil
-			}
-			// git diff for criteria tamper check - file was tampered
-			if req.Name == "git" && strings.Contains(args, "diff") && strings.Contains(args, "criteria-abc") && strings.Contains(args, "HEAD") {
-				_, _ = io.WriteString(req.Stdout, "criteria.md\n") // non-empty means changed
-				return true, nil
-			}
-			// test command fails
-			if req.Name == "bash" && strings.Contains(args, "cd ") && strings.Contains(args, "echo test") {
-				return true, errors.New("test failed")
-			}
-			return false, nil
-		},
-	}))
-
-	stateJSON, err := app.phaseIntegrate(ctx, root, app.env, "owner/repo", 41, `{"phase":"DECIDE","next_phase":"INTEGRATE","criteria_commit":"criteria-abc","worktree":"/tmp/runoq-wt-41"}`, "Coordinate migration")
-	if err != nil {
-		t.Fatalf("phaseIntegrate returned error: %v", err)
-	}
-	if !strings.Contains(stateJSON, `"phase":"FAILED"`) {
-		t.Fatalf("expected FAILED phase, got %s", stateJSON)
-	}
-}
-
-func TestMentionTriageReturnsEmptyStdoutWhenPollMentionsIsEmpty(t *testing.T) {
-	ctx := t.Context()
-	root := t.TempDir()
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	var calls []string
-
-	app := New([]string{"mention-triage", "owner/repo", "87"}, []string{
-		"RUNOQ_ROOT=" + root,
-	}, root, &stdout, &stderr)
-	app.SetConfig(OrchestratorConfig{IdentityHandle: "runoq"})
-	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
-		calls = append(calls, commandLine(req))
-		switch {
-		case req.Name == "gh" && strings.Contains(strings.Join(req.Args, " "), "issues?state=open"):
-			_, _ = io.WriteString(req.Stdout, "[]\n")
-			return nil
-		default:
-			return nil
-		}
-	})
-
-	code := app.Run(ctx)
-	if code != 0 {
-		t.Fatalf("expected exit code 0, got %d", code)
-	}
-	if stdout.Len() != 0 {
-		t.Fatalf("expected no stdout when no mentions are found, got %q", stdout.String())
-	}
-	if !containsCall(calls, "gh api repos/owner/repo/issues?state=open") {
-		t.Fatalf("expected poll-mentions API call, got %v", calls)
-	}
-	if !strings.Contains(stderr.String(), "Token mint") {
-		t.Fatalf("expected auth log on stderr, got %q", stderr.String())
-	}
-}
-
-func TestMentionTriageReturnsNotImplementedWhenMentionsExist(t *testing.T) {
+func TestRunRejectsRemovedMentionTriageCommand(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
 
@@ -1603,66 +1486,18 @@ func TestMentionTriageReturnsNotImplementedWhenMentionsExist(t *testing.T) {
 	app := New([]string{"mention-triage", "owner/repo", "87"}, []string{
 		"RUNOQ_ROOT=" + root,
 	}, root, &stdout, &stderr)
-	app.SetConfig(OrchestratorConfig{IdentityHandle: "runoq"})
-	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
-		switch {
-		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
-			_, _ = io.WriteString(req.Stdout, "fail\n")
-			return nil
-		case req.Name == "gh" && strings.Contains(strings.Join(req.Args, " "), "issues?state=open"):
-			_, _ = io.WriteString(req.Stdout, `[{"number":10}]`)
-			return nil
-		case req.Name == "gh" && strings.Contains(strings.Join(req.Args, " "), "issues/10/comments"):
-			_, _ = io.WriteString(req.Stdout, `[{"id":3001,"body":"Hey @runoq please help","user":{"login":"alice"},"created_at":"2026-01-01T00:00:00Z"}]`)
-			return nil
-		default:
-			t.Fatalf("unexpected command: %s", commandLine(req))
-			return nil
-		}
-	})
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, defaultMockConfig()))
 
 	code := app.Run(ctx)
 	if code != 1 {
-		t.Fatalf("expected exit code 1, got %d", code)
+		t.Fatalf("expected exit code 1 for removed command, got %d", code)
 	}
-	if stdout.Len() != 0 {
-		t.Fatalf("expected no stdout when mentions exist, got %q", stdout.String())
+	if !strings.Contains(stderr.String(), "Usage:") {
+		t.Fatalf("expected usage output for removed command, got %q", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "mention-triage with mentions not implemented") {
-		t.Fatalf("expected not-implemented error, got %q", stderr.String())
-	}
-}
-
-func TestMentionTriagePropagatesScriptExitCodeAndStderr(t *testing.T) {
-	ctx := t.Context()
-	root := t.TempDir()
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-
-	app := New([]string{"mention-triage", "owner/repo", "87"}, []string{
-		"RUNOQ_ROOT=" + root,
-	}, root, &stdout, &stderr)
-	app.SetConfig(OrchestratorConfig{IdentityHandle: "runoq"})
-	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
-		switch {
-		case req.Name == "bash" && strings.Contains(strings.Join(req.Args, " "), "gh-auth.sh"):
-			_, _ = io.WriteString(req.Stdout, "fail\n")
-			return nil
-		case req.Name == "gh" && strings.Contains(strings.Join(req.Args, " "), "issues?state=open"):
-			return fakeExitError{code: 23}
-		default:
-			t.Fatalf("unexpected command: %s", commandLine(req))
-			return nil
-		}
-	})
-
-	code := app.Run(ctx)
-	if code != 23 {
-		t.Fatalf("expected exit code 23, got %d", code)
-	}
-	if stdout.Len() != 0 {
-		t.Fatalf("expected no stdout on error, got %q", stdout.String())
+	if strings.Contains(stderr.String(), "mention-triage") {
+		t.Fatalf("usage should not advertise removed command, got %q", stderr.String())
 	}
 }
 

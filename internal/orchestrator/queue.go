@@ -11,24 +11,17 @@ import (
 	"github.com/saruman/runoq/internal/shell"
 )
 
-func (a *App) mentionTriageEntry(ctx context.Context, root string, env []string, args []string) int {
-	if len(args) != 2 {
-		a.printUsage(a.stderr)
-		return 1
-	}
+type ineligibleIssueError struct {
+	IssueNumber int
+	Reasons     []string
+}
 
-	repo := args[0]
-	cfg := a.cfg
-
-	mentions, err := a.pollMentions(ctx, repo, cfg.IdentityHandle)
-	if err != nil {
-		return commandExitCode(err)
+func (e ineligibleIssueError) Error() string {
+	details := strings.TrimSpace(strings.Join(e.Reasons, "; "))
+	if details == "" {
+		return fmt.Sprintf("issue #%d is not eligible", e.IssueNumber)
 	}
-	if len(mentions) == 0 {
-		return 0
-	}
-
-	return shell.Fail(a.stderr, "mention-triage with mentions not implemented")
+	return fmt.Sprintf("issue #%d is not eligible: %s", e.IssueNumber, details)
 }
 
 func (a *App) runCommandEntry(ctx context.Context, root string, env []string, args []string) int {

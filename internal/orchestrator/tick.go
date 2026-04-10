@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -732,6 +733,13 @@ func (t *tickRunner) dispatchTask(ctx context.Context, task *issue) int {
 	runApp.SetConfig(t.orchestratorConfig())
 	stateJSON, err := runApp.RunIssue(ctx, t.cfg.Repo, task.Number, t.cfg.DryRunImplementation, task.Title, metadata)
 	if err != nil {
+		var ineligibleErr ineligibleIssueError
+		if errors.As(err, &ineligibleErr) {
+			reason := strings.Join(ineligibleErr.Reasons, "; ")
+			t.warn(fmt.Sprintf("Issue #%d skipped: %s", task.Number, reason))
+			_, _ = fmt.Fprintf(t.cfg.Stdout, "Issue #%d skipped: %s\n", task.Number, reason)
+			return 2
+		}
 		return t.fail("issue #%d: %v", task.Number, err)
 	}
 
