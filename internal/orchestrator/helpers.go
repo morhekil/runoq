@@ -179,6 +179,23 @@ func parseReviewVerdict(path string) (reviewVerdictResult, error) {
 	return result, nil
 }
 
+func stringSliceFromAny(value any) []string {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		typed, ok := item.(string)
+		if !ok {
+			return nil
+		}
+		result = append(result, typed)
+	}
+	return result
+}
+
 func (a *App) prepareAuth(ctx context.Context, root string, env []string) []string {
 	homeDir := ""
 	if h, err := os.UserHomeDir(); err == nil {

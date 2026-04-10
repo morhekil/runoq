@@ -2454,6 +2454,13 @@ func TestRunFromDevelopTransientErrorDoesNotEscalate(t *testing.T) {
 	if retryAfter == "" {
 		t.Error("expected transient_retry_after timestamp in state")
 	}
+	waiting, _ := state["waiting"].(bool)
+	if !waiting {
+		t.Error("expected waiting=true in state")
+	}
+	if got, _ := state["waiting_reason"].(string); got != "transient_backoff" {
+		t.Errorf("waiting_reason = %q, want %q", got, "transient_backoff")
+	}
 }
 
 func TestRunFromDevelopSkipsWhenBackoffActive(t *testing.T) {
@@ -2495,6 +2502,46 @@ func TestRunFromDevelopSkipsWhenBackoffActive(t *testing.T) {
 	// State should be returned unchanged (still in DEVELOP)
 	if !strings.Contains(result, `"transient_retry_after"`) {
 		t.Fatalf("state should preserve transient_retry_after, got %s", result)
+	}
+	if !strings.Contains(result, `"waiting":true`) {
+		t.Fatalf("expected waiting=true, got %s", result)
+	}
+}
+
+func TestResumeFromStateUsesDevelopPathForWaitingState(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var stderr bytes.Buffer
+	codexCalled := false
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, &stderr)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		issueNumber: 42,
+		issueTitle:  "Implement queue",
+		customHandler: func(req shell.CommandRequest) (bool, error) {
+			if req.Name == "codex" || strings.HasSuffix(req.Name, "/codex") {
+				codexCalled = true
+				return true, nil
+			}
+			return false, nil
+		},
+	}))
+
+	futureTime := "2099-01-01T00:00:00Z"
+	stateJSON := `{"issue":42,"phase":"DEVELOP","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":87,"round":1,"waiting":true,"waiting_reason":"transient_backoff","transient_retry_after":"` + futureTime + `"}`
+
+	result, err := app.resumeFromState(ctx, root, app.env, "owner/repo", 42, stateJSON, IssueMetadata{Number: 42, Title: "Implement queue"})
+	if err != nil {
+		t.Fatalf("resumeFromState: %v", err)
+	}
+
+	if codexCalled {
+		t.Fatal("codex should not be called while waiting backoff is active")
+	}
+	if !strings.Contains(result, `"waiting":true`) {
+		t.Fatalf("expected waiting state to be preserved, got %s", result)
 	}
 }
 
@@ -2618,7 +2665,7 @@ func TestRunFromDevelopStopsAtDevelopOnCompletedRound(t *testing.T) {
 				return true, nil
 			}
 			if strings.HasSuffix(req.Name, "/state.sh") {
-				_, _ = io.WriteString(req.Stdout, `{"payload_schema_valid":true,"files_changed":["src/queue.ts"],"files_added":[],"files_deleted":[]}`)
+				_, _ = io.WriteString(req.Stdout, `{"payload_schema_valid":true,"payload_schema_errors":[],"payload_source":"clean","files_changed":["src/queue.ts"],"files_added":[],"files_deleted":[]}`)
 				return true, nil
 			}
 			if req.Name == "git" && strings.Contains(args, "rev-parse") && strings.Contains(args, "HEAD") {
@@ -2642,6 +2689,12 @@ func TestRunFromDevelopStopsAtDevelopOnCompletedRound(t *testing.T) {
 	}
 	if !strings.Contains(result, `"status":"completed"`) {
 		t.Fatalf("expected completed develop status, got %s", result)
+	}
+	if !strings.Contains(result, `"payload_schema_valid":true`) {
+		t.Fatalf("expected payload_schema_valid=true, got %s", result)
+	}
+	if !strings.Contains(result, `"payload_source":"clean"`) {
+		t.Fatalf("expected payload_source=clean, got %s", result)
 	}
 	if strings.Contains(result, `"phase":"DONE"`) || strings.Contains(result, `"needs-review"`) {
 		t.Fatalf("did not expect needs-review escalation, got %s", result)

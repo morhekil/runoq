@@ -275,11 +275,6 @@ func requiredPayloadSchemaBlock() string {
 ` + "```json" + `
 {
   "status": "completed" | "failed" | "stuck",
-  "commits_pushed": ["<sha>", "..."],
-  "commit_range": "<first-sha>..<last-sha>",
-  "files_changed": ["path", "..."],
-  "files_added": ["path", "..."],
-  "files_deleted": ["path", "..."],
   "tests_run": true | false,
   "tests_passed": true | false,
   "test_summary": "<short summary>",

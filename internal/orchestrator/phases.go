@@ -384,6 +384,11 @@ func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo 
 	if rawValid, ok := result.VerificationPayload["payload_schema_valid"].(bool); ok {
 		payloadSchemaValid = rawValid
 	}
+	payloadSchemaErrors := stringSliceFromAny(result.VerificationPayload["payload_schema_errors"])
+	payloadSource := ""
+	if rawSource, ok := result.VerificationPayload["payload_source"].(string); ok {
+		payloadSource = strings.TrimSpace(rawSource)
+	}
 
 	nextState, err := updateStateJSON(stateJSON, func(state map[string]any) {
 		state["phase"] = "DEVELOP"
@@ -401,6 +406,9 @@ func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo 
 		state["verification_payload"] = result.VerificationPayload
 		state["verification_passed"] = result.VerificationPassed
 		state["verification_failures"] = result.VerificationFailures
+		state["payload_schema_valid"] = payloadSchemaValid
+		state["payload_schema_errors"] = payloadSchemaErrors
+		state["payload_source"] = payloadSource
 		state["caveats"] = result.Caveats
 		state["summary"] = result.Summary
 	})
@@ -409,11 +417,17 @@ func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo 
 	}
 
 	developBody := fmt.Sprintf(
-		"## Develop - round %d\n\n| Field | Value |\n|-------|-------|\n| **Status** | %s |\n| **Commit range** | `%s` |\n| **Cumulative tokens** | %d |\n| **Payload schema valid** | %s |\n",
-		round, result.Status, result.CommitRange, result.CumulativeTokens, yesNo(payloadSchemaValid),
+		"## Develop - round %d\n\n| Field | Value |\n|-------|-------|\n| **Status** | %s |\n| **Commit range** | `%s` |\n| **Cumulative tokens** | %d |\n| **Payload schema valid** | %s |\n| **Payload source** | %s |\n",
+		round, result.Status, result.CommitRange, result.CumulativeTokens, yesNo(payloadSchemaValid), orDefault(payloadSource, "unknown"),
 	)
 	if strings.TrimSpace(result.Summary) != "" {
 		developBody += "\n**Summary**: " + result.Summary + "\n"
+	}
+	if len(payloadSchemaErrors) > 0 {
+		developBody += "\n### Payload Schema Errors\n"
+		for _, item := range payloadSchemaErrors {
+			developBody += "- " + item + "\n"
+		}
 	}
 	if state.PRNumber != 0 {
 		_ = a.postAuditCommentWithState(ctx, root, env, repo, state.PRNumber, "develop", nextState, developBody, "issue-runner")

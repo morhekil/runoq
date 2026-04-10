@@ -337,6 +337,21 @@ func TestDevelopmentLoop_SingleRoundSuccess(t *testing.T) {
 	}
 }
 
+func TestRequiredPayloadSchemaBlockOmitsReconstructableGitFields(t *testing.T) {
+	schema := requiredPayloadSchemaBlock()
+
+	for _, field := range []string{"tests_run", "tests_passed", "test_summary", "build_passed", "blockers", "notes"} {
+		if !strings.Contains(schema, field) {
+			t.Fatalf("expected schema to contain %q, got:\n%s", field, schema)
+		}
+	}
+	for _, field := range []string{"commits_pushed", "commit_range", "files_changed", "files_added", "files_deleted"} {
+		if strings.Contains(schema, field) {
+			t.Fatalf("expected schema to omit %q, got:\n%s", field, schema)
+		}
+	}
+}
+
 func TestDevelopmentLoop_PersistsVerificationPayload(t *testing.T) {
 	dir := t.TempDir()
 	worktree := filepath.Join(dir, "wt")

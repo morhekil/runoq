@@ -743,6 +743,12 @@ func (t *tickRunner) dispatchTask(ctx context.Context, task *issue) int {
 		}
 	}
 
+	if waitingReasonFromState(stateJSON) != "" {
+		t.warn(fmt.Sprintf("Issue #%d waiting: %s", task.Number, waitingReasonFromState(stateJSON)))
+		_, _ = fmt.Fprintf(t.cfg.Stdout, "Issue #%d — phase: %s (waiting)\n", task.Number, phase)
+		return 2
+	}
+
 	// If the issue reached a terminal phase, set the appropriate status.
 	// Phases like phaseDevelopNeedsReview already set status on the issue;
 	// only call set-status here when the state indicates it's needed.

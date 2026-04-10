@@ -164,6 +164,9 @@ func (a *App) runSingleIssue(ctx context.Context, root string, env []string, rep
 		return stateJSON, err
 	}
 	for !isTerminalPhase(stateJSON) {
+		if waitingReasonFromState(stateJSON) != "" {
+			return stateJSON, nil
+		}
 		a.logInfo("CLI: phase boundary reached, continuing to next phase")
 		stateJSON, err = a.resumeFromState(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 		if err != nil {
@@ -182,6 +185,20 @@ func isTerminalPhase(stateJSON string) bool {
 		return false
 	}
 	return state.Phase == "DONE" || state.Phase == "FINALIZE"
+}
+
+func waitingReasonFromState(stateJSON string) string {
+	var state struct {
+		Waiting       bool   `json:"waiting"`
+		WaitingReason string `json:"waiting_reason"`
+	}
+	if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
+		return ""
+	}
+	if !state.Waiting {
+		return ""
+	}
+	return strings.TrimSpace(state.WaitingReason)
 }
 
 func (a *App) runIssueWithEnv(ctx context.Context, root string, env []string, repo string, issueNumber int, dryRun bool, title string, metadata IssueMetadata) (string, error) {
@@ -217,6 +234,10 @@ func (a *App) resumeFromState(ctx context.Context, root string, env []string, re
 		return "", fmt.Errorf("failed to parse derived state: %v", err)
 	}
 	a.logInfo("RESUME: issue #%d from phase %s (PR #%d)", issueNumber, state.Phase, state.PRNumber)
+
+	if state.Phase == "DEVELOP" && waitingReasonFromState(stateJSON) != "" {
+		return a.runFromDevelop(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+	}
 
 	switch state.Phase {
 	case "DONE", "FINALIZE":
@@ -352,6 +373,13 @@ func (a *App) runFromDevelop(ctx context.Context, root string, env []string, rep
 			retryAfter, err := time.Parse(time.RFC3339, backoffState.TransientRetryAfter)
 			if err == nil && time.Now().Before(retryAfter) {
 				a.logInfo("DEVELOP: issue #%d backoff active until %s, skipping", issueNumber, backoffState.TransientRetryAfter)
+				stateJSON, err = updateStateJSON(stateJSON, func(state map[string]any) {
+					state["waiting"] = true
+					state["waiting_reason"] = "transient_backoff"
+				})
+				if err != nil {
+					return "", err
+				}
 				return stateJSON, nil
 			}
 		}
@@ -386,6 +414,8 @@ func (a *App) runFromDevelop(ctx context.Context, root string, env []string, rep
 		stateJSON, err = updateStateJSON(stateJSON, func(state map[string]any) {
 			state["transient_retries"] = retries
 			state["transient_retry_after"] = retryAfter
+			state["waiting"] = true
+			state["waiting_reason"] = "transient_backoff"
 		})
 		if err != nil {
 			return "", err
@@ -410,6 +440,8 @@ func (a *App) runFromDevelop(ctx context.Context, root string, env []string, rep
 		stateJSON, err = updateStateJSON(stateJSON, func(state map[string]any) {
 			state["transient_retries"] = 0
 			state["transient_retry_after"] = ""
+			delete(state, "waiting")
+			delete(state, "waiting_reason")
 		})
 		if err != nil {
 			return "", err

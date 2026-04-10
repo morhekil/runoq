@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"sort"
 	"strconv"
@@ -472,11 +471,11 @@ func normalizePayload(payload map[string]any, truth groundTruth) normalizedPaylo
 	schemaErrors := payloadSchemaErrors(payload)
 	result := normalizedPayload{
 		Status:              validStatus(payload["status"]),
-		CommitsPushed:       truthBackedStringArray(payload["commits_pushed"], truth.CommitsPushed),
-		CommitRange:         truthBackedString(payload["commit_range"], truth.CommitRange),
-		FilesChanged:        truthBackedStringArray(payload["files_changed"], truth.FilesChanged),
-		FilesAdded:          truthBackedStringArray(payload["files_added"], truth.FilesAdded),
-		FilesDeleted:        truthBackedStringArray(payload["files_deleted"], truth.FilesDeleted),
+		CommitsPushed:       append([]string(nil), truth.CommitsPushed...),
+		CommitRange:         truth.CommitRange,
+		FilesChanged:        append([]string(nil), truth.FilesChanged...),
+		FilesAdded:          append([]string(nil), truth.FilesAdded...),
+		FilesDeleted:        append([]string(nil), truth.FilesDeleted...),
 		TestsRun:            boolOr(payload["tests_run"], false),
 		TestsPassed:         boolOr(payload["tests_passed"], false),
 		TestSummary:         stringOrDefault(payload["test_summary"], ""),
@@ -485,27 +484,15 @@ func normalizePayload(payload map[string]any, truth groundTruth) normalizedPaylo
 		Notes:               stringOrDefault(payload["notes"], ""),
 		PayloadSchemaValid:  len(schemaErrors) == 0,
 		PayloadSchemaErrors: schemaErrors,
-		PayloadSource:       "patched",
+		PayloadSource:       "clean",
+	}
+	if len(schemaErrors) > 0 {
+		result.PayloadSource = "patched"
 	}
 
 	patched := make([]string, 0)
 	if !isValidStatus(payload["status"]) {
 		patched = append(patched, "status")
-	}
-	if truthBackedMismatch(payload["commits_pushed"], truth.CommitsPushed) {
-		patched = append(patched, "commits_pushed")
-	}
-	if truthBackedMismatch(payload["commit_range"], truth.CommitRange) {
-		patched = append(patched, "commit_range")
-	}
-	if truthBackedMismatch(payload["files_changed"], truth.FilesChanged) {
-		patched = append(patched, "files_changed")
-	}
-	if truthBackedMismatch(payload["files_added"], truth.FilesAdded) {
-		patched = append(patched, "files_added")
-	}
-	if truthBackedMismatch(payload["files_deleted"], truth.FilesDeleted) {
-		patched = append(patched, "files_deleted")
 	}
 	if _, ok := payload["tests_run"].(bool); !ok {
 		patched = append(patched, "tests_run")
@@ -536,19 +523,19 @@ func normalizePayload(payload map[string]any, truth groundTruth) normalizedPaylo
 	result.PatchedFields = uniqueSorted(patched)
 
 	discrepancies := make([]string, 0)
-	if truthBackedMismatch(payload["commits_pushed"], truth.CommitsPushed) {
+	if _, ok := payload["commits_pushed"]; ok && truthBackedMismatch(payload["commits_pushed"], truth.CommitsPushed) {
 		discrepancies = append(discrepancies, "commits_pushed_mismatch")
 	}
-	if truthBackedMismatch(payload["commit_range"], truth.CommitRange) {
+	if _, ok := payload["commit_range"]; ok && truthBackedMismatch(payload["commit_range"], truth.CommitRange) {
 		discrepancies = append(discrepancies, "commit_range_mismatch")
 	}
-	if truthBackedMismatch(payload["files_changed"], truth.FilesChanged) {
+	if _, ok := payload["files_changed"]; ok && truthBackedMismatch(payload["files_changed"], truth.FilesChanged) {
 		discrepancies = append(discrepancies, "files_changed_mismatch")
 	}
-	if truthBackedMismatch(payload["files_added"], truth.FilesAdded) {
+	if _, ok := payload["files_added"]; ok && truthBackedMismatch(payload["files_added"], truth.FilesAdded) {
 		discrepancies = append(discrepancies, "files_added_mismatch")
 	}
-	if truthBackedMismatch(payload["files_deleted"], truth.FilesDeleted) {
+	if _, ok := payload["files_deleted"]; ok && truthBackedMismatch(payload["files_deleted"], truth.FilesDeleted) {
 		discrepancies = append(discrepancies, "files_deleted_mismatch")
 	}
 	result.Discrepancies = uniqueSorted(discrepancies)
@@ -616,24 +603,9 @@ func synthesizePayload(truth groundTruth) normalizedPayload {
 }
 
 func payloadSchemaErrors(payload map[string]any) []string {
-	errorsList := make([]string, 0, 12)
+	errorsList := make([]string, 0, 7)
 	if !isValidStatus(payload["status"]) {
 		errorsList = append(errorsList, "status_missing_or_invalid")
-	}
-	if _, ok := parseStringArray(payload["commits_pushed"]); !ok {
-		errorsList = append(errorsList, "commits_pushed_missing_or_non_string_array")
-	}
-	if _, ok := payload["commit_range"].(string); !ok {
-		errorsList = append(errorsList, "commit_range_missing_or_non_string")
-	}
-	if _, ok := parseStringArray(payload["files_changed"]); !ok {
-		errorsList = append(errorsList, "files_changed_missing_or_non_string_array")
-	}
-	if _, ok := parseStringArray(payload["files_added"]); !ok {
-		errorsList = append(errorsList, "files_added_missing_or_non_string_array")
-	}
-	if _, ok := parseStringArray(payload["files_deleted"]); !ok {
-		errorsList = append(errorsList, "files_deleted_missing_or_non_string_array")
 	}
 	if _, ok := payload["tests_run"].(bool); !ok {
 		errorsList = append(errorsList, "tests_run_missing_or_non_boolean")
@@ -850,7 +822,7 @@ func truthBackedMismatch(value any, fallback any) bool {
 		if !ok {
 			return true
 		}
-		return !reflect.DeepEqual(actual, expected)
+		return !slices.Equal(actual, expected)
 	default:
 		return true
 	}

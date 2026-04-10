@@ -249,7 +249,7 @@ func TestValidatePayloadIncludesThreadIDAndSchemaMetadata(t *testing.T) {
 		`{"type":"thread.started","thread_id":"thread-abc123"}`,
 		"<!-- runoq:payload:codex-return -->",
 		"```json",
-		`{"status":"completed","commits_pushed":["fake"],"commit_range":"fake..fake","files_changed":[],"files_added":[],"files_deleted":[],"tests_run":true,"tests_passed":true,"test_summary":"ok","build_passed":true,"blockers":[],"notes":"ok"}`,
+		`{"status":"completed","tests_run":true,"tests_passed":true,"test_summary":"ok","build_passed":true,"blockers":[],"notes":"ok"}`,
 		"```",
 	}, "\n")
 	if err := os.WriteFile(source, []byte(content), 0o644); err != nil {
@@ -276,6 +276,12 @@ func TestValidatePayloadIncludesThreadIDAndSchemaMetadata(t *testing.T) {
 	if !strings.Contains(stdout, `"payload_schema_errors": []`) {
 		t.Fatalf("expected empty payload schema errors: %q", stdout)
 	}
+	if !strings.Contains(stdout, `"payload_source": "clean"`) {
+		t.Fatalf("expected payload_source=clean: %q", stdout)
+	}
+	if !strings.Contains(stdout, `"commits_pushed": [`) || !strings.Contains(stdout, `"files_added": [`) {
+		t.Fatalf("expected truth-backed commit/file data in output: %q", stdout)
+	}
 }
 
 func TestValidatePayloadFlagsSchemaErrorsForInvalidFieldTypes(t *testing.T) {
@@ -293,7 +299,7 @@ func TestValidatePayloadFlagsSchemaErrorsForInvalidFieldTypes(t *testing.T) {
 		`{"type":"thread.started","thread_id":"thread-invalid"}`,
 		"<!-- runoq:payload:codex-return -->",
 		"```json",
-		`{"status":"completed","commits_pushed":[],"commit_range":"","files_changed":[],"files_added":[],"files_deleted":[],"tests_run":true,"tests_passed":"yes","test_summary":"","build_passed":"true","blockers":[],"notes":""}`,
+		`{"status":"completed","tests_run":true,"tests_passed":"yes","test_summary":"","build_passed":"true","blockers":[],"notes":""}`,
 		"```",
 	}, "\n")
 	if err := os.WriteFile(source, []byte(content), 0o644); err != nil {
@@ -319,6 +325,9 @@ func TestValidatePayloadFlagsSchemaErrorsForInvalidFieldTypes(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "build_passed_missing_or_non_boolean") {
 		t.Fatalf("expected build_passed schema error: %q", stdout)
+	}
+	if strings.Contains(stdout, "commits_pushed_missing_or_non_string_array") || strings.Contains(stdout, "files_changed_missing_or_non_string_array") {
+		t.Fatalf("did not expect git fact schema errors after contract narrowing: %q", stdout)
 	}
 }
 
