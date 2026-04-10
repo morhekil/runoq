@@ -982,11 +982,15 @@ func (a *App) phaseRespond(ctx context.Context, root string, env []string, repo 
 
 	a.logInfo("RESPOND: found %d unprocessed comment(s) on PR #%d", len(comments), state.PRNumber)
 
+	handledComments := 0
+	var processingErrors []error
+
 	// Post acknowledgment reply for each unprocessed comment and mark processed via +1 reaction
 	for _, comment := range comments {
 		reply := fmt.Sprintf("Acknowledged feedback from %s. This will be addressed in the next development round.", comment.CommenterIdentity)
 		if err := a.commentPR(ctx, repo, state.PRNumber, fmt.Sprintf("<!-- runoq:agent:codex -->\n> Re: comment by @%s\n\n%s", comment.Author, reply)); err != nil {
 			a.logInfo("RESPOND: failed to post reply for comment %d: %v", comment.ID, err)
+			processingErrors = append(processingErrors, fmt.Errorf("reply to comment %d: %w", comment.ID, err))
 			continue
 		}
 
@@ -994,14 +998,21 @@ func (a *App) phaseRespond(ctx context.Context, root string, env []string, repo 
 		reactionEndpoint := fmt.Sprintf("repos/%s/issues/comments/%d/reactions", repo, comment.ID)
 		if _, err := a.ghOutput(ctx, env, "api", reactionEndpoint, "-f", "content=+1", "--method", "POST"); err != nil {
 			a.logInfo("RESPOND: failed to add +1 reaction to comment %d: %v", comment.ID, err)
+			processingErrors = append(processingErrors, fmt.Errorf("mark comment %d processed: %w", comment.ID, err))
+			continue
 		}
 
 		a.logInfo("RESPOND: replied to comment %d by %s", comment.ID, comment.Author)
+		handledComments++
+	}
+
+	if len(processingErrors) > 0 {
+		return "", fmt.Errorf("RESPOND: failed to process %d comment(s): %w", len(processingErrors), errors.Join(processingErrors...))
 	}
 
 	nextState, err := updateStateJSON(stateJSON, func(state map[string]any) {
 		state["phase"] = "RESPOND"
-		state["responded_comments"] = len(comments)
+		state["responded_comments"] = handledComments
 	})
 	if err != nil {
 		return "", err

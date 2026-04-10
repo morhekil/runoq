@@ -2322,6 +2322,75 @@ func TestPhaseRespondNoComments(t *testing.T) {
 	}
 }
 
+func TestPhaseRespondFailsWhenCommentProcessingIsIncomplete(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	tests := []struct {
+		name         string
+		failReply    bool
+		failReaction bool
+		wantErr      string
+	}{
+		{
+			name:      "reply failure",
+			failReply: true,
+			wantErr:   "failed to process 1 comment(s)",
+		},
+		{
+			name:         "reaction failure",
+			failReaction: true,
+			wantErr:      "failed to process 1 comment(s)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls []string
+			app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, io.Discard)
+			app.SetConfig(defaultOrchestratorConfig())
+			app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+				calls:       &calls,
+				issueNumber: 42,
+				issueTitle:  "Implement queue",
+				ghHandler: func(ghArgs string, req shell.CommandRequest) (bool, error) {
+					if strings.Contains(ghArgs, "api") && strings.Contains(ghArgs, "issues/87/comments") && !strings.Contains(ghArgs, "reactions") {
+						_, _ = io.WriteString(req.Stdout, `[
+							{"id": 300, "body": "Please add error handling", "user": {"login": "human1"}, "created_at": "2026-01-01T00:00:00Z", "reactions": {"+1": 0}}
+						]`)
+						return true, nil
+					}
+					if strings.Contains(ghArgs, "pr comment 87") && tt.failReply {
+						return true, errors.New("reply failed")
+					}
+					if strings.Contains(ghArgs, "api") && strings.Contains(ghArgs, "reactions") && strings.Contains(ghArgs, "+1") {
+						if tt.failReaction {
+							return true, errors.New("reaction failed")
+						}
+						return true, nil
+					}
+					return false, nil
+				},
+			}))
+
+			stateJSON := `{"issue":42,"phase":"REVIEW","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":87,"round":1}`
+			result, err := app.phaseRespond(ctx, root, app.env, "owner/repo", 42, stateJSON)
+			if err == nil {
+				t.Fatal("expected phaseRespond to fail")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
+			}
+			if result != "" {
+				t.Fatalf("expected empty result on failure, got %s", result)
+			}
+			if tt.failReaction && !containsCall(calls, "pr comment 87") {
+				t.Fatalf("expected reply attempt before reaction failure, got %v", calls)
+			}
+		})
+	}
+}
+
 func TestPhaseVerifyRerunsDeterministicVerificationFromStatePayload(t *testing.T) {
 	ctx := t.Context()
 	baseDir := t.TempDir()
