@@ -60,6 +60,26 @@ If an epic already contains an implementation task labeled `runoq:in-progress`, 
 - [ ] No new ready sibling is dispatched while an in-progress sibling exists
 - [ ] Terminal output identifies the resumed task rather than a newly selected task
 
+### Scenario: Targeted issue dispatch mode
+
+Operator provides `TargetIssue`, so the tick dispatches that specific implementation task instead of walking the milestone queue.
+
+- [ ] The tick prints `Dispatching target issue #<n>` before dispatch
+- [ ] An open implementation task goes straight through the implementation phase machine for that task
+- [ ] Terminal output reports `Issue #<n> — phase: <PHASE>` for the targeted task
+- [ ] Queue walking is bypassed; the tick does not require epic or milestone selection to dispatch the targeted task
+- [ ] A closed targeted task reports `Issue #<n> already complete` and exits without reopening or redispatching it
+
+### Scenario: INIT dry-run mode
+
+Operator enables dry-run implementation dispatch for a specific issue.
+
+- [ ] `INIT` returns a state payload with `phase=INIT`, `issue=<n>`, `branch=<branch>`, and `dry_run=true`
+- [ ] No worktree is created
+- [ ] No draft PR is created
+- [ ] No issue status transition to `runoq:in-progress` occurs
+- [ ] No audit comment is posted because no PR exists yet
+
 ### Scenario: Happy path (6 ticks)
 
 **Tick 1 — Init:**
@@ -483,10 +503,12 @@ Minimum observable scenarios:
 - [ ] Bootstrap path with no existing epics creates the planning epic and planning issue, then posts a proposal
 - [ ] Pending planning review with unresolved human comments responds to those comments and does not advance in the same tick
 - [ ] Planning review can remain in an awaiting-human-decision state across ticks without materializing milestones early
-- [ ] Approved planning review materializes milestone or task issues and closes the review issue
+- [ ] Approved planning review materializes milestone or task issues, closes the review issue, and closes its parent `Project Planning` issue
 - [ ] Approved top-level planning review seeds a planning issue only for the first newly created milestone
 - [ ] Proposal posting for that seeded task-planning issue happens on a later planning-dispatch tick, not during the approval-application tick
-- [ ] Approved adjustment review applies accepted adjustments, closes the review issue, and seeds the next planning issue when appropriate
+- [ ] Approved adjustment review applies accepted adjustments, closes the review issue, and closes its parent planning issue
+- [ ] Approved adjustment review seeds the next planning issue only when the next open milestone does not already have a planning child
+- [ ] Approved adjustment terminal output reports that adjustments were applied, rather than always claiming new issues were created
 - [ ] When a milestone's child tasks drain, the tick runs milestone review and creates an adjustment review issue
 - [ ] When all milestones are complete, the terminal output reports that all milestones are complete
 
