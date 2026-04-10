@@ -108,7 +108,9 @@ func (a *App) phaseInit(ctx context.Context, root string, env []string, repo str
 		return "", err
 	}
 
-	_ = a.postAuditCommentWithState(ctx, root, env, repo, prResult.Number, "init", stateJSON, fmt.Sprintf("Initialized work on issue #%d. Branch: `%s`", issueNumber, branch))
+	if err := a.postAuditCommentWithState(ctx, root, env, repo, prResult.Number, "init", stateJSON, fmt.Sprintf("Initialized work on issue #%d. Branch: `%s`", issueNumber, branch)); err != nil {
+		return "", fmt.Errorf("post init audit comment: %w", err)
+	}
 
 	a.logInfo("INIT: branch=%s worktree=%s pr=#%d", branch, worktree, prResult.Number)
 	return stateJSON, nil
@@ -292,7 +294,9 @@ func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo 
 		}
 	}
 	if state.PRNumber != 0 {
-		_ = a.postAuditCommentWithState(ctx, root, env, repo, state.PRNumber, "develop", nextState, developBody, "issue-runner")
+		if err := a.postAuditCommentWithState(ctx, root, env, repo, state.PRNumber, "develop", nextState, developBody, "issue-runner"); err != nil {
+			return "", issueRunnerResult{}, fmt.Errorf("post develop audit comment: %w", err)
+		}
 	}
 
 	return nextState, result, nil
@@ -408,7 +412,9 @@ func (a *App) phaseVerify(ctx context.Context, root string, env []string, repo s
 	if strings.TrimSpace(checklist) != "" {
 		verifyBody += "\n### Failures\n" + checklist + "\n"
 	}
-	_ = a.postAuditCommentWithState(ctx, root, env, repo, state.PRNumber, "verify", verifyState, verifyBody, "verifier")
+	if err := a.postAuditCommentWithState(ctx, root, env, repo, state.PRNumber, "verify", verifyState, verifyBody, "verifier"); err != nil {
+		return "", fmt.Errorf("post verify audit comment: %w", err)
+	}
 
 	return verifyState, nil
 }
@@ -634,7 +640,9 @@ func (a *App) phaseReview(ctx context.Context, root string, env []string, repo s
 		return "", err
 	}
 
-	_ = a.postAuditCommentWithState(ctx, root, env, repo, state.PRNumber, "review", reviewState, reviewBody)
+	if err := a.postAuditCommentWithState(ctx, root, env, repo, state.PRNumber, "review", reviewState, reviewBody); err != nil {
+		return "", fmt.Errorf("post review audit comment: %w", err)
+	}
 
 	return reviewState, nil
 }
@@ -929,7 +937,9 @@ func (a *App) phaseDevelopNeedsReview(ctx context.Context, root string, env []st
 		body := fmt.Sprintf(
 			"## Needs review — issue #%d\n\n| Field | Value |\n|-------|-------|\n| **Develop status** | `%s` |\n| **Reason** | %s |\n",
 			issueNumber, developStatus, developSummary)
-		_ = a.postAuditCommentWithState(ctx, root, env, repo, state.PRNumber, "finalize", finalizeState, body)
+		if err := a.postAuditCommentWithState(ctx, root, env, repo, state.PRNumber, "finalize", finalizeState, body); err != nil {
+			return "", fmt.Errorf("post finalize audit comment: %w", err)
+		}
 	}
 
 	doneState, err := updateStateJSON(finalizeState, func(state map[string]any) {

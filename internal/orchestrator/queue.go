@@ -423,7 +423,9 @@ func (a *App) runFromDevelop(ctx context.Context, root string, env []string, rep
 			commentBody := fmt.Sprintf(
 				"Transient codex error (attempt %d/%d): %s\n\nBacking off for %v — next tick will retry automatically.",
 				retries, maxTransientRetries, developResult.Summary, backoff)
-			_ = a.postAuditCommentWithState(ctx, root, env, repo, prState.PRNumber, "develop-transient", stateJSON, commentBody)
+			if err := a.postAuditCommentWithState(ctx, root, env, repo, prState.PRNumber, "develop-transient", stateJSON, commentBody); err != nil {
+				return "", fmt.Errorf("post develop-transient audit comment: %w", err)
+			}
 		}
 
 		return stateJSON, nil
@@ -487,7 +489,9 @@ func (a *App) ensurePRCreated(ctx context.Context, root string, env []string, re
 	if event == "" || event == "respond" || event == "done" || event == "finalize" {
 		event = "develop"
 	}
-	_ = a.postAuditCommentWithState(ctx, root, env, repo, prResult.Number, event, nextState, fmt.Sprintf("PR created. Branch: `%s`", state.Branch))
+	if err := a.postAuditCommentWithState(ctx, root, env, repo, prResult.Number, event, nextState, fmt.Sprintf("PR created. Branch: `%s`", state.Branch)); err != nil {
+		return "", fmt.Errorf("post %s audit comment: %w", event, err)
+	}
 
 	return nextState, nil
 }
@@ -550,7 +554,9 @@ func (a *App) runFromDecide(ctx context.Context, root string, env []string, repo
 		case "finalize-needs-review":
 			body = "Decision: finalize-needs-review. Next tick will hand off for human review."
 		}
-		_ = a.postAuditCommentWithState(ctx, root, env, repo, decideState.PRNumber, "decide", stateJSON, body)
+		if err := a.postAuditCommentWithState(ctx, root, env, repo, decideState.PRNumber, "decide", stateJSON, body); err != nil {
+			return "", fmt.Errorf("post decide audit comment: %w", err)
+		}
 	}
 	// Tick boundary: DECIDE never chains into FINALIZE in the same tick.
 	return stateJSON, nil

@@ -1220,6 +1220,33 @@ func TestRunFromDecideReturnsBoundaryOnPass(t *testing.T) {
 	}
 }
 
+func TestRunFromDecideFailsWhenDecideAuditCommentFails(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, io.Discard)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		issueNumber: 42,
+		issueTitle:  "Implement queue",
+		ghHandler: func(ghArgs string, req shell.CommandRequest) (bool, error) {
+			if strings.Contains(ghArgs, "pr comment 87") {
+				return true, errors.New("comment failed")
+			}
+			return false, nil
+		},
+	}))
+
+	stateJSON := `{"issue":42,"phase":"REVIEW","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":87,"round":1,"verdict":"PASS","score":"42","review_checklist":"- All good.","baseline_hash":"base","head_hash":"head","summary":"Ready"}`
+	_, err := app.runFromDecide(ctx, root, app.env, "owner/repo", 42, stateJSON, IssueMetadata{Number: 42, Type: "task"})
+	if err == nil {
+		t.Fatal("expected decide failure when decide audit comment fails")
+	}
+	if !strings.Contains(err.Error(), "post decide audit comment") {
+		t.Fatalf("expected decide audit comment error, got %v", err)
+	}
+}
+
 // TestResumeFromStateBoundaries verifies that resumeFromState correctly advances
 // through tick boundaries without chaining across them.
 func TestResumeFromStateBoundaries(t *testing.T) {
@@ -2070,6 +2097,43 @@ func TestPhaseInitCreatesPRAndSetsState(t *testing.T) {
 	}
 }
 
+func TestPhaseInitFailsWhenInitAuditCommentFails(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	env := []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root, "RUNOQ_BASE_REF=main"}
+	if err := os.MkdirAll(root+"/config", 0o755); err != nil {
+		t.Fatalf("mkdir config: %v", err)
+	}
+	if err := os.WriteFile(root+"/config/runoq.json", []byte(`{"branchPrefix":"runoq/","worktreePrefix":"runoq-wt-"}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	app := New(nil, env, root, io.Discard, io.Discard)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		issueNumber: 42,
+		issueTitle:  "Implement queue",
+		ghHandler: func(ghArgs string, req shell.CommandRequest) (bool, error) {
+			if strings.Contains(ghArgs, "pr comment 87") {
+				return true, errors.New("comment failed")
+			}
+			return false, nil
+		},
+	}))
+	wtApp := worktree.New(nil, env, root, io.Discard, io.Discard)
+	wtApp.SetCommandExecutor(app.execCommand)
+	app.SetWorktreeApp(wtApp)
+
+	_, err := app.phaseInit(ctx, root, app.env, "owner/repo", 42, false, "Implement queue")
+	if err == nil {
+		t.Fatal("expected init failure when init audit comment fails")
+	}
+	if !strings.Contains(err.Error(), "post init audit comment") {
+		t.Fatalf("expected init audit comment error, got %v", err)
+	}
+}
+
 func TestEnsurePRCreatedSkipsWhenPRExists(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
@@ -2139,6 +2203,33 @@ func TestEnsurePRCreatedUsesDevelopAuditCommentWithoutOpenPRMarker(t *testing.T)
 	}
 	if !strings.Contains(commentBody, "runoq:bot:orchestrator:develop") {
 		t.Fatalf("expected develop audit marker when creating PR from develop state, got %q", commentBody)
+	}
+}
+
+func TestEnsurePRCreatedFailsWhenAuditCommentFails(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, io.Discard)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		issueNumber: 42,
+		issueTitle:  "Implement queue",
+		ghHandler: func(ghArgs string, req shell.CommandRequest) (bool, error) {
+			if strings.Contains(ghArgs, "pr comment 87") {
+				return true, errors.New("comment failed")
+			}
+			return false, nil
+		},
+	}))
+
+	stateJSON := `{"issue":42,"phase":"DEVELOP","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":0,"round":1,"status":"completed"}`
+	_, err := app.ensurePRCreated(ctx, root, app.env, "owner/repo", 42, stateJSON, "Implement queue")
+	if err == nil {
+		t.Fatal("expected ensurePRCreated failure when audit comment fails")
+	}
+	if !strings.Contains(err.Error(), "post develop audit comment") {
+		t.Fatalf("expected develop audit comment error, got %v", err)
 	}
 }
 
