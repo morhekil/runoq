@@ -62,6 +62,14 @@ If an epic already contains an implementation task labeled `runoq:in-progress`, 
 - [ ] No new ready sibling is dispatched while an in-progress sibling exists
 - [ ] Terminal output identifies the resumed task rather than a newly selected task
 
+### Scenario: Queue continuation prefers dependents of the last completed task
+
+When multiple ready tasks exist, queue-mode dispatch prefers a ready task that directly depends on the most recently completed task so work continues down the started subtree.
+
+- [ ] After one task completes, the next queue tick prefers a ready direct dependent of that task over unrelated ready siblings when such a dependent exists
+- [ ] If no ready direct dependent exists, normal depth/priority selection resumes
+- [ ] The loop driver carries the last completed issue number forward between ticks when selecting the next ready implementation task
+
 ### Scenario: Targeted issue dispatch mode
 
 Operator provides `TargetIssue`, so the tick dispatches that specific implementation task instead of walking the milestone queue.
@@ -73,6 +81,8 @@ Operator provides `TargetIssue`, so the tick dispatches that specific implementa
 - [ ] A closed targeted task reports `Issue #<n> already complete` and exits without reopening or redispatching it
 - [ ] A non-existent targeted issue reports `target issue #<n> not found` and exits with an error
 - [ ] A targeted epic/planning/adjustment issue reports `target issue #<n> is not an implementation task` and exits with an error
+- [ ] A targeted task still enforces implementation eligibility checks and reports `Issue #<n> skipped: <reason>` when it is not dispatchable
+- [ ] A targeted task can also return a waiting state, and terminal output reports `Issue #<n> — phase: <PHASE> (waiting): <reason>`
 
 ### Scenario: INIT dry-run mode
 
@@ -545,12 +555,14 @@ Planning smoke is part of the currently implemented externally observable behavi
 Minimum observable scenarios:
 
 - [ ] Bootstrap path with no existing epics creates the planning epic and planning issue, then posts a proposal
+- [ ] A pending planning issue with no proposal payload yet is treated as needing planning dispatch rather than awaiting human decision
 - [ ] Pending planning review with unresolved human comments responds to those comments and does not advance in the same tick
 - [ ] Planning review can remain in an awaiting-human-decision state across ticks without materializing milestones early
-- [ ] Approved planning review materializes milestone or task issues, closes the review issue, and closes its parent `Project Planning` issue
+- [ ] Approved top-level planning review materializes milestone issues, closes the review issue, and closes its parent `Project Planning` issue
+- [ ] Approved milestone-scoped task-planning review materializes task issues and closes the review issue without closing the milestone epic
 - [ ] Approved top-level planning review seeds a planning issue only for the first newly created milestone
 - [ ] Proposal posting for that seeded task-planning issue happens on a later planning-dispatch tick, not during the approval-application tick
-- [ ] Approved adjustment review applies accepted adjustments, closes the review issue, and closes its parent planning issue
+- [ ] Approved adjustment review applies accepted adjustments, closes the adjustment review issue, and closes its parent milestone epic
 - [ ] Approved adjustment review seeds the next planning issue only when the next open milestone does not already have a planning child
 - [ ] Approved adjustment terminal output reports that adjustments were applied, rather than always claiming new issues were created
 - [ ] When a milestone's child tasks drain, the tick runs milestone review and creates an adjustment review issue
