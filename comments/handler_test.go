@@ -3,6 +3,7 @@ package comments
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/saruman/runoq/agents"
@@ -13,6 +14,7 @@ type fakeGH struct {
 	calls       []string
 	reactionErr error
 	labelAddErr error
+	editedBody  string
 }
 
 func (f *fakeGH) IssueView(_ context.Context, repo string, number int, fields string) (string, error) {
@@ -27,6 +29,7 @@ func (f *fakeGH) IssueComment(_ context.Context, repo string, number int, body s
 
 func (f *fakeGH) IssueEditBody(_ context.Context, repo string, number int, body string) error {
 	f.calls = append(f.calls, "issue-edit-body")
+	f.editedBody = body
 	return nil
 }
 
@@ -136,6 +139,43 @@ func TestHandleCommentsApprove(t *testing.T) {
 	}
 }
 
+func TestHandleCommentsChangeRequestUpdatesProposalBody(t *testing.T) {
+	t.Parallel()
+
+	gh := &fakeGH{
+		issueView: `{"number":2,"title":"Review","body":"## Acceptance Criteria\n- [ ] Done.\n\n<!-- runoq:proposal-start -->\nOld proposal","comments":[
+			{"author":{"login":"human"},"body":"Please revise","id":"IC1","reactionGroups":[]}
+		]}`,
+	}
+	invoker := &fakeInvoker{
+		responseText: `{"action":"change-request","reply":"Updated proposal.","revised_proposal":{"items":[{"title":"Revised milestone","type":"implementation","goal":"Ship it","criteria":["Works"],"priority":1}]}}`,
+	}
+
+	err := HandleComments(t.Context(), HandleCommentsConfig{
+		Repo:        "owner/repo",
+		IssueNumber: 2,
+		PlanFile:    "docs/plan.md",
+		RunoqRoot:   t.TempDir(),
+		GH:          gh,
+		Invoker:     invoker,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gh.editedBody == "" {
+		t.Fatal("expected issue body to be updated for change-request")
+	}
+	if gh.editedBody == gh.issueView {
+		t.Fatal("expected edited body to differ from original issue view payload")
+	}
+	if !containsString(gh.editedBody, "Revised milestone") {
+		t.Fatalf("expected revised proposal content in body, got %q", gh.editedBody)
+	}
+	if containsString(gh.editedBody, "Old proposal") {
+		t.Fatalf("expected old proposal content to be replaced, got %q", gh.editedBody)
+	}
+}
+
 func TestHandleCommentsClaudeBinPassedToInvoker(t *testing.T) {
 	t.Parallel()
 
@@ -216,4 +256,8 @@ func TestHandleCommentsReturnsReactionError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected reaction error")
 	}
+}
+
+func containsString(haystack, needle string) bool {
+	return strings.Contains(haystack, needle)
 }

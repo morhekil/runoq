@@ -127,10 +127,17 @@ func HandleComments(ctx context.Context, cfg HandleCommentsConfig) error {
 			}
 		}
 	case ActionChangeRequest:
-		// TODO: update issue body with revised proposal
-		// This requires planning.FormatProposalCommentBody + ReplaceProposalInBody
-		// which creates a circular import (comments → planning). For now, the
-		// change-request side effect is handled by the caller.
+		if agentResp.RevisedProposal == nil {
+			return fmt.Errorf("change-request action requires revised proposal payload")
+		}
+		var revised revisedProposal
+		if err := json.Unmarshal(*agentResp.RevisedProposal, &revised); err != nil {
+			return fmt.Errorf("parse revised proposal: %w", err)
+		}
+		newBody := replaceProposalInBody(issueData.Body, formatRevisedProposal(revised))
+		if err := cfg.GH.IssueEditBody(ctx, cfg.Repo, cfg.IssueNumber, newBody); err != nil {
+			return fmt.Errorf("update issue body: %w", err)
+		}
 	}
 
 	// Mark as responded (thumbs_up)
@@ -141,6 +148,53 @@ func HandleComments(ctx context.Context, cfg HandleCommentsConfig) error {
 	}
 
 	return nil
+}
+
+type revisedProposal struct {
+	Items []struct {
+		Title    string   `json:"title"`
+		Type     string   `json:"type"`
+		Goal     string   `json:"goal,omitzero"`
+		Criteria []string `json:"criteria,omitzero"`
+		Priority *int     `json:"priority,omitzero"`
+	} `json:"items"`
+}
+
+const proposalStartMarker = "<!-- runoq:proposal-start -->"
+
+func formatRevisedProposal(p revisedProposal) string {
+	var b strings.Builder
+	b.WriteString("<!-- runoq:payload:plan-proposal -->\n")
+	for i, item := range p.Items {
+		if i > 0 {
+			b.WriteString("\n---\n\n")
+		}
+		fmt.Fprintf(&b, "### %d. %s\n", i+1, item.Title)
+		b.WriteString("**Type:** ")
+		b.WriteString(item.Type)
+		if item.Priority != nil {
+			fmt.Fprintf(&b, " · **Priority:** %d", *item.Priority)
+		}
+		b.WriteString("\n\n")
+		if item.Goal != "" {
+			fmt.Fprintf(&b, "> %s\n\n", item.Goal)
+		}
+		if len(item.Criteria) > 0 {
+			b.WriteString("**Acceptance criteria:**\n")
+			for _, criterion := range item.Criteria {
+				fmt.Fprintf(&b, "- [ ] %s\n", criterion)
+			}
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
+}
+
+func replaceProposalInBody(existingBody, newProposal string) string {
+	if idx := strings.Index(existingBody, proposalStartMarker); idx >= 0 {
+		return existingBody[:idx] + proposalStartMarker + "\n" + newProposal
+	}
+	return existingBody + "\n\n" + proposalStartMarker + "\n" + newProposal
 }
 
 func extractCommentBodies(issueViewJSON string, ids []string) (string, error) {
