@@ -162,8 +162,11 @@ func TestRunTickNoEpicsBootstraps(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "runoq.json")
-	if err := os.WriteFile(configPath, []byte(`{"labels":{"ready":"runoq:ready","inProgress":"runoq:in-progress","done":"runoq:done","needsReview":"runoq:needs-human-review","blocked":"runoq:blocked","planApproved":"runoq:plan-approved"}}`), 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Join(tmpDir, "config"), 0o755); err != nil {
+		t.Fatalf("mkdir config: %v", err)
+	}
+	configPath := filepath.Join(tmpDir, "config", "runoq.json")
+	if err := os.WriteFile(configPath, []byte(`{"labels":{"ready":"runoq:ready","inProgress":"runoq:in-progress","done":"runoq:done","needsReview":"runoq:needs-human-review","blocked":"runoq:blocked","planApproved":"runoq:plan-approved"},"branchPrefix":"runoq/","worktreePrefix":"runoq-wt-"}`), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -614,6 +617,73 @@ func TestTickSelectsTaskAndCallsRunIssue(t *testing.T) {
 	// Tick should have selected #11 (priority 1) and called RunIssue with it
 	if eligibilityIssue != "11" {
 		t.Errorf("expected RunIssue called with issue 11, got eligibility for issue %q; stderr:\n%s", eligibilityIssue, stderr.String())
+	}
+}
+
+func TestRunTickTargetIssueDispatchesSpecificTask(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "runoq.json")
+	if err := os.WriteFile(configPath, []byte(`{"labels":{"ready":"runoq:ready","inProgress":"runoq:in-progress","done":"runoq:done","needsReview":"runoq:needs-human-review","blocked":"runoq:blocked","planApproved":"runoq:plan-approved"}}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	issueList := `[
+		{"number":42,"title":"Target task","state":"OPEN","body":"## Acceptance Criteria\n\n- [ ] Works.","labels":[{"name":"runoq:ready"}],"url":"u"},
+		{"number":99,"title":"Other epic","state":"OPEN","body":"","labels":[],"url":"u"}
+	]`
+
+	graphqlResponse := `{"data":{"repository":{"issues":{"nodes":[
+		{"number":42,"blockedBy":{"nodes":[]},"issueType":{"name":"Task"}},
+		{"number":99,"blockedBy":{"nodes":[]},"issueType":{"name":"Epic"}}
+	]}}}}`
+
+	var stdout, stderr bytes.Buffer
+	stub := &ghStub{
+		rules: []ghStubRule{
+			{contains: "issue list", stdout: issueList},
+			{contains: "api graphql", stdout: graphqlResponse},
+			{contains: "pr list --repo owner/repo --state open --head", stdout: `[]`},
+			{contains: "pr list --repo owner/repo --search closes #42", stdout: `[]`},
+			{contains: "issue view 42", stdout: `{"number":42,"title":"Target task","body":"## Acceptance Criteria\n\n- [ ] Works.","labels":[{"name":"runoq:ready"}],"url":"u"}`},
+			{contains: "issue edit 42", stdout: ""},
+			{contains: "ls-remote --symref origin HEAD", stdout: "ref: refs/heads/main\tHEAD\n"},
+			{contains: "remote show", stdout: "HEAD branch: main\n"},
+			{contains: "fetch", stdout: ""},
+			{contains: "worktree", stdout: ""},
+			{contains: "branch -D", stdout: ""},
+			{contains: "commit --allow-empty", stdout: ""},
+			{contains: "push", stdout: ""},
+			{contains: "config user.", stdout: ""},
+			{contains: "pr create", stdout: "https://example.test/pull/87\n"},
+			{contains: "pr comment", stdout: ""},
+		},
+	}
+
+	result := RunTick(t.Context(), TickConfig{
+		Repo:           "owner/repo",
+		PlanFile:       "docs/plan.md",
+		RunoqRoot:      tmpDir,
+		TargetIssue:    42,
+		BranchPrefix:   "runoq/",
+		WorktreePrefix: "runoq-wt-",
+		Env:            []string{"RUNOQ_CONFIG=" + configPath, "RUNOQ_ROOT=" + tmpDir, "TARGET_ROOT=" + tmpDir},
+		ExecCommand:    stub.exec,
+		Stdout:         &stdout,
+		Stderr:         &stderr,
+	})
+
+	if result != 0 {
+		t.Fatalf("RunTick = %d, want 0; stderr=%s", result, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Issue #42 — phase: INIT") {
+		t.Fatalf("expected targeted issue output, got %q", stdout.String())
+	}
+	for _, call := range stub.calls {
+		if strings.Contains(call, "sub_issues") {
+			t.Fatalf("targeted issue tick should not walk epic hierarchy, got calls: %v", stub.calls)
+		}
 	}
 }
 

@@ -89,10 +89,13 @@ runoq plan docs/plan.md --dry-run
 Use single-issue mode when you want to drive one queue item explicitly:
 
 ```bash
-runoq run --issue 42
+runoq tick --issue 42
+runoq loop --issue 42
 ```
 
-During a successful run, `runoq` drives the issue through a deterministic phase sequence:
+`tick --issue N` advances that task by one implementation transition. `loop --issue N` keeps invoking targeted ticks until the issue reaches a terminal state.
+
+During a successful issue run, `runoq` drives the issue through a deterministic phase sequence:
 
 1. **INIT** — eligibility check, label transition to `runoq:in-progress`, worktree and draft PR creation
 2. **DEVELOP** — one bounded Codex dev round runs in the worktree and posts its result to the PR
@@ -110,7 +113,7 @@ If the outcome is a clean pass and complexity is at or below the auto-merge thre
 Queue mode lets `runoq` select the next ready issue automatically:
 
 ```bash
-runoq run
+runoq loop
 ```
 
 Queue selection is based on open issues labeled `runoq:ready`. The runtime skips issues whose dependencies are not yet labeled `runoq:done` and continues until there are no actionable items left or the consecutive-failure circuit breaker halts the queue.

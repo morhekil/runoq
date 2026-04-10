@@ -429,22 +429,6 @@ func truncateHash(value string) string {
 	return trimmed[:7]
 }
 
-func commandExitCode(err error) int {
-	if err == nil {
-		return 0
-	}
-
-	type exitCoder interface {
-		ExitCode() int
-	}
-
-	var exitErr exitCoder
-	if errors.As(err, &exitErr) {
-		return exitErr.ExitCode()
-	}
-	return 1
-}
-
 func firstReviewer(reviewers []string) string {
 	for _, reviewer := range reviewers {
 		trimmed := strings.TrimSpace(reviewer)

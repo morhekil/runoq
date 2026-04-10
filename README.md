@@ -16,7 +16,7 @@ It gives a human operator a repeatable way to turn a plan into GitHub issues, ru
 
 1. Run `runoq init` inside a target GitHub repository.
 2. Create queued issues from a plan with `runoq plan <file>`.
-3. Execute one issue with `runoq run --issue N` or let the runtime select the next ready issue with `runoq run`.
+3. Advance one issue with `runoq tick --issue N`, run it to completion with `runoq loop --issue N`, or let the runtime keep selecting ready work with `runoq loop`.
 4. Inspect local state and token/cost summaries with `runoq report`.
 5. Launch maintenance review with `runoq maintenance`.
 
@@ -48,7 +48,7 @@ export RUNOQ_SYMLINK_DIR="$HOME/.local/bin"
 
 /path/to/runoq/bin/runoq init
 /path/to/runoq/bin/runoq plan docs/plan.md
-/path/to/runoq/bin/runoq run --issue 42
+/path/to/runoq/bin/runoq loop --issue 42
 /path/to/runoq/bin/runoq report summary
 ```
 
@@ -58,7 +58,8 @@ export RUNOQ_SYMLINK_DIR="$HOME/.local/bin"
 
 - `runoq init`: bootstraps identity, labels, state directories, a fallback `package.json`, and a local CLI symlink.
 - `runoq plan <file>`: sends a plan document to the `plan-to-issues` skill to create queued GitHub issues.
-- `runoq run [--issue N] [--dry-run]`: runs a single issue or the next ready queue item through the orchestrated implementation flow.
+- `runoq tick [--issue N]`: advances the planning or implementation workflow by one deterministic step.
+- `runoq loop [--backoff N] [--max-wait-cycles N] [--issue N]`: repeats `tick` until completion, interruption, or a wait-limit stop.
 - `runoq report <summary|issue|cost>`: reports on saved run state and token usage.
 - `runoq maintenance`: launches the maintenance reviewer agent for a read-only review pass.
 

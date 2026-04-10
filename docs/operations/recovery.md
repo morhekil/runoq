@@ -6,16 +6,16 @@ This guide explains how to recover from interrupted runs, eligibility failures, 
 
 When a run behaves unexpectedly, check these in order:
 
-1. `runoq run --dry-run`
-2. `runoq report issue <n>`
-3. the issue comments
-4. the PR comments and PR body summary
-5. `.runoq/state/<issue>.json`
+1. `runoq report issue <n>`
+2. the issue comments
+3. the PR comments and PR body summary
+4. `.runoq/state/<issue>.json`
 
 Useful commands:
 
 ```bash
-runoq run --dry-run
+runoq tick --issue 42
+runoq loop --issue 42
 runoq report issue 42
 runoq report summary
 scripts/worktree.sh inspect 42
@@ -24,7 +24,7 @@ scripts/gh-auth.sh print-identity
 
 ## What Startup Reconciliation Does
 
-Every `runoq run` begins with `dispatch-safety.sh reconcile`.
+Every implementation dispatch through `runoq tick --issue`, `runoq loop --issue`, or a queue-selecting implementation tick begins with `dispatch-safety.sh reconcile`.
 
 Possible reconciliation outcomes:
 
@@ -34,7 +34,7 @@ Possible reconciliation outcomes:
 | `needs-review` | interrupted state cannot be resumed safely | relabels the issue to `runoq:needs-human-review` and comments on the issue |
 | `reset-ready` | GitHub still shows `runoq:in-progress`, but no active local state explains it | resets the label to `runoq:ready` and comments on the issue |
 
-If you want to see reconciliation output without dispatching new work, use `runoq run --dry-run`.
+There is no preview-only reconciliation command. To observe reconciliation, inspect the issue and PR comments it writes during the next implementation tick.
 
 ## Interrupted Runs
 
@@ -50,7 +50,7 @@ Symptoms:
 What to do:
 
 - confirm the branch and PR still reflect the intended work
-- rerun `runoq run --issue <n>` if you want to continue manually
+- rerun `runoq tick --issue <n>` for one controlled transition, or `runoq loop --issue <n>` to keep advancing automatically
 - otherwise let queue mode resume naturally on the next run
 
 ### Unrecoverable interruption
@@ -78,7 +78,7 @@ What to do:
 
 Symptoms:
 
-- `runoq run --dry-run` shows a reconciliation action `reset-ready`
+- the next implementation tick resets the issue to `runoq:ready`
 - issue comment says `Found stale runoq:in-progress label with no active run. Reset to runoq:ready.`
 
 What it means:
@@ -154,7 +154,7 @@ What to do:
 - inspect the adjustment-review issue and decide whether to accept, reject, or revise the proposed follow-up work
 - Check whether the criteria commit is still reachable
 - Fix the underlying integration failures (often test/build failures across combined child work)
-- Rerun `runoq run` — the epic sweep will retry integration for epics whose children are all done
+- Rerun `runoq loop` — the epic sweep will retry integration for epics whose children are all done
 
 ## Verification Failures
 

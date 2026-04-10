@@ -29,9 +29,8 @@ import (
 const usageText = `Usage:
   runoq init [--plan <path>]
   runoq plan [file] [--auto-confirm] [--dry-run]
-  runoq tick
-  runoq loop [--backoff N]
-  runoq run [--issue N] [--dry-run]
+  runoq tick [--issue N]
+  runoq loop [--backoff N] [--max-wait-cycles N] [--issue N]
   runoq report <summary|issue|cost> [...]
   runoq maintenance
 `
@@ -69,16 +68,19 @@ Options:
   --auto-confirm    Skip confirmation prompt
   --dry-run         Show decomposition without creating issues
 `,
-	"tick": `Usage: runoq tick
+	"tick": `Usage: runoq tick [--issue N]
 
 Run one iteration of the planning lifecycle.
+
+Options:
+  --issue N     Run a single implementation task instead of queue selection
 
 Exit codes:
   0    Work done, more available
   2    Nothing to do, waiting for human input
   1    Error
 `,
-	"loop": `Usage: runoq loop [--backoff N] [--max-wait-cycles N]
+	"loop": `Usage: runoq loop [--backoff N] [--max-wait-cycles N] [--issue N]
 
 Run tick in a loop until interrupted or complete.
 
@@ -89,14 +91,7 @@ On exit 1 (error), stops. On exit 3 (all milestones complete), stops.
 Options:
   --backoff N           Seconds to wait when tick has no work (default: 30)
   --max-wait-cycles N   Stop after N consecutive waiting ticks (default: unlimited)
-`,
-	"run": `Usage: runoq run [--issue N] [--dry-run]
-
-Execute the next issue from the queue.
-
-Options:
-  --issue N     Run a specific issue number instead of the next in queue
-  --dry-run     Show what would be executed without running it
+  --issue N             Run a single implementation task instead of queue selection
 `,
 	"report": `Usage: runoq report <summary|issue|cost> [...]
 
@@ -181,7 +176,7 @@ func (a *App) Run(ctx context.Context) int {
 	}
 
 	switch subcommand {
-	case "init", "plan", "tick", "loop", "run", "report", "maintenance":
+	case "init", "plan", "tick", "loop", "report", "maintenance":
 		if hasHelpFlag(args) {
 			_, _ = io.WriteString(a.stdout, subcommandHelp[subcommand])
 			return 0
@@ -201,31 +196,20 @@ func (a *App) Run(ctx context.Context) int {
 		}
 		return 1
 	case "tick":
+		if _, err := parseTickArgs(args); err != nil {
+			return shell.Fail(a.stderr, err.Error())
+		}
 		targetEnv, code := a.prepareTargetContext(ctx, runoqRoot, env)
 		if code != 0 {
 			return code
 		}
-		return a.runTick(ctx, targetEnv, runoqRoot)
+		return a.runTick(ctx, targetEnv, runoqRoot, args)
 	case "loop":
 		targetEnv, code := a.prepareTargetContext(ctx, runoqRoot, env)
 		if code != 0 {
 			return code
 		}
 		return a.runLoop(ctx, targetEnv, runoqRoot, args)
-	case "run":
-		targetEnv, code := a.prepareTargetContext(ctx, runoqRoot, env)
-		if code != 0 {
-			return code
-		}
-		authEnv, code := a.prepareAuth(ctx, targetEnv, runoqRoot)
-		if code != 0 {
-			return code
-		}
-		repo, _ := shell.EnvLookup(authEnv, "REPO")
-		runApp := orchestrator.New(append([]string{"run", repo}, args...), authEnv, a.cwd, a.stdout, a.stderr)
-		runApp.SetCommandExecutor(a.execCommand)
-		runApp.SetConfig(a.orchestratorConfig())
-		return runApp.Run(ctx)
 	case "report":
 		targetEnv, code := a.prepareTargetContext(ctx, runoqRoot, env)
 		if code != 0 {
@@ -595,14 +579,21 @@ func (a *App) orchestratorConfig() orchestrator.OrchestratorConfig {
 	return cfg
 }
 
-func (a *App) runTick(ctx context.Context, env []string, runoqRoot string) int {
+func (a *App) runTick(ctx context.Context, env []string, runoqRoot string, args []string) int {
 	repo, _ := shell.EnvLookup(env, "REPO")
 	targetRoot, _ := shell.EnvLookup(env, "TARGET_ROOT")
-
-	// Read plan file from project config
-	planFile, err := readProjectPlanFile(targetRoot)
+	targetIssue, err := parseTickArgs(args)
 	if err != nil {
 		return shell.Fail(a.stderr, err.Error())
+	}
+
+	// Read plan file from project config
+	planFile := ""
+	if targetIssue == 0 {
+		planFile, err = readProjectPlanFile(targetRoot)
+		if err != nil {
+			return shell.Fail(a.stderr, err.Error())
+		}
 	}
 
 	dryImpl, _ := shell.EnvLookup(env, "RUNOQ_DRY_RUN_IMPL")
@@ -611,6 +602,7 @@ func (a *App) runTick(ctx context.Context, env []string, runoqRoot string) int {
 		Repo:                 repo,
 		PlanFile:             planFile,
 		RunoqRoot:            runoqRoot,
+		TargetIssue:          targetIssue,
 		PlanApprovedLabel:    a.labels.PlanApproved,
 		MaxRounds:            orchCfg.MaxRounds,
 		MaxTokenBudget:       orchCfg.MaxTokenBudget,
@@ -633,13 +625,17 @@ func (a *App) runTick(ctx context.Context, env []string, runoqRoot string) int {
 	})
 }
 
-func (a *App) runTickWithCapture(ctx context.Context, env []string, runoqRoot string, lastCompleted int) (int, int) {
+func (a *App) runTickWithCapture(ctx context.Context, env []string, runoqRoot string, lastCompleted int, targetIssue int) (int, int) {
 	repo, _ := shell.EnvLookup(env, "REPO")
 	targetRoot, _ := shell.EnvLookup(env, "TARGET_ROOT")
 
-	planFile, err := readProjectPlanFile(targetRoot)
-	if err != nil {
-		return shell.Fail(a.stderr, err.Error()), 0
+	planFile := ""
+	var err error
+	if targetIssue == 0 {
+		planFile, err = readProjectPlanFile(targetRoot)
+		if err != nil {
+			return shell.Fail(a.stderr, err.Error()), 0
+		}
 	}
 
 	var buf bytes.Buffer
@@ -650,6 +646,7 @@ func (a *App) runTickWithCapture(ctx context.Context, env []string, runoqRoot st
 		Repo:                repo,
 		PlanFile:            planFile,
 		RunoqRoot:           runoqRoot,
+		TargetIssue:         targetIssue,
 		PlanApprovedLabel:   a.labels.PlanApproved,
 		MaxRounds:           orchCfg.MaxRounds,
 		MaxTokenBudget:      orchCfg.MaxTokenBudget,
@@ -699,8 +696,19 @@ func parseCompletedIssue(output string) int {
 func (a *App) runLoop(ctx context.Context, env []string, runoqRoot string, args []string) int {
 	backoff := 30
 	maxWaitCycles := 0 // 0 = unlimited
+	targetIssue := 0
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
+		case "--issue":
+			if i+1 >= len(args) {
+				return shell.Failf(a.stderr, "Missing --issue value")
+			}
+			v, err := strconv.Atoi(args[i+1])
+			if err != nil || v < 1 {
+				return shell.Failf(a.stderr, "Invalid --issue value: %s", args[i+1])
+			}
+			targetIssue = v
+			i++
 		case "--backoff":
 			if i+1 >= len(args) {
 				return shell.Failf(a.stderr, "Missing --backoff value")
@@ -721,6 +729,8 @@ func (a *App) runLoop(ctx context.Context, env []string, runoqRoot string, args 
 			}
 			maxWaitCycles = v
 			i++
+		default:
+			return shell.Failf(a.stderr, "Unknown option: %s", args[i])
 		}
 	}
 
@@ -730,7 +740,7 @@ func (a *App) runLoop(ctx context.Context, env []string, runoqRoot string, args 
 	waitCycles := 0
 	lastCompleted := 0
 	for {
-		code, completed := a.runTickWithCapture(loopCtx, env, runoqRoot, lastCompleted)
+		code, completed := a.runTickWithCapture(loopCtx, env, runoqRoot, lastCompleted, targetIssue)
 
 		select {
 		case <-loopCtx.Done():
@@ -744,6 +754,9 @@ func (a *App) runLoop(ctx context.Context, env []string, runoqRoot string, args 
 			waitCycles = 0
 			if completed > 0 {
 				lastCompleted = completed
+				if targetIssue > 0 && completed == targetIssue {
+					return 0
+				}
 			}
 		case 2:
 			waitCycles++
@@ -764,6 +777,26 @@ func (a *App) runLoop(ctx context.Context, env []string, runoqRoot string, args 
 			return shell.Failf(a.stderr, "tick exited with status %d", code)
 		}
 	}
+}
+
+func parseTickArgs(args []string) (int, error) {
+	if len(args) == 0 {
+		return 0, nil
+	}
+	if args[0] != "--issue" {
+		return 0, fmt.Errorf("unknown option: %s", args[0])
+	}
+	if len(args) == 1 {
+		return 0, fmt.Errorf("missing --issue value")
+	}
+	if len(args) != 2 {
+		return 0, fmt.Errorf("unknown option: %s", args[2])
+	}
+	v, err := strconv.Atoi(args[1])
+	if err != nil || v < 1 {
+		return 0, fmt.Errorf("invalid --issue value: %s", args[1])
+	}
+	return v, nil
 }
 
 func (a *App) printUsage(w io.Writer) {

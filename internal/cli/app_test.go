@@ -98,7 +98,7 @@ func makeBody(s string) io.ReadCloser {
 	return io.NopCloser(strings.NewReader(s))
 }
 
-func TestRunCreatesLogFile(t *testing.T) {
+func TestTickCreatesLogFile(t *testing.T) {
 	t.Parallel()
 
 	targetRoot := t.TempDir()
@@ -122,7 +122,7 @@ func TestRunCreatesLogFile(t *testing.T) {
 	var stdout strings.Builder
 	var stderr strings.Builder
 	app := New(
-		[]string{"run", "--issue", "42", "--dry-run"},
+		[]string{"tick", "--issue", "42"},
 		[]string{"RUNOQ_ROOT=/runoq", "TARGET_ROOT=" + targetRoot, "PATH=/usr/bin"},
 		targetRoot,
 		&stdout,
@@ -151,7 +151,7 @@ func TestRunCreatesLogFile(t *testing.T) {
 	}
 }
 
-func TestRunRunSubcommandInvokesOrchestrator(t *testing.T) {
+func TestTickIssueSubcommandInvokesOrchestrator(t *testing.T) {
 	t.Parallel()
 
 	targetRoot := t.TempDir()
@@ -177,7 +177,7 @@ func TestRunRunSubcommandInvokesOrchestrator(t *testing.T) {
 	var stdout strings.Builder
 	var stderr strings.Builder
 	app := New(
-		[]string{"run", "--issue", "42", "--dry-run"},
+		[]string{"tick", "--issue", "42"},
 		[]string{"RUNOQ_ROOT=/runoq", "TARGET_ROOT=" + targetRoot, "PATH=/usr/bin", "GH_TOKEN=runtime-token"},
 		targetRoot,
 		&stdout,
@@ -201,6 +201,36 @@ func TestRunRunSubcommandInvokesOrchestrator(t *testing.T) {
 		if call.Name == "bash" {
 			t.Fatalf("did not expect auth shell wrapper call, got %+v", call)
 		}
+	}
+}
+
+func TestRunSubcommandIsRemoved(t *testing.T) {
+	t.Parallel()
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	app := New(
+		[]string{"run", "--issue", "42"},
+		[]string{"RUNOQ_ROOT=/runoq"},
+		"/tmp/project",
+		&stdout,
+		&stderr,
+		"",
+	)
+	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
+		t.Fatalf("unexpected command: %s %v", req.Name, req.Args)
+		return nil
+	})
+
+	code := app.Run(context.Background())
+	if code != 1 {
+		t.Fatalf("expected exit code 1, got %d", code)
+	}
+	if !strings.Contains(stderr.String(), "Usage:") {
+		t.Fatalf("expected usage output on stderr, got %q", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "runoq run") {
+		t.Fatalf("usage should not advertise removed run command, got %q", stderr.String())
 	}
 }
 
@@ -427,6 +457,74 @@ func TestTickSubcommandCallsRunTick(t *testing.T) {
 	}
 }
 
+func TestTickSubcommandRejectsMissingIssueValue(t *testing.T) {
+	t.Parallel()
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	app := New(
+		[]string{"tick", "--issue"},
+		[]string{"RUNOQ_ROOT=/runoq"},
+		"/tmp/project",
+		&stdout,
+		&stderr,
+		"",
+	)
+	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
+		t.Fatalf("unexpected command: %s %v", req.Name, req.Args)
+		return nil
+	})
+
+	code := app.Run(context.Background())
+	if code != 1 {
+		t.Fatalf("expected exit code 1, got %d", code)
+	}
+	if !strings.Contains(stderr.String(), "missing --issue value") {
+		t.Fatalf("expected missing issue error, got %q", stderr.String())
+	}
+}
+
+func TestLoopIssueStopsWhenTargetAlreadyComplete(t *testing.T) {
+	t.Parallel()
+
+	targetRoot := t.TempDir()
+	mustMkdir(t, filepath.Join(targetRoot, ".git"))
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	app := New(
+		[]string{"loop", "--issue", "42", "--max-wait-cycles", "1", "--backoff", "1"},
+		[]string{"RUNOQ_ROOT=/runoq", "TARGET_ROOT=" + targetRoot, "RUNOQ_REPO=owner/repo"},
+		targetRoot,
+		&stdout,
+		&stderr,
+		"",
+	)
+	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
+		if req.Name != "gh" {
+			t.Fatalf("unexpected command: %s %v", req.Name, req.Args)
+		}
+		args := strings.Join(req.Args, " ")
+		switch {
+		case strings.Contains(args, "issue list"):
+			mustWriteStdout(t, req.Stdout, `[{"number":42,"title":"Done","state":"CLOSED","body":"","labels":[],"url":"u"}]`)
+		case strings.Contains(args, "api graphql"):
+			mustWriteStdout(t, req.Stdout, `{"data":{"repository":{"issues":{"nodes":[{"number":42,"blockedBy":{"nodes":[]},"issueType":{"name":"Task"}}]}}}}`)
+		default:
+			t.Fatalf("unexpected gh call: %v", req.Args)
+		}
+		return nil
+	})
+
+	code := app.Run(context.Background())
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %d; stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Issue #42 already complete") {
+		t.Fatalf("expected targeted completion output, got %q", stdout.String())
+	}
+}
+
 func TestPlanPrintsRemovedNotice(t *testing.T) {
 	t.Parallel()
 
@@ -501,7 +599,7 @@ func TestExitCodePassThrough(t *testing.T) {
 	var stdout strings.Builder
 	var stderr strings.Builder
 	app := New(
-		[]string{"run"},
+		[]string{"tick"},
 		[]string{"RUNOQ_ROOT=/runoq"},
 		"/tmp/project",
 		&stdout,
@@ -559,7 +657,7 @@ func TestParseRepoFromRemote(t *testing.T) {
 func TestSubcommandHelpPrintsUsageAndExitsZero(t *testing.T) {
 	t.Parallel()
 
-	for _, cmd := range []string{"init", "plan", "tick", "loop", "run", "report", "maintenance"} {
+	for _, cmd := range []string{"init", "plan", "tick", "loop", "report", "maintenance"} {
 		for _, flag := range []string{"-h", "--help"} {
 			t.Run(cmd+"/"+flag, func(t *testing.T) {
 				t.Parallel()

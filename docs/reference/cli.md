@@ -7,8 +7,8 @@ This document describes the public `runoq` CLI implemented by [`bin/runoq`](../.
 ```text
 runoq init
 runoq plan <file>
-runoq tick
-runoq run [--issue N] [--dry-run]
+runoq tick [--issue N]
+runoq loop [--backoff N] [--max-wait-cycles N] [--issue N]
 runoq report <summary|issue|cost> [...]
 runoq maintenance
 ```
@@ -37,14 +37,10 @@ The public CLI contract is unchanged; these env vars only control runtime dispat
 | --- | --- | --- |
 | `runoq init` | Yes | Yes |
 | `runoq plan <file>` | No | Yes, but only after user confirmation in the plan pipeline |
-| `runoq tick` | No intended durable local mutation beyond logs and transient planning artifacts | Yes |
-| `runoq run --issue N` | Yes | Yes |
-| `runoq run` | Yes | Yes |
-| `runoq run --dry-run` | No intended durable mutation beyond reconciliation side effects | Reconciliation comments or label cleanup may occur before the dry-run output |
+| `runoq tick [--issue N]` | Yes when the tick dispatches implementation work; otherwise logs plus transient planning artifacts | Yes |
+| `runoq loop [--backoff N] [--max-wait-cycles N] [--issue N]` | Yes | Yes |
 | `runoq report ...` | No | No |
 | `runoq maintenance` | Agent-dependent; expected to create local maintenance state | Yes |
-
-`runoq run --dry-run` is not a pure no-op. The runtime performs startup reconciliation first, which can resume interrupted runs or reset stale `runoq:in-progress` labels before reporting queue state.
 
 ## Command Reference
 
@@ -115,14 +111,16 @@ Advances the iterative planning and coordination workflow by exactly one step.
 
 ```bash
 runoq tick
+runoq tick --issue 42
 ```
 
 What it does:
 
 - Resolves target repo context and GitHub auth
-- Reads the committed `runoq.json` plan path and current GitHub issue state
+- In normal mode, reads the committed `runoq.json` plan path and current GitHub issue state
 - Executes one deterministic transition in the iterative planning state machine
 - May bootstrap planning, answer planning comments, materialize approved milestone or task proposals, dispatch implementation, or advance milestone review
+- With `--issue N`, skips queue selection and advances only that implementation task by one transition
 - Prints a single-line status suitable for operators and notification hooks
 
 Common statuses:
@@ -141,35 +139,30 @@ Common failures:
 - Proposal comment missing the expected `runoq:payload:*` marker
 - Underlying planning or dispatch script failure
 
-### `runoq run [--issue N] [--dry-run]`
+### `runoq loop [--backoff N] [--max-wait-cycles N] [--issue N]`
 
-Runs the implementation workflow for a single issue or the next actionable queue item.
+Repeats `runoq tick` until interrupted, all work is complete, or an optional wait limit is reached.
 
 ```bash
-runoq run
-runoq run --issue 42
-runoq run --dry-run
-runoq run --issue 42 --dry-run
+runoq loop
+runoq loop --issue 42
+runoq loop --backoff 15 --max-wait-cycles 4
 ```
 
 Flags:
 
-- `--issue N`: dispatch exactly issue `N` instead of selecting from the ready queue
-- `--dry-run`: return reconciliation and queue-selection data without dispatching new work
+- `--issue N`: keep advancing exactly issue `N` instead of using queue selection
+- `--backoff N`: seconds to wait before retrying after a waiting tick
+- `--max-wait-cycles N`: stop after `N` consecutive waiting ticks instead of looping forever
 
 Behavior:
 
 - Resolves target repo context and GitHub auth
-- Runs startup reconciliation through `dispatch-safety.sh reconcile`
-- In queue mode, selects the next actionable `runoq:ready` issue by dependency and priority
-- In execution mode, delegates to `orchestrator.sh run` which creates a sibling worktree, opens a draft PR, drives the phase state machine (INIT, DEVELOP, VERIFY, REVIEW, DECIDE, FINALIZE), and finalizes with either `auto-merge` or `needs-human-review`
-- Persists Claude invocation artifacts under `log/claude/<name>-<timestamp>/`
-- Persists Codex round artifacts under each issue log directory, for example `log/issue-42-.../codex-round-1/`
-
-Dry-run output:
-
-- Queue mode returns JSON with `mode`, `reconciliation`, `queue`, and `selection`
-- Single-issue mode returns JSON with `mode`, `reconciliation`, and `issue`
+- Invokes `tick` repeatedly with the same runtime configuration
+- In queue mode, keeps selecting the next actionable `runoq:ready` task when implementation dispatch is the next valid tick transition
+- In `--issue N` mode, keeps advancing that one implementation task until it reaches a terminal phase or the command is interrupted
+- Sleeps between waiting ticks according to `--backoff`
+- Stops cleanly on terminal project completion, Ctrl-C, or the configured wait-cycle limit
 
 Common failures:
 
@@ -266,13 +259,13 @@ runoq plan docs/plan.md
 Inspect queue selection before dispatching:
 
 ```bash
-runoq run --dry-run
+runoq tick
 ```
 
 Run one known issue:
 
 ```bash
-runoq run --issue 42
+runoq loop --issue 42
 ```
 
 Inspect local outcomes after the run:
@@ -293,8 +286,8 @@ runoq maintenance
 - Unknown top-level subcommands print usage and exit non-zero.
 - Command-specific argument validation failures print usage or a targeted error and exit non-zero.
 - `runoq::die` failures are human-readable and include repo, auth, file-path, or config guidance where the scripts provide it.
-- `run` may exit with the underlying dev-process status when a development round stalls or crashes.
-- JSON-producing commands are intended for machine consumption where practical: `run --dry-run`, `report`, and many lower-level scripts emit structured JSON.
+- `tick` or `loop` may exit with the underlying dev-process status when a development round stalls or crashes.
+- JSON-producing commands are intended for machine consumption where practical: `report`, and many lower-level scripts emit structured JSON.
 
 ## Related Docs
 

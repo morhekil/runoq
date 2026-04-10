@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -94,75 +93,6 @@ func (a *App) commentPR(ctx context.Context, repo string, prNumber int, body str
 
 	_, err = a.ghOutput(ctx, a.env, "pr", "comment", strconv.Itoa(prNumber), "--repo", repo, "--body-file", bodyFile.Name())
 	return err
-}
-
-// pollMentions returns open issue/PR comments that mention the given handle.
-func (a *App) pollMentions(ctx context.Context, repo, handle string) ([]json.RawMessage, error) {
-	out, err := a.ghOutput(ctx, a.env, "api", fmt.Sprintf("repos/%s/issues?state=open&per_page=100", repo))
-	if err != nil {
-		return nil, fmt.Errorf("poll-mentions list issues: %w", err)
-	}
-
-	var items []struct {
-		Number      int  `json:"number"`
-		PullRequest *any `json:"pull_request"`
-	}
-	if err := json.Unmarshal([]byte(out), &items); err != nil {
-		return nil, fmt.Errorf("poll-mentions parse issues: %w", err)
-	}
-
-	mention := "@" + handle
-	var results []json.RawMessage
-	for _, item := range items {
-		commentsOut, err := a.ghOutput(ctx, a.env, "api", fmt.Sprintf("repos/%s/issues/%d/comments", repo, item.Number))
-		if err != nil {
-			continue
-		}
-		var comments []struct {
-			ID   int    `json:"id"`
-			Body string `json:"body"`
-			User struct {
-				Login string `json:"login"`
-			} `json:"user"`
-			CreatedAt string `json:"created_at"`
-		}
-		if err := json.Unmarshal([]byte(commentsOut), &comments); err != nil {
-			continue
-		}
-		for _, c := range comments {
-			if !strings.Contains(c.Body, mention) {
-				continue
-			}
-			if strings.Contains(c.Body, "runoq:payload") || strings.Contains(c.Body, "runoq:bot") {
-				continue
-			}
-			ctxType := "issue"
-			var prNumber *int
-			var issueNumber *int
-			if item.PullRequest != nil {
-				ctxType = "pr"
-				n := item.Number
-				prNumber = &n
-			} else {
-				n := item.Number
-				issueNumber = &n
-			}
-			entry, _ := json.Marshal(map[string]any{
-				"comment_id":   c.ID,
-				"author":       c.User.Login,
-				"body":         c.Body,
-				"created_at":   c.CreatedAt,
-				"context_type": ctxType,
-				"pr_number":    prNumber,
-				"issue_number": issueNumber,
-			})
-			results = append(results, json.RawMessage(entry))
-		}
-	}
-	if results == nil {
-		results = []json.RawMessage{}
-	}
-	return results, nil
 }
 
 // finalizePR marks a PR as ready and either auto-merges or assigns a reviewer.

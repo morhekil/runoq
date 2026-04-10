@@ -8,7 +8,7 @@ This guide covers the day-to-day operator workflow for the `runoq` issue queue.
 
 | Label | Meaning | Typical next step |
 | --- | --- | --- |
-| `runoq:ready` | Eligible for queue selection once dependencies and eligibility checks pass | run `runoq run` or target it with `runoq run --issue N` |
+| `runoq:ready` | Eligible for queue selection once dependencies and eligibility checks pass | run `runoq loop` or target it with `runoq tick --issue N` / `runoq loop --issue N` |
 | `runoq:in-progress` | Actively being worked or awaiting reconciliation | inspect state, PR comments, and startup reconciliation output |
 | `runoq:done` | Completed successfully | inspect PR finalization and reports |
 | `runoq:blocked` | Manually or externally blocked | unblock prerequisites or adjust the issue |
@@ -49,49 +49,15 @@ Check the queue surface:
 - dependencies really reflect sequencing constraints
 - old `runoq:in-progress` issues are understood before starting
 
-If you suspect stale state, start with:
-
-```bash
-runoq run --dry-run
-```
-
-This performs reconciliation first, then shows queue state and selection without dispatching new work.
-
-## Dry-Run Usage
-
-### Queue preview
-
-```bash
-runoq run --dry-run
-```
-
-Use this to answer:
-
-- what reconciliation actions would happen at startup?
-- which issue would be selected next?
-- which ready issues are being skipped, and why?
-
-The returned JSON includes:
-
-- `mode: "dry-run"`
-- `reconciliation`
-- `queue`
-- `selection`
-
-### Single-issue preview
-
-```bash
-runoq run --issue 42 --dry-run
-```
-
-Use this to confirm the runtime sees the targeted issue number and to inspect reconciliation output before dispatching manually.
+There is no preview-only execution mode anymore. Reconciliation happens as part of implementation dispatch through `tick` or `loop`, so inspect issue labels, issue comments, PR comments, and `runoq report issue <n>` when you need to understand current queue state before continuing.
 
 ## Single-Issue Mode
 
 Use single-issue mode when you want to target one queue item regardless of what else is ready.
 
 ```bash
-runoq run --issue 42
+runoq tick --issue 42
+runoq loop --issue 42
 ```
 
 Typical reasons:
@@ -100,7 +66,9 @@ Typical reasons:
 - you want to retry a previously escalated or reconciled issue
 - you do not want the runner to keep draining the queue afterward
 
-Single-issue mode still performs the full phase sequence:
+`tick --issue N` advances that task by exactly one implementation transition. `loop --issue N` keeps invoking `tick --issue N` until the task reaches a terminal phase or the command is interrupted.
+
+Single-issue implementation still performs the full phase sequence:
 
 - startup reconciliation
 - eligibility checks
@@ -111,14 +79,14 @@ Single-issue mode still performs the full phase sequence:
 - DECIDE: route to another DEVELOP round or FINALIZE
 - FINALIZE: PR finalization, label transition, worktree cleanup
 
-It stops after that one issue.
+In `loop --issue N` mode it stops after that one issue reaches a terminal outcome.
 
 ## Queue Mode
 
 Use queue mode when you want `runoq` to keep selecting the next actionable ready issue until there is nothing left to do or the circuit breaker halts execution.
 
 ```bash
-runoq run
+runoq loop
 ```
 
 Queue mode:
@@ -226,11 +194,12 @@ Use them to confirm:
 
 For normal operation, this cadence works well:
 
-1. Run `runoq run --dry-run` to inspect reconciliation and selection.
-2. If the queue looks healthy, run `runoq run`.
-3. If one issue needs focused attention, run `runoq run --issue N`.
-4. After the run, inspect issue comments, PR comments, and `runoq report summary`.
-5. If the queue halted or escalated repeatedly, fix the root cause before the next run.
+1. Review open `runoq:ready`, `runoq:in-progress`, and `runoq:needs-human-review` issues on GitHub.
+2. Use `runoq tick` when you want one deterministic transition and immediate operator feedback.
+3. If the queue looks healthy and you want continuous progress, run `runoq loop`.
+4. If one issue needs focused attention, run `runoq loop --issue N` or `runoq tick --issue N`.
+5. After the run, inspect issue comments, PR comments, and `runoq report summary`.
+6. If the queue halted or escalated repeatedly, fix the root cause before the next run.
 
 ## Related Docs
 

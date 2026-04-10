@@ -2,7 +2,7 @@
 
 This document describes the major runtime sequences in `runoq`: iterative planning, execution, reconciliation, mention handling, and maintenance review.
 
-For `runoq run`, the orchestrator owns the phase machine and uses a bounded develop-round helper for `DEVELOP`. The orchestrator drives phase transitions (INIT, DEVELOP, VERIFY, REVIEW, DECIDE, FINALIZE), spawns agents for bounded reasoning tasks, and handles tick-level PR conversation replies. The develop helper runs one codex round and leaves deterministic checks to the separate `VERIFY` phase.
+For implementation dispatch triggered by `runoq tick --issue`, queue-selecting `runoq tick`, or `runoq loop`, the orchestrator owns the phase machine and uses a bounded develop-round helper for `DEVELOP`. The orchestrator drives phase transitions (INIT, DEVELOP, VERIFY, REVIEW, DECIDE, FINALIZE), spawns agents for bounded reasoning tasks, and handles tick-level PR conversation replies. The develop helper runs one codex round and leaves deterministic checks to the separate `VERIFY` phase.
 
 ## `runoq tick`
 
@@ -125,12 +125,13 @@ sequenceDiagram
 | Epic/task linking | Tasks with a `parent_epic_key` are linked via the GitHub sub-issues API |
 | Complexity rationale | Each task receives a `complexity_rationale` explaining the complexity estimate |
 
-## `runoq run` Happy Path
+## Implementation Dispatch Happy Path
 
-The queue execution flow has two entry modes:
+The implementation flow has three public entry modes:
 
-- `runoq run --issue N`: target a single issue directly
-- `runoq run`: ask the queue for the next actionable ready issue
+- `runoq tick --issue N`: target a single issue for one implementation transition
+- `runoq tick`: execute one planning or queue-dispatch transition
+- `runoq loop [--issue N]`: repeat ticks until completion, interruption, or a wait-limit stop
 
 The sequence below shows the happy path for one issue after reconciliation succeeds.
 
@@ -151,7 +152,7 @@ sequenceDiagram
   participant GH as GitHub
   participant FS as target repo and sibling worktree
 
-  Operator->>CLI: runoq run [--issue N]
+  Operator->>CLI: runoq tick [--issue N] or runoq loop [--issue N]
   CLI->>Auth: export-token
   Auth-->>CLI: GH_TOKEN
   CLI->>Run: invoke run flow

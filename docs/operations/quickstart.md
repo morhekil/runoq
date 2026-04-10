@@ -16,7 +16,7 @@ Install all of the following. The smoke tests and runtime scripts will fail if a
 | `bats` | Shell test framework | `brew install bats-core` |
 | `shellcheck` | Shell linting | `brew install shellcheck` |
 | `node` / `npm` | Lifecycle eval target repos use `npm test` and `npm run build` | `brew install node` |
-| `claude` | Claude CLI, used by `runoq plan`, `run`, and `maintenance` | [Install instructions](https://docs.anthropic.com/en/docs/claude-code) |
+| `claude` | Claude CLI, used by `runoq plan`, `tick`, `loop`, and `maintenance` | [Install instructions](https://docs.anthropic.com/en/docs/claude-code) |
 | `codex` | Required by lifecycle eval alongside `claude` | See OpenAI Codex docs |
 
 If `claude` or `codex` are installed under different names or paths, override with:
@@ -229,7 +229,7 @@ bats test/live_smoke.bats test/live_smoke_sandbox.bats
 
 ## 8. Configure Lifecycle Eval Environment
 
-The lifecycle eval creates a disposable GitHub repo, runs `runoq init` and `runoq run` against it end-to-end, and then you clean it up.
+The lifecycle eval creates a disposable GitHub repo, runs `runoq init` and `runoq loop` against it end-to-end, and then you clean it up.
 
 Required variables (in addition to `RUNOQ_SMOKE=1` from above):
 
@@ -270,7 +270,7 @@ This will:
 2. Push a small seeded target from `test/fixtures/live_smoke_lifecycle_target/`
 3. Run `runoq init` against it
 4. Seed a 3-issue dependent chain from `test/fixtures/live_smoke_lifecycle_issues.json`
-5. Run `runoq run` in queue mode
+5. Run `runoq loop` in queue mode
 6. Return structured JSON with completion metrics
 
 Or run through Bats:
@@ -322,7 +322,7 @@ Run `gh auth status`. If expired, run `gh auth login` again.
 - Check permissions: `ls -la "$HOME/.runoq/app-key.pem"` (should be `600`)
 - Confirm the key belongs to the correct app (regenerate if unsure)
 
-### Lifecycle init succeeds but `runoq run` fails
+### Lifecycle init succeeds but `runoq loop` fails
 
 - Check `.runoq/live-smoke/runs/<run_id>/init.log` and `run.log`
 - Confirm `claude` and `codex` are on `PATH` and working
@@ -338,6 +338,6 @@ The sandbox script cleans up on success. If it fails mid-run, manually check the
 
 ## Related Docs
 
-- [Operator workflow](./operator-workflow.md) — day-to-day runoq commands (init, plan, run, report, maintenance)
+- [Operator workflow](./operator-workflow.md) — day-to-day runoq commands (init, plan, tick, loop, report, maintenance)
 - [Live smoke tests](../live-smoke.md) — lane details, output formats, and managed repo model
 - [Configuration and auth reference](../reference/config-auth.md) — full variable and identity reference

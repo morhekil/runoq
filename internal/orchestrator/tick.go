@@ -28,6 +28,7 @@ type TickConfig struct {
 	Repo                 string
 	PlanFile             string
 	RunoqRoot            string
+	TargetIssue          int
 	PlanApprovedLabel    string
 	MaxRounds            int
 	MaxTokenBudget       int
@@ -115,6 +116,23 @@ func (t *tickRunner) run(ctx context.Context) int {
 		return t.fail("parse issues: %v", err)
 	}
 	t.info(fmt.Sprintf("found %d issues", len(t.issues)))
+
+	if t.cfg.TargetIssue > 0 {
+		t.step(fmt.Sprintf("Dispatching target issue #%d", t.cfg.TargetIssue))
+		target := t.findIssueByNumber(t.cfg.TargetIssue)
+		if target == nil {
+			return t.fail("target issue #%d not found", t.cfg.TargetIssue)
+		}
+		if issueTypeOf(*target) != "task" {
+			return t.fail("target issue #%d is not an implementation task", t.cfg.TargetIssue)
+		}
+		if target.State != "OPEN" {
+			t.success(fmt.Sprintf("Issue #%d already complete", target.Number))
+			_, _ = fmt.Fprintf(t.cfg.Stdout, "Issue #%d already complete\n", target.Number)
+			return 3
+		}
+		return t.dispatchTask(ctx, target)
+	}
 
 	// Populate dependency info from GitHub's native APIs
 	if err := t.fetchDependencies(ctx); err != nil {
