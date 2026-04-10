@@ -985,10 +985,11 @@ func (a *App) phaseRespond(ctx context.Context, root string, env []string, repo 
 	handledComments := 0
 	var processingErrors []error
 
-	// Post acknowledgment reply for each unprocessed comment and mark processed via +1 reaction
+		// Post acknowledgment reply for each unprocessed comment and mark processed via +1 reaction
 	for _, comment := range comments {
 		reply := fmt.Sprintf("Acknowledged feedback from %s. This will be addressed in the next development round.", comment.CommenterIdentity)
-		if err := a.commentPR(ctx, repo, state.PRNumber, fmt.Sprintf("<!-- runoq:agent:codex -->\n> Re: comment by @%s\n\n%s", comment.Author, reply)); err != nil {
+		body := fmt.Sprintf("<!-- runoq:bot:orchestrator:respond -->\n<!-- runoq:agent:codex -->\n> Re: comment by @%s\n\n%s", comment.Author, reply)
+		if err := a.commentPR(ctx, repo, state.PRNumber, body); err != nil {
 			a.logInfo("RESPOND: failed to post reply for comment %d: %v", comment.ID, err)
 			processingErrors = append(processingErrors, fmt.Errorf("reply to comment %d: %w", comment.ID, err))
 			continue

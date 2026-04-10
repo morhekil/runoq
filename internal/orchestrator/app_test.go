@@ -2284,6 +2284,7 @@ func TestPhaseRespondAcknowledgesComments(t *testing.T) {
 
 	var stderr bytes.Buffer
 	var calls []string
+	var commentBody string
 
 	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, &stderr)
 	app.SetConfig(defaultOrchestratorConfig())
@@ -2297,6 +2298,16 @@ func TestPhaseRespondAcknowledgesComments(t *testing.T) {
 				_, _ = io.WriteString(req.Stdout, `[
 					{"id": 300, "body": "Please add error handling", "user": {"login": "human1"}, "created_at": "2026-01-01T00:00:00Z", "reactions": {"+1": 0}}
 				]`)
+				return true, nil
+			}
+			if strings.Contains(ghArgs, "pr comment 87") && strings.Contains(ghArgs, "--body-file") {
+				for i, arg := range req.Args {
+					if arg == "--body-file" && i+1 < len(req.Args) {
+						data, _ := os.ReadFile(req.Args[i+1])
+						commentBody = string(data)
+						break
+					}
+				}
 				return true, nil
 			}
 			// +1 reaction
@@ -2320,6 +2331,9 @@ func TestPhaseRespondAcknowledgesComments(t *testing.T) {
 	}
 	if !containsCall(calls, "pr comment 87") {
 		t.Fatalf("expected PR comment call, got %v", calls)
+	}
+	if !strings.Contains(commentBody, "runoq:bot") {
+		t.Fatalf("expected RESPOND reply to be tagged as bot output, got %q", commentBody)
 	}
 	if !strings.Contains(stderr.String(), "RESPOND: replied to comment 300 by human1") {
 		t.Fatalf("expected respond log, got %q", stderr.String())
