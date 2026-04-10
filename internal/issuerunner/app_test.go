@@ -636,6 +636,101 @@ func TestDevelopmentLoop_NoVerificationLoop(t *testing.T) {
 	}
 }
 
+func TestDevelopmentLoop_SchemaRetryUsesResumeWithSameThreadID(t *testing.T) {
+	dir := t.TempDir()
+	worktree := filepath.Join(dir, "wt")
+	mustMkdirAll(t, worktree)
+	logDir := filepath.Join(dir, "logs")
+	mustMkdirAll(t, logDir)
+	runoqRoot := filepath.Join(dir, "runoq")
+	mustMkdirAll(t, filepath.Join(runoqRoot, "scripts"))
+
+	specFile := filepath.Join(dir, "spec.md")
+	mustWriteFile(t, specFile, []byte("implement X"))
+
+	validateCount := 0
+	var codexCalls [][]string
+	fe := &fakeExecutor{t: t, handlers: map[string]func(shell.CommandRequest) error{
+		"git": func(req shell.CommandRequest) error {
+			if req.Stdout != nil {
+				mustWriteReqStdout(t, req, "abc123\n")
+			}
+			return nil
+		},
+		"codex": func(req shell.CommandRequest) error {
+			codexCalls = append(codexCalls, append([]string(nil), req.Args...))
+			if req.Stdout != nil {
+				mustWriteReqStdout(t, req, `{"type":"thread.started","thread_id":"thread-42"}`+"\n")
+				mustWriteReqStdout(t, req, `{"tokens": 500}`+"\n")
+			}
+			for i, arg := range req.Args {
+				if arg == "-o" && i+1 < len(req.Args) {
+					mustWriteFile(t, req.Args[i+1], []byte("fake codex output"))
+					break
+				}
+			}
+			return nil
+		},
+		"state.sh": func(req shell.CommandRequest) error {
+			validateCount++
+			if req.Stdout != nil {
+				if validateCount == 1 {
+					mustWriteReqStdout(t, req, `{"payload_schema_valid":false}`)
+				} else {
+					mustWriteReqStdout(t, req, `{"payload_schema_valid":true}`)
+				}
+			}
+			return nil
+		},
+	}}
+
+	payloadFile := writePayloadFile(t, dir, inputPayload{
+		IssueNumber:    1,
+		PRNumber:       10,
+		Worktree:       worktree,
+		Branch:         "feat-x",
+		SpecPath:       specFile,
+		Repo:           "owner/repo",
+		MaxRounds:      3,
+		MaxTokenBudget: 100000,
+		LogDir:         logDir,
+	})
+
+	var stdout, stderr bytes.Buffer
+	app := New([]string{"run", payloadFile},
+		[]string{"RUNOQ_ROOT=" + runoqRoot, "RUNOQ_CODEX_BIN=codex"},
+		dir, &stdout, &stderr)
+	app.SetCommandExecutor(fe.exec)
+
+	code := app.Run(t.Context())
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr=%s", code, stderr.String())
+	}
+
+	var out outputPayload
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("parse output: %v; raw=%s", err, stdout.String())
+	}
+	if out.Status != "completed" {
+		t.Fatalf("status = %q, want completed", out.Status)
+	}
+	if validateCount != 2 {
+		t.Fatalf("validate-payload called %d times, want 2", validateCount)
+	}
+	if len(codexCalls) != 2 {
+		t.Fatalf("codex called %d times, want 2", len(codexCalls))
+	}
+	if len(codexCalls[0]) < 1 || codexCalls[0][0] != "exec" {
+		t.Fatalf("initial codex call = %v, want exec", codexCalls[0])
+	}
+	if len(codexCalls[0]) > 1 && codexCalls[0][1] == "resume" {
+		t.Fatalf("initial codex call should not be a resume, got %v", codexCalls[0])
+	}
+	if len(codexCalls[1]) < 3 || codexCalls[1][0] != "exec" || codexCalls[1][1] != "resume" || codexCalls[1][2] != "thread-42" {
+		t.Fatalf("schema retry call = %v, want exec resume thread-42", codexCalls[1])
+	}
+}
+
 func TestClassifyTransientError(t *testing.T) {
 	app := newTestApp(t, nil)
 	dir := t.TempDir()

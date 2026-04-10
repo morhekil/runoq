@@ -739,6 +739,67 @@ func TestRunFromReviewReturnsAfterReview(t *testing.T) {
 	}
 }
 
+func TestRunFromReviewRoundTwoUsesFreshReviewerInvocation(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var stderr bytes.Buffer
+	var calls []string
+	var reviewArgs []string
+	var reviewPayload string
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, &stderr)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		calls:       &calls,
+		issueNumber: 42,
+		issueTitle:  "Implement queue",
+		customHandler: func(req shell.CommandRequest) (bool, error) {
+			args := strings.Join(req.Args, " ")
+			switch {
+			case req.Name == "git" && req.Stdout != nil:
+				_, _ = io.WriteString(req.Stdout, "HEAD branch: main\n")
+				return false, nil
+			case (req.Name == "claude" || strings.HasSuffix(req.Name, "/claude")) && strings.Contains(args, "stream-json"):
+				reviewArgs = append([]string(nil), req.Args...)
+				reviewPayload = req.Args[len(req.Args)-1]
+				reviewContent := "REVIEW-TYPE: diff-review\nVERDICT: PASS\nSCORE: 42\nCHECKLIST:\n- OK.\n"
+				resultLine, _ := json.Marshal(map[string]any{"type": "result", "result": reviewContent})
+				_, _ = fmt.Fprintf(req.Stdout, "%s\n", resultLine)
+				return true, nil
+			}
+			return false, nil
+		},
+	}))
+
+	stateJSON := `{"issue":42,"phase":"VERIFY","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":87,"round":2,"baseline_hash":"base","head_hash":"head","commit_range":"base..head","changed_files":["main.go"],"related_files":[],"spec_requirements":"## AC","previous_checklist":"- Carry this forward.","verification_passed":true}`
+
+	result, err := app.runFromReview(ctx, root, app.env, "owner/repo", 42, stateJSON, IssueMetadata{Number: 42, Type: "task"})
+	if err != nil {
+		t.Fatalf("runFromReview: %v", err)
+	}
+	if !strings.Contains(result, `"phase":"REVIEW"`) {
+		t.Fatalf("expected REVIEW phase, got %s", result)
+	}
+	if len(reviewArgs) == 0 {
+		t.Fatal("expected reviewer invocation")
+	}
+	for _, arg := range reviewArgs {
+		if arg == "resume" {
+			t.Fatalf("expected fresh reviewer invocation, got args %v", reviewArgs)
+		}
+	}
+	if !strings.Contains(reviewPayload, `"round":2`) {
+		t.Fatalf("expected round 2 in reviewer payload, got %q", reviewPayload)
+	}
+	if !strings.Contains(reviewPayload, `"previousChecklist":"- Carry this forward."`) {
+		t.Fatalf("expected previous checklist in reviewer payload, got %q", reviewPayload)
+	}
+	if !containsCall(calls, "stream-json") {
+		t.Fatalf("expected review agent invocation (claude stream-json), got calls: %v", calls)
+	}
+}
+
 // TestRunFromDecideReturnsOnIterate verifies that runFromDecide returns at the
 // tick boundary when the verdict is ITERATE, posting an audit comment so the
 // next tick can derive state. It should NOT chain to runFromDevelop.
@@ -1040,6 +1101,80 @@ func TestResumeFromInitSkipsCriteriaPhase(t *testing.T) {
 	}
 	if strings.Contains(stderr.String(), "CRITERIA:") {
 		t.Fatalf("expected INIT to resume directly to DEVELOP without CRITERIA, got log %q", stderr.String())
+	}
+}
+
+func TestResumeFromDecideIterateRunsFreshRoundTwoDevelopWithChecklist(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var stderr bytes.Buffer
+	var codexCalls [][]string
+	var codexPrompt string
+
+	worktree := t.TempDir()
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, &stderr)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		issueNumber: 42,
+		issueTitle:  "Implement queue",
+		customHandler: func(req shell.CommandRequest) (bool, error) {
+			args := strings.Join(req.Args, " ")
+			switch {
+			case req.Name == "git" && strings.Contains(args, "rev-parse") && strings.Contains(args, "HEAD"):
+				_, _ = io.WriteString(req.Stdout, "abc123\n")
+				return true, nil
+			case req.Name == "codex" && strings.Contains(args, "exec"):
+				codexCalls = append(codexCalls, append([]string(nil), req.Args...))
+				codexPrompt = req.Args[len(req.Args)-1]
+				if req.Stdout != nil {
+					_, _ = io.WriteString(req.Stdout, `{"type":"thread.started","thread_id":"thread-42"}`+"\n")
+					_, _ = io.WriteString(req.Stdout, `{"tokens":500}`+"\n")
+				}
+				for i, arg := range req.Args {
+					if arg == "-o" && i+1 < len(req.Args) {
+						if err := os.WriteFile(req.Args[i+1], []byte("fake codex output"), 0o644); err != nil {
+							return true, err
+						}
+						break
+					}
+				}
+				return true, nil
+			case strings.HasSuffix(req.Name, "/state.sh"):
+				if req.Stdout != nil {
+					_, _ = io.WriteString(req.Stdout, `{"payload_schema_valid":true}`)
+				}
+				return true, nil
+			}
+			return false, nil
+		},
+	}))
+
+	meta := IssueMetadata{Number: 42, Title: "Implement queue", Type: "task"}
+	stateJSON := fmt.Sprintf(`{"issue":42,"phase":"DECIDE","branch":"runoq/42-implement-queue","worktree":%q,"pr_number":87,"round":1,"decision":"iterate","next_phase":"DEVELOP","review_checklist":"- Fix error handling.","baseline_hash":"base","head_hash":"head"}`, worktree)
+
+	result, err := app.resumeFromState(ctx, root, app.env, "owner/repo", 42, stateJSON, meta)
+	if err != nil {
+		t.Fatalf("resumeFromState: %v", err)
+	}
+	if !strings.Contains(result, `"phase":"DEVELOP"`) {
+		t.Fatalf("expected DEVELOP phase, got %s", result)
+	}
+	if !strings.Contains(result, `"round":2`) {
+		t.Fatalf("expected round 2 develop state, got %s", result)
+	}
+	if len(codexCalls) != 1 {
+		t.Fatalf("expected exactly one fresh codex call, got %d", len(codexCalls))
+	}
+	if len(codexCalls[0]) < 1 || codexCalls[0][0] != "exec" {
+		t.Fatalf("expected codex exec, got %v", codexCalls[0])
+	}
+	if len(codexCalls[0]) > 1 && codexCalls[0][1] == "resume" {
+		t.Fatalf("round-2 develop should be a fresh exec, got %v", codexCalls[0])
+	}
+	if !strings.Contains(codexPrompt, "Checklist:") || !strings.Contains(codexPrompt, "- Fix error handling.") {
+		t.Fatalf("expected previous checklist in round-2 codex prompt, got %q", codexPrompt)
 	}
 }
 
