@@ -15,7 +15,7 @@ Both tiers use the same validation functions — the difference is only what dri
 
 ## Tier 1: Fixture Smoke — Planning Flow
 
-_TODO document_
+Planning smoke must cover bootstrap, planning review, approved planning application, and approved adjustment application. The minimum observable planning scenarios are listed later in this document so the tier is no longer undocumented.
 
 ---
 
@@ -37,8 +37,9 @@ And a **fixture diff-reviewer** response for the `claude stream-json --agent dif
 
 - `INIT` is its own tick. A fresh implementation dispatch should stop after opening the PR and posting initial audit state.
 - Later `DEVELOP` rounds should start with a fresh codex invocation. Cross-round continuity must come from explicit carry-forward state such as `previous_checklist`, not hidden thread memory.
-- Codex `resume` is allowed only for same-round schema-retry repair after an invalid payload block.
+- Codex `resume` is allowed only for same-round schema-retry repair after an invalid payload block, and the current runtime performs at most one same-thread retry.
 - Reviewer invocations should be fresh on every `REVIEW` tick. There is no cross-round reviewer resume contract.
+- Reviewer contract repair is a separate same-thread behavior within a single `REVIEW` tick. It is not a cross-round resume contract.
 
 ### Scenario: Happy path (6 ticks)
 
@@ -52,7 +53,7 @@ Verify on GitHub:
 
 - [ ] Issue has `runoq:in-progress` label (not `runoq:ready`)
 - [ ] A draft PR for correct branch exists with `Closes #<issue>` in body
-- [ ] PR audit comment contains correct state/phase and implementor agent attribution
+- [ ] PR audit comment contains correct state/phase and orchestrator attribution
 - [ ] The issue branch has been pushed to origin with the initial empty bootstrap commit
 - [ ] No implementation code commits are pushed yet
 
@@ -66,6 +67,7 @@ Verify on GitHub:
 
 - [ ] Code commits are pushed to PR
 - [ ] PR has a new `DEVELOP` audit comment with implementor attribution
+- [ ] The `DEVELOP` comment is posted by `orchestrator` via `issue-runner`
 - [ ] No `VERIFY` or `REVIEW` comments are posted yet
 
 Verify correct output on terminal.
@@ -91,6 +93,7 @@ tick_once
 Verify on GitHub:
 
 - [ ] PR has new audit comment with review state and reviewer agent attribution
+- [ ] The review comment is posted by `orchestrator` via `diff-reviewer`
 - [ ] Review comment contains verdict (`PASS`, `ITERATE`, or `FAIL`)
 - [ ] Review comment contains score
 - [ ] Review comment contains full scorecard with comments/explanations
@@ -108,6 +111,7 @@ tick_once
 Verify on GitHub:
 
 - [ ] PR has a new `DECIDE` audit comment
+- [ ] The `DECIDE` comment is an orchestrator audit comment, not an implementor or reviewer comment
 - [ ] The decision comment does not also finalize in the same tick
 - [ ] Issue still has `runoq:in-progress` label
 
@@ -143,7 +147,7 @@ Same as happy path but the fixture reviewer returns `ITERATE` on first review.
 
 **Tick 5** — Decide: iterate
 
-- [ ] PR has audit comment for decide phase with orchestrator agent attribution, containing "iterate" decision
+- [ ] PR has audit comment for decide phase with orchestrator attribution, containing "iterate" decision
 - [ ] State includes review checklist carried forward as `previous_checklist`
 
 **Tick 6** — Develop round 2
@@ -237,7 +241,7 @@ Fixture simulates worktree creation or branch push failure during INIT.
 
 Fixture reviewer returns `PASS` but finalize routes to needs-review due to config constraints.
 
-**PASS with caveats** — reviewer returns PASS with caveats:
+**PASS with caveats** — finalize sees persisted caveats despite a `PASS` review verdict:
 
 - [ ] Issue has `runoq:needs-human-review` (not `runoq:done`)
 - [ ] PR finalize comment shows reason: caveats present
@@ -265,13 +269,15 @@ Fixture codex writes an invalid final payload block but includes a valid `thread
 
 - [ ] `state validate-payload` returns normalized JSON with `payload_schema_valid=false` for the first payload
 - [ ] Same-thread schema retry is attempted
+- [ ] Only one same-thread schema retry is attempted
 - [ ] The corrected payload is accepted without re-running development commands
 - [ ] Tick stops in `DEVELOP`; verification still happens later in the separate `VERIFY` tick
 
 **Schema retry fails**
 
-- [ ] `state validate-payload` continues to return normalized JSON with `payload_schema_valid=false` after bounded retries
+- [ ] `state validate-payload` continues to return normalized JSON with `payload_schema_valid=false` after the single allowed retry
 - [ ] `DEVELOP` still completes and persists the invalid payload state
+- [ ] Persisted state/comment includes schema metadata such as `payload_source`, `payload_schema_errors`, and caveat text indicating one failed resume attempt
 - [ ] The later `VERIFY` tick records the deterministic failure
 - [ ] Tick does not loop indefinitely
 
@@ -281,6 +287,12 @@ Fixture codex writes an invalid final payload block but includes a valid `thread
 - [ ] No same-thread schema retry is attempted because no resumable thread ID is available
 - [ ] `DEVELOP` still completes and persists caveats indicating the payload remained invalid and no thread ID was available
 - [ ] The later `VERIFY` tick records the deterministic failure
+
+**Synthetic or patched payload normalization**
+
+- [ ] `state validate-payload` truth-backs commit and file facts from git ground truth
+- [ ] The normalized payload exposes `payload_source` as `clean`, `patched`, or `synthetic`
+- [ ] The normalized payload exposes `patched_fields` and `discrepancies` when the codex payload is missing, malformed, or inconsistent with git ground truth
 
 ### Scenario: Resume from crash (idempotency)
 
@@ -316,12 +328,13 @@ Process crashes after the DECIDE tick has posted an `iterate` audit comment, but
 
 ### Scenario: Conversation loop (RESPOND phase)
 
-A human posts a comment on the PR while the issue is in-progress.
+An unprocessed non-audit PR comment exists while the issue is in-progress.
 
 - [ ] Bot detects unprocessed comment (no +1 reaction, not a bot comment)
 - [ ] Bot posts reply with agent attribution
 - [ ] Bot adds +1 reaction to original comment (marks as processed)
 - [ ] Bot-generated comments (with `runoq:bot` marker) are excluded from processing
+- [ ] `RESPOND` may preempt any PR-backed implementation tick (`DEVELOP`, `VERIFY`, `REVIEW`, `DECIDE`, `FINALIZE`) and the interrupted phase does not advance in that tick
 
 ### Scenario: Transient error path
 
@@ -347,6 +360,76 @@ Fixture codex returns a `turn.failed` event with capacity error.
 **Tick 2** — Retry succeeds
 
 - [ ] Normal develop retry flow resumes against the existing PR
+- [ ] `transient_retries` and `transient_retry_after` are cleared after a successful develop round
+
+**Backoff still active**
+
+- [ ] A tick that lands before `transient_retry_after` does not invoke codex again
+- [ ] Tick returns the persisted `DEVELOP` waiting state with `waiting=true` and `waiting_reason=transient_backoff`
+
+**Retry budget exhausted**
+
+- [ ] After 5 consecutive transient failures, the next transient failure escalates to deterministic needs-review handoff
+- [ ] PR is marked ready for review
+- [ ] Issue moves to `runoq:needs-human-review`
+- [ ] A durable finalize audit comment explains the transient-failure handoff
+
+### Scenario: Reviewer contract repair
+
+Fixture reviewer returns malformed review output on the initial `REVIEW` invocation.
+
+**Repair succeeds**
+
+- [ ] `REVIEW` captures the reviewer thread ID
+- [ ] A same-thread repair attempt is issued within the same `REVIEW` tick
+- [ ] The posted review comment records `Repair attempted = yes`
+- [ ] The repaired review comment contains a valid scorecard, verdict, and score
+- [ ] Tick still stops at `REVIEW`; `DECIDE` happens later in its own tick
+
+**Repair fails**
+
+- [ ] Only one same-thread repair attempt is issued
+- [ ] The posted review comment records contract errors
+- [ ] Review state is forced to `FAIL` with score `0`
+- [ ] The next tick goes through `DECIDE` and routes to needs-review finalization unless another iteration path is available
+
+### Scenario: PR exists but no recoverable state comment
+
+An issue already has a linked PR, but the PR comments do not contain a structured `<!-- runoq:state:... -->` block.
+
+- [ ] `deriveStateFromGitHub` finds the linked PR but returns `found=false`
+- [ ] A fresh dispatch does not silently resume from non-structured prose comments
+- [ ] The smoke should verify the chosen operator-facing behavior explicitly when a PR exists without recoverable state
+
+### Scenario: Fixture Smoke — Planning Flow
+
+Planning smoke is part of the currently implemented externally observable behavior and should not remain undocumented.
+
+Minimum observable scenarios:
+
+- [ ] Bootstrap path with no existing epics creates the planning epic and planning issue, then posts a proposal
+- [ ] Pending planning review with unresolved human comments responds to those comments and does not advance in the same tick
+- [ ] Approved planning review materializes milestone or task issues and closes the review issue
+- [ ] Approved adjustment review applies accepted adjustments, closes the review issue, and seeds the next planning issue when appropriate
+
+### Scenario: Epic integration flow
+
+Epic integration is implemented and externally observable after task queues drain.
+
+**Integrate pending**
+
+- [ ] If not all child tasks are `runoq:done`, the epic remains non-terminal
+- [ ] State returns to `DECIDE` with `decision=integrate-pending` and `next_phase=INTEGRATE`
+
+**Integrate success**
+
+- [ ] When all child tasks are done and integration verification passes, the epic moves to `runoq:done`
+- [ ] The epic issue is closed
+
+**Integrate failure**
+
+- [ ] Integration verification failure moves the epic to `runoq:needs-human-review`
+- [ ] Failure details are persisted in state for operator inspection
 
 ---
 
