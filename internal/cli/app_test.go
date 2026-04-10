@@ -2,8 +2,14 @@ package cli
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -80,6 +86,16 @@ func mustWriteStdout(t *testing.T, w io.Writer, value string) {
 	if _, err := io.WriteString(w, value); err != nil {
 		t.Fatalf("write stdout: %v", err)
 	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+func makeBody(s string) io.ReadCloser {
+	return io.NopCloser(strings.NewReader(s))
 }
 
 func TestRunCreatesLogFile(t *testing.T) {
@@ -162,7 +178,7 @@ func TestRunRunSubcommandInvokesOrchestrator(t *testing.T) {
 	var stderr strings.Builder
 	app := New(
 		[]string{"run", "--issue", "42", "--dry-run"},
-		[]string{"RUNOQ_ROOT=/runoq", "TARGET_ROOT=" + targetRoot, "PATH=/usr/bin"},
+		[]string{"RUNOQ_ROOT=/runoq", "TARGET_ROOT=" + targetRoot, "PATH=/usr/bin", "GH_TOKEN=runtime-token"},
 		targetRoot,
 		&stdout,
 		&stderr,
@@ -178,17 +194,101 @@ func TestRunRunSubcommandInvokesOrchestrator(t *testing.T) {
 		t.Fatalf("expected orchestrator log output on stderr, got %q", stderr.String())
 	}
 
-	// Verify that the env passed to the orchestrator contains the expected values.
-	// The auth call (bash -lc) receives the prepared env with TARGET_ROOT and REPO.
-	if len(calls) < 2 {
-		t.Fatalf("expected at least 2 command calls (git + auth), got %d", len(calls))
+	if len(calls) == 0 {
+		t.Fatal("expected command calls")
 	}
-	authCall := calls[1]
-	if value, ok := shell.EnvLookup(authCall.Env, "TARGET_ROOT"); !ok || value != targetRoot {
-		t.Fatalf("TARGET_ROOT mismatch: %q", value)
+	for _, call := range calls {
+		if call.Name == "bash" {
+			t.Fatalf("did not expect auth shell wrapper call, got %+v", call)
+		}
 	}
-	if value, ok := shell.EnvLookup(authCall.Env, "REPO"); !ok || value != "owner/repo" {
-		t.Fatalf("REPO mismatch: %q", value)
+}
+
+func TestPrepareAuthMintsTokenWithoutShellScript(t *testing.T) {
+	t.Parallel()
+
+	targetRoot := t.TempDir()
+	mustMkdir(t, filepath.Join(targetRoot, ".git"))
+	if err := os.MkdirAll(filepath.Join(targetRoot, ".runoq"), 0o755); err != nil {
+		t.Fatalf("mkdir .runoq: %v", err)
+	}
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	keyPath := filepath.Join(targetRoot, "app-key.pem")
+	pemBytes := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(key),
+	})
+	if err := os.WriteFile(keyPath, pemBytes, 0o600); err != nil {
+		t.Fatalf("write key: %v", err)
+	}
+
+	identityJSON, err := json.Marshal(map[string]any{
+		"appId":          12345,
+		"privateKeyPath": keyPath,
+	})
+	if err != nil {
+		t.Fatalf("marshal identity: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(targetRoot, ".runoq", "identity.json"), identityJSON, 0o644); err != nil {
+		t.Fatalf("write identity: %v", err)
+	}
+
+	origDefaultClient := http.DefaultClient
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			switch {
+			case r.URL.Path == "/app/installations" && r.Method == http.MethodGet:
+				return &http.Response{
+					StatusCode: 200,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       makeBody(`[{"id":222,"account":{"login":"my-org"}}]`),
+				}, nil
+			case r.URL.Path == "/app/installations/222/access_tokens" && r.Method == http.MethodPost:
+				return &http.Response{
+					StatusCode: 201,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       makeBody(`{"token":"dynamic-tok"}`),
+				}, nil
+			default:
+				return &http.Response{
+					StatusCode: 404,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       makeBody(`{"message":"not found"}`),
+				}, nil
+			}
+		}),
+	}
+	http.DefaultClient = client
+	t.Cleanup(func() {
+		http.DefaultClient = origDefaultClient
+	})
+
+	var calls []shell.CommandRequest
+	executor := func(_ context.Context, req shell.CommandRequest) error {
+		calls = append(calls, req)
+		return nil
+	}
+
+	app := New(nil, []string{
+		"RUNOQ_ROOT=/runoq",
+		"TARGET_ROOT=" + targetRoot,
+		"REPO=my-org/test-repo",
+	}, targetRoot, io.Discard, io.Discard, "")
+	app.SetCommandExecutor(executor)
+
+	env, code := app.prepareAuth(t.Context(), app.env, "/runoq")
+	if code != 0 {
+		t.Fatalf("prepareAuth code=%d", code)
+	}
+	if token, ok := shell.EnvLookup(env, "GH_TOKEN"); !ok || token != "dynamic-tok" {
+		t.Fatalf("GH_TOKEN = %q (ok=%v), want dynamic-tok", token, ok)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("expected no shell commands, got %d", len(calls))
 	}
 }
 
@@ -197,41 +297,37 @@ func TestRunConfigEmptyFallsBackToDefault(t *testing.T) {
 
 	targetRoot := t.TempDir()
 	mustMkdir(t, filepath.Join(targetRoot, ".git"))
-
-	// Track the env passed to orchestrator calls to verify RUNOQ_CONFIG.
-	var authEnvSnapshot []string
 	executor := func(_ context.Context, req shell.CommandRequest) error {
 		switch {
 		case req.Name == "git" && len(req.Args) >= 4 && req.Args[2] == "remote":
 			if req.Stdout != nil {
 				mustWriteStdout(t, req.Stdout, "git@github.com:owner/repo.git\n")
 			}
-		case req.Name == "bash" && len(req.Args) > 0 && req.Args[0] == "-lc":
-			if req.Stdout != nil {
-				mustWriteStdout(t, req.Stdout, "runtime-token")
-			}
-			// Capture env at auth time — this is the env the orchestrator will receive.
-			authEnvSnapshot = append([]string(nil), req.Env...)
 		}
 		return nil
 	}
 
-	var stdout strings.Builder
-	var stderr strings.Builder
 	app := New(
-		[]string{"run", "--dry-run"},
+		nil,
 		[]string{"RUNOQ_ROOT=/runoq", "RUNOQ_CONFIG=", "TARGET_ROOT=" + targetRoot, "PATH=/usr/bin"},
 		targetRoot,
-		&stdout,
-		&stderr,
+		io.Discard,
+		io.Discard,
 		"",
 	)
 	app.SetCommandExecutor(executor)
 
-	_ = app.Run(context.Background())
+	runoqRoot, resolvedEnv, ok := app.resolveRuntimeEnv()
+	if !ok {
+		t.Fatal("expected runtime env to resolve")
+	}
+	nextEnv, code := app.prepareTargetContext(context.Background(), runoqRoot, resolvedEnv)
+	if code != 0 {
+		t.Fatalf("prepareTargetContext code=%d", code)
+	}
 
 	// The empty RUNOQ_CONFIG should have been replaced with the default.
-	if value, ok := shell.EnvLookup(authEnvSnapshot, "RUNOQ_CONFIG"); !ok || value != "/runoq/config/runoq.json" {
+	if value, ok := shell.EnvLookup(nextEnv, "RUNOQ_CONFIG"); !ok || value != "/runoq/config/runoq.json" {
 		t.Fatalf("RUNOQ_CONFIG mismatch: %q", value)
 	}
 }

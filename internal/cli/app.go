@@ -17,6 +17,7 @@ import (
 
 	"github.com/saruman/runoq/internal/claude"
 	"github.com/saruman/runoq/internal/config"
+	"github.com/saruman/runoq/internal/gh"
 	"github.com/saruman/runoq/internal/gitops"
 	"github.com/saruman/runoq/internal/orchestrator"
 	"github.com/saruman/runoq/internal/report"
@@ -335,27 +336,62 @@ func (a *App) prepareTargetContext(ctx context.Context, runoqRoot string, env []
 }
 
 func (a *App) prepareAuth(ctx context.Context, env []string, runoqRoot string) ([]string, int) {
-	token, err := shell.CommandOutput(ctx, a.execCommand, shell.CommandRequest{
-		Name: "bash",
-		Args: []string{
-			"-lc",
-			`eval "$("$1" export-token)"; printf '%s' "$GH_TOKEN"`,
-			"bash",
-			filepath.Join(runoqRoot, "scripts", "gh-auth.sh"),
-		},
-		Dir: a.cwd,
-		Env: env,
-	})
-	if err != nil {
-		return nil, shell.ExitCodeFromError(err)
+	authEnv := append([]string(nil), env...)
+	if forceRefresh, ok := shell.EnvLookup(authEnv, "RUNOQ_FORCE_REFRESH_TOKEN"); ok && strings.TrimSpace(forceRefresh) != "" {
+		authEnv = withoutEnvKeys(authEnv, "GH_TOKEN", "GITHUB_TOKEN")
 	}
-	if token == "" {
-		return nil, shell.Fail(a.stderr, "Failed to export GH_TOKEN.")
+
+	targetRoot, _ := shell.EnvLookup(authEnv, "TARGET_ROOT")
+	homeDir, _ := shell.EnvLookup(authEnv, "HOME")
+	clientCWD := targetRoot
+	if strings.TrimSpace(clientCWD) == "" {
+		clientCWD = a.cwd
+	}
+	authClient := gh.NewClient(a.execCommand, http.DefaultClient, authEnv, clientCWD, homeDir)
+	if err := authClient.EnsureToken(ctx); err != nil {
+		return nil, shell.Fail(a.stderr, err.Error())
 	}
 
 	nextEnv := append([]string(nil), env...)
-	nextEnv = shell.EnvSet(nextEnv, "GH_TOKEN", token)
-	return nextEnv, 0
+	if token, ok := shell.EnvLookup(authClient.Env(), "GH_TOKEN"); ok && token != "" {
+		nextEnv = shell.EnvSet(nextEnv, "GH_TOKEN", token)
+		return nextEnv, 0
+	}
+	if token, ok := shell.EnvLookup(nextEnv, "GH_TOKEN"); ok && strings.TrimSpace(token) != "" {
+		return nextEnv, 0
+	}
+	if token, ok := shell.EnvLookup(nextEnv, "GITHUB_TOKEN"); ok && strings.TrimSpace(token) != "" {
+		nextEnv = shell.EnvSet(nextEnv, "GH_TOKEN", token)
+		return nextEnv, 0
+	}
+
+	_ = runoqRoot
+	return nil, shell.Fail(a.stderr, "Failed to export GH_TOKEN.")
+}
+
+func withoutEnvKeys(env []string, keys ...string) []string {
+	if len(keys) == 0 {
+		return append([]string(nil), env...)
+	}
+
+	blocked := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		blocked[key] = struct{}{}
+	}
+
+	filtered := make([]string, 0, len(env))
+	for _, item := range env {
+		name, _, ok := strings.Cut(item, "=")
+		if !ok {
+			filtered = append(filtered, item)
+			continue
+		}
+		if _, found := blocked[name]; found {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered
 }
 
 func (a *App) resolveRepo(ctx context.Context, env []string, targetRoot string) (string, error) {
