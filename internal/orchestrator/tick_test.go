@@ -542,6 +542,70 @@ func TestHandleActiveConversationsNoInProgressTasks(t *testing.T) {
 	}
 }
 
+func TestHandleActiveConversationsFailsWhenPRLookupFails(t *testing.T) {
+	t.Parallel()
+
+	runner := &tickRunner{
+		cfg: TickConfig{
+			Repo:            "owner/repo",
+			InProgressLabel: "runoq:in-progress",
+			Stdout:          io.Discard,
+			Stderr:          io.Discard,
+		},
+		issues: []issue{
+			{Number: 10, Title: "Task", State: "OPEN", IssueType: "task", Labels: []label{{Name: "runoq:in-progress"}}},
+		},
+	}
+	runner.cfg.ExecCommand = func(_ context.Context, req shell.CommandRequest) error {
+		args := strings.Join(req.Args, " ")
+		if strings.Contains(args, "pr list") && strings.Contains(args, "closes #10") {
+			return errors.New("pr list failed")
+		}
+		t.Fatalf("unexpected command: %s %s", req.Name, args)
+		return nil
+	}
+
+	result := runner.handleActiveConversations(t.Context())
+	if result != 1 {
+		t.Fatalf("expected result 1, got %d", result)
+	}
+}
+
+func TestHandleActiveConversationsFailsWhenCommentLookupFails(t *testing.T) {
+	t.Parallel()
+
+	runner := &tickRunner{
+		cfg: TickConfig{
+			Repo:            "owner/repo",
+			InProgressLabel: "runoq:in-progress",
+			IdentityHandle:  "runoq",
+			Stdout:          io.Discard,
+			Stderr:          io.Discard,
+		},
+		issues: []issue{
+			{Number: 10, Title: "Task", State: "OPEN", IssueType: "task", Labels: []label{{Name: "runoq:in-progress"}}},
+		},
+	}
+	runner.cfg.ExecCommand = func(_ context.Context, req shell.CommandRequest) error {
+		args := strings.Join(req.Args, " ")
+		switch {
+		case strings.Contains(args, "pr list") && strings.Contains(args, "closes #10"):
+			_, _ = io.WriteString(req.Stdout, `[{"number":87}]`)
+			return nil
+		case strings.Contains(args, "api") && strings.Contains(args, "issues/87/comments") && !strings.Contains(args, "reactions"):
+			return errors.New("comment lookup failed")
+		default:
+			t.Fatalf("unexpected command: %s %s", req.Name, args)
+			return nil
+		}
+	}
+
+	result := runner.handleActiveConversations(t.Context())
+	if result != 1 {
+		t.Fatalf("expected result 1, got %d", result)
+	}
+}
+
 func TestTickSelectsTaskAndCallsRunIssue(t *testing.T) {
 	t.Parallel()
 

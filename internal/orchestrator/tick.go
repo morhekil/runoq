@@ -264,12 +264,17 @@ func (t *tickRunner) handleActiveConversations(ctx context.Context) int {
 		// Find linked PR for this in-progress task
 		prListOut, err := t.ghOutput(ctx, "pr", "list", "--repo", t.cfg.Repo, "--search", fmt.Sprintf("closes #%d", iss.Number), "--json", "number")
 		if err != nil {
-			continue
+			t.warn(fmt.Sprintf("conversation sweep failed for task #%d: find linked PR: %v", iss.Number, err))
+			return 1
 		}
 		var prs []struct {
 			Number int `json:"number"`
 		}
-		if err := json.Unmarshal([]byte(prListOut), &prs); err != nil || len(prs) == 0 {
+		if err := json.Unmarshal([]byte(prListOut), &prs); err != nil {
+			t.warn(fmt.Sprintf("conversation sweep failed for task #%d: parse linked PR list: %v", iss.Number, err))
+			return 1
+		}
+		if len(prs) == 0 {
 			continue
 		}
 		prNumber := prs[0].Number
@@ -280,7 +285,11 @@ func (t *tickRunner) handleActiveConversations(ctx context.Context) int {
 		orchApp.SetConfig(t.orchestratorConfig())
 
 		comments, err := orchApp.findUnprocessedComments(ctx, t.cfg.Repo, "pr", prNumber)
-		if err != nil || len(comments) == 0 {
+		if err != nil {
+			t.warn(fmt.Sprintf("conversation sweep failed for PR #%d: %v", prNumber, err))
+			return 1
+		}
+		if len(comments) == 0 {
 			continue
 		}
 

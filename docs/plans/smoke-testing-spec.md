@@ -584,8 +584,16 @@ An unprocessed PR comment exists before a normal implementation phase starts.
 The tick scans active in-progress conversations before normal queue selection.
 
 - [ ] An in-progress task with an unprocessed PR comment is handled before any new ready task is selected
-- [ ] The tick emits `RESPOND`-only output for that task
+- [ ] Terminal output reports `Responded to comments on PR #<n>`
 - [ ] Normal implementation dispatch is deferred until a later tick
+
+### Scenario: Tick-level conversation sweep lookup failure
+
+The tick finds an in-progress task, but linked-PR discovery or PR-comment lookup fails during the pre-dispatch conversation sweep.
+
+- [ ] The tick exits with an error instead of silently falling through to new queue dispatch
+- [ ] No new ready task is dispatched in the same tick
+- [ ] Terminal/log output surfaces the conversation-sweep lookup failure
 
 ### Scenario: RESPOND failure is surfaced instead of reported as success
 
