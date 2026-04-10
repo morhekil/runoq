@@ -105,7 +105,6 @@ Single-issue mode still performs the full phase sequence:
 - startup reconciliation
 - eligibility checks
 - INIT: label transition to `runoq:in-progress`, worktree creation, draft PR creation
-- CRITERIA: bar-setter writes acceptance tests/specs (skipped for low complexity)
 - DEVELOP: one bounded Codex dev round runs
 - VERIFY: deterministic verification reruns from the pushed branch
 - REVIEW: diff-reviewer evaluates the diff
@@ -169,7 +168,7 @@ Epics are grouping issues created by `runoq plan` with `type: epic`. They do not
 
 1. For each `runoq:ready` epic, check whether all child tasks (linked via the GitHub sub-issues API) are `runoq:done`
 2. If all children are done, run the **INTEGRATE** phase:
-   - If the epic has a `criteria_commit` (from the CRITERIA phase), run `verify.sh integrate` against it to confirm acceptance criteria are met
+   - If the epic has a legacy `criteria_commit`, run `verify.sh integrate` against it to confirm acceptance criteria are met
    - If no criteria commit exists, mark the epic done directly
 3. On integration success, the epic moves to `runoq:done`
 4. On integration failure, the epic moves to `runoq:needs-human-review` with failure details
@@ -206,7 +205,6 @@ Look for:
 Look for:
 
 - `runoq:bot:init` — orchestrator initialization
-- `runoq:bot:criteria` — bar-setter acceptance criteria (medium/high complexity)
 - `runoq:bot:review` — diff review verdict, score, and checklist per round
 - `runoq:bot:finalize` — finalization decision table with complexity, verdict, and auto-merge status
 - payload reconstruction comments when malformed output was patched or synthesized

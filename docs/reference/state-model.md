@@ -56,7 +56,7 @@ Fields commonly written by `run.sh` and `orchestrator.sh`:
 - `branch`
 - `worktree`
 - `pr_number`
-- `criteria_commit` when bar-setter has authored acceptance criteria (medium+ complexity tasks)
+- `criteria_commit` when recovered legacy state carries criteria-protection history
 - `complexity_rationale` free-text explanation of the complexity estimate (from issue metadata)
 - `type` issue type (`epic` or `task`)
 - `parent_epic` parent epic issue number (for tasks within an epic)
@@ -108,8 +108,8 @@ Fields commonly written by `run.sh` and `orchestrator.sh`:
 ### Phases
 
 - `INIT`
-- `CRITERIA`
 - `DEVELOP`
+- `VERIFY`
 - `REVIEW`
 - `DECIDE`
 - `FINALIZE`
@@ -121,15 +121,14 @@ Fields commonly written by `run.sh` and `orchestrator.sh`:
 
 `state.sh` enforces these transitions:
 
-- `INIT -> CRITERIA`
 - `INIT -> DEVELOP`
 - `INIT -> FINALIZE`
 - `INIT -> FAILED`
-- `CRITERIA -> DEVELOP`
-- `CRITERIA -> REVIEW`
-- `CRITERIA -> FAILED`
-- `DEVELOP -> REVIEW`
+- `DEVELOP -> VERIFY`
 - `DEVELOP -> FAILED`
+- `VERIFY -> REVIEW`
+- `VERIFY -> DECIDE`
+- `VERIFY -> FAILED`
 - `REVIEW -> DECIDE`
 - `REVIEW -> FAILED`
 - `DECIDE -> DEVELOP`

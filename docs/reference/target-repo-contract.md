@@ -107,7 +107,7 @@ Those are part of the expected operator-facing PR shape, even though the summary
 
 ## `AGENTS.md` In The Target Repo
 
-The runtime does not parse `AGENTS.md`, but the prompt layer does. Agent startup contracts (such as bar-setter and diff-reviewer) read `AGENTS.md` from the target repo context.
+The runtime does not parse `AGENTS.md`, but the prompt layer does. Agent startup contracts (such as diff-reviewer) read `AGENTS.md` from the target repo context.
 
 Downstream guidance:
 

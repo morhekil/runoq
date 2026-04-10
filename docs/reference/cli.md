@@ -162,7 +162,7 @@ Behavior:
 - Resolves target repo context and GitHub auth
 - Runs startup reconciliation through `dispatch-safety.sh reconcile`
 - In queue mode, selects the next actionable `runoq:ready` issue by dependency and priority
-- In execution mode, delegates to `orchestrator.sh run` which creates a sibling worktree, opens a draft PR, drives the phase state machine (INIT, CRITERIA, DEVELOP, REVIEW, DECIDE, FINALIZE), and finalizes with either `auto-merge` or `needs-human-review`
+- In execution mode, delegates to `orchestrator.sh run` which creates a sibling worktree, opens a draft PR, drives the phase state machine (INIT, DEVELOP, VERIFY, REVIEW, DECIDE, FINALIZE), and finalizes with either `auto-merge` or `needs-human-review`
 - Persists Claude invocation artifacts under `log/claude/<name>-<timestamp>/`
 - Persists Codex round artifacts under each issue log directory, for example `log/issue-42-.../codex-round-1/`
 

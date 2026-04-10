@@ -75,7 +75,7 @@ Primary callers: `bin/runoq`, operators, tests.
 Pipeline phases:
 
 1. **Decompose**: calls `milestone-decomposer` to produce milestone items, then `task-decomposer` once per milestone to produce the final epic/task hierarchy with `key`, `type`, `title`, `body`, `priority`, `estimated_complexity`, `complexity_rationale`, dependency keys, and parent/children relationships.
-2. **Present**: displays the proposed issue hierarchy to the operator with complexity, dependency, and bar-setter annotations. Shows warnings if the agent produced any.
+2. **Present**: displays the proposed issue hierarchy to the operator with complexity and dependency annotations. Shows warnings if the agent produced any.
 3. **Create**: creates epics first, then tasks in order, resolving dependency keys to real issue numbers. Passes `--complexity-rationale` when present.
 
 Notes:
@@ -157,16 +157,15 @@ Primary callers: `run.sh`, tests.
 
 | Subcommand | Arguments | JSON/stdout contract | Side effects |
 | --- | --- | --- | --- |
-| `run` | `<repo> [--issue N] [--dry-run]` | JSON object with phase progression, outcome, and audit trail references | creates worktree, draft PR, spawns bar-setter/diff-reviewer agents, drives phase transitions, posts audit comments, finalizes PR |
+| `run` | `<repo> [--issue N] [--dry-run]` | JSON object with phase progression, outcome, and audit trail references | creates worktree, draft PR, runs develop/verify/review rounds, posts audit comments, finalizes PR |
 | `mention-triage` | `<repo> <pr-number>` | JSON array of classified mentions with `comment_id`, `classification`, `action_taken` | polls mentions, classifies via haiku structured-output call, dispatches to mention-responder or feeds change-requests into DEVELOP |
 
 Phase transitions driven by orchestrator:
 
-- `INIT -> CRITERIA` (when estimated_complexity is medium or higher)
-- `INIT -> DEVELOP` (when estimated_complexity is low, skipping CRITERIA)
-- `CRITERIA -> REVIEW` (non-low complexity deterministic handoff path)
-- `CRITERIA -> DEVELOP`
-- `DEVELOP -> REVIEW`
+- `INIT -> DEVELOP`
+- `DEVELOP -> VERIFY`
+- `VERIFY -> REVIEW`
+- `VERIFY -> DECIDE` (when verification fails)
 - `REVIEW -> DECIDE`
 - `DECIDE -> DEVELOP` (iterate)
 - `DECIDE -> FINALIZE`
@@ -243,9 +242,9 @@ Primary callers: `run.sh`, `mentions.sh`, `gh-pr-lifecycle.sh`, `maintenance.sh`
 
 Allowed phase transitions:
 
-- `INIT -> CRITERIA | DEVELOP | FINALIZE | FAILED`
-- `CRITERIA -> DEVELOP | REVIEW | FAILED`
-- `DEVELOP -> REVIEW | FAILED`
+- `INIT -> DEVELOP | FINALIZE | FAILED`
+- `DEVELOP -> VERIFY | FAILED`
+- `VERIFY -> REVIEW | DECIDE | FAILED`
 - `REVIEW -> DECIDE | FAILED`
 - `DECIDE -> DEVELOP | FINALIZE | INTEGRATE | FAILED`
 - `FINALIZE -> DONE | FAILED`

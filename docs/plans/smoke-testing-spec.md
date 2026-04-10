@@ -29,10 +29,16 @@ Same repo and fixture infrastructure as the planning smoke. After tasks are mate
 2. Commits and pushes to origin
 3. Writes valid JSONL events to stdout (with `thread.started` and token counts)
 4. Writes a valid last-message payload to the `-o` path (matching the required schema)
-5. Validates that a consistent thread ID is used across all runs
+5. Captures thread IDs so schema-retry scenarios can verify same-thread resume within a single develop round
 
 And a **fixture diff-reviewer** response for the `claude stream-json --agent diff-reviewer` invocation that returns a PASS verdict with a score.
-diff-reviewer fixture must also validate that it receives correct consistent resume thread ID throughout the whole PR review work.
+
+### Agent invocation policy
+
+- `INIT` is its own tick. A fresh implementation dispatch should stop after opening the PR and posting initial audit state.
+- Later `DEVELOP` rounds should start with a fresh codex invocation. Cross-round continuity must come from explicit carry-forward state such as `previous_checklist`, not hidden thread memory.
+- Codex `resume` is allowed only for same-round schema-retry repair after an invalid payload block.
+- Reviewer invocations should be fresh on every `REVIEW` tick. There is no cross-round reviewer resume contract.
 
 ### Scenario: Happy path (6 ticks)
 
@@ -120,36 +126,50 @@ Verify on GitHub:
 
 Verify correct output on terminal.
 
-### Scenario: Iterate path (6 ticks)
+### Scenario: Iterate path (10 ticks)
 
 Same as happy path but the fixture reviewer returns `ITERATE` on first review.
 
-**Tick 1** — Develop + Open PR (same checks as happy path tick 1)
+**Tick 1** — Init (same checks as happy path tick 1)
 
-**Tick 2** — Review returns ITERATE verdict
+**Tick 2** — Develop round 1 (same checks as happy path tick 2)
+
+**Tick 3** — Verify round 1 (same checks as happy path tick 3)
+
+**Tick 4** — Review returns ITERATE verdict
 
 - [ ] PR has review comment with `ITERATE` verdict and reviewer agent attribution
 - [ ] Issue still `runoq:in-progress`
 
-**Tick 3** — Decide: iterate
+**Tick 5** — Decide: iterate
 
 - [ ] PR has audit comment for decide phase with orchestrator agent attribution, containing "iterate" decision
 - [ ] State includes review checklist carried forward as `previous_checklist`
 
-**Tick 4** — Develop round 2
+**Tick 6** — Develop round 2
 
 - [ ] New commits pushed to branch (from second codex round)
 - [ ] PR has new develop audit comment for round 2 with implementor agent attribution
-- [ ] Implementor codex has been launched via resume with its correct consistent thread id for this PR and a modified propmpt that includes review feedback and allows for different responses: address and modify code, or push back with an explanation
+- [ ] Implementor codex has been launched as a fresh round-2 invocation, not a cross-round thread resume
+- [ ] The round-2 codex prompt includes the prior review checklist explicitly
 
-**Tick 5** — Review (PASS this time)
+**Tick 7** — Verify round 2
+
+- [ ] PR has a new `VERIFY` audit comment for round 2
+
+**Tick 8** — Review (PASS this time)
 
 - [ ] PR has review comment with `PASS` verdict and reviewer agent attribution
-- [ ] Reviewer claude has been launched with --resume with its correct consistent thread id for this PR
+- [ ] Reviewer claude has been launched as a fresh invocation for round 2, not a cross-round resume
 
-**Tick 6** — Decide + Finalize
+**Tick 9** — Decide: finalize
 
-- [ ] Same finalize checks as happy path tick 3
+- [ ] PR has a new `DECIDE` audit comment
+- [ ] The decision comment does not also finalize in the same tick
+
+**Tick 10** — Finalize
+
+- [ ] Same finalize checks as happy path tick 6
 
 ### Scenario: Needs-review path (1 tick)
 

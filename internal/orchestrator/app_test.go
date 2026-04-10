@@ -315,7 +315,7 @@ func TestRunProgramTeesOutputToLogWriter(t *testing.T) {
 
 	var logBuf bytes.Buffer
 	var stderr bytes.Buffer
-	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, &stderr)
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root, "RUNOQ_BASE_REF=main"}, root, io.Discard, &stderr)
 	app.SetLogWriter(&logBuf)
 	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
 		_, _ = io.WriteString(req.Stdout, "stdout-data\n")
@@ -659,7 +659,7 @@ func TestPhaseFinalizeAutoMergesAndCleansUp(t *testing.T) {
 	var stderr bytes.Buffer
 	var calls []string
 
-	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, &stderr)
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root, "RUNOQ_BASE_REF=main"}, root, io.Discard, &stderr)
 	app.SetConfig(defaultOrchestratorConfig())
 	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{calls: &calls, issueNumber: 42, issueTitle: "Implement queue"}))
 
@@ -699,6 +699,12 @@ func TestRunFromReviewReturnsAfterReview(t *testing.T) {
 		calls:       &calls,
 		issueNumber: 42,
 		issueTitle:  "Implement queue",
+		customHandler: func(req shell.CommandRequest) (bool, error) {
+			if req.Name == "git" && req.Stdout != nil {
+				_, _ = io.WriteString(req.Stdout, "HEAD branch: main\n")
+			}
+			return false, nil
+		},
 	}))
 
 	// State with an existing PR: review should run without depending on legacy OPEN-PR state.
@@ -938,6 +944,102 @@ func TestResumeFromStateBoundaries(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRunIssueFreshDispatchStopsAtInitBoundary(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var calls []string
+	var stderr bytes.Buffer
+
+	env := []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root, "RUNOQ_BASE_REF=main"}
+	if err := os.MkdirAll(root+"/config", 0o755); err != nil {
+		t.Fatalf("mkdir config: %v", err)
+	}
+	if err := os.WriteFile(root+"/config/runoq.json", []byte(`{"branchPrefix":"runoq/","worktreePrefix":"runoq-wt-"}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	app := New(nil, env, root, io.Discard, &stderr)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		calls:       &calls,
+		issueNumber: 42,
+		issueTitle:  "Implement queue",
+	}))
+	wtApp := worktree.New(nil, env, root, io.Discard, io.Discard)
+	wtApp.SetCommandExecutor(app.execCommand)
+	app.SetWorktreeApp(wtApp)
+
+	meta := IssueMetadata{Number: 42, Title: "Implement queue", EstimatedComplexity: "medium", Type: "task"}
+	result, err := app.RunIssue(ctx, "owner/repo", 42, false, "Implement queue", meta)
+	if err != nil {
+		t.Fatalf("RunIssue: %v", err)
+	}
+	if !strings.Contains(result, `"phase":"INIT"`) {
+		t.Fatalf("expected fresh dispatch to stop at INIT, got %s", result)
+	}
+	if containsCall(calls, "codex exec") {
+		t.Fatalf("expected fresh dispatch to stop before DEVELOP, got calls %v", calls)
+	}
+}
+
+func TestResumeFromInitSkipsCriteriaPhase(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var stderr bytes.Buffer
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, &stderr)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		issueNumber: 42,
+		issueTitle:  "Implement queue",
+		customHandler: func(req shell.CommandRequest) (bool, error) {
+			args := strings.Join(req.Args, " ")
+			switch {
+			case req.Name == "git":
+				if req.Stdout != nil {
+					_, _ = io.WriteString(req.Stdout, "abc123\n")
+				}
+				return true, nil
+			case req.Name == "codex" && strings.Contains(args, "exec"):
+				if req.Stdout != nil {
+					_, _ = io.WriteString(req.Stdout, `{"type":"thread.started","thread_id":"thread-42"}`+"\n")
+					_, _ = io.WriteString(req.Stdout, `{"tokens":500}`+"\n")
+				}
+				for i, arg := range req.Args {
+					if arg == "-o" && i+1 < len(req.Args) {
+						if err := os.WriteFile(req.Args[i+1], []byte("fake codex output"), 0o644); err != nil {
+							return true, err
+						}
+						break
+					}
+				}
+				return true, nil
+			case strings.HasSuffix(req.Name, "/state.sh"):
+				if req.Stdout != nil {
+					_, _ = io.WriteString(req.Stdout, `{"payload_schema_valid":true}`)
+				}
+				return true, nil
+			}
+			return false, nil
+		},
+	}))
+
+	meta := IssueMetadata{Number: 42, Title: "Implement queue", Type: "task"}
+	stateJSON := `{"issue":42,"phase":"INIT","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":87,"round":0}`
+
+	result, err := app.resumeFromState(ctx, root, app.env, "owner/repo", 42, stateJSON, meta)
+	if err != nil {
+		t.Fatalf("resumeFromState: %v", err)
+	}
+	if !strings.Contains(result, `"phase":"DEVELOP"`) {
+		t.Fatalf("expected DEVELOP phase, got %s", result)
+	}
+	if strings.Contains(stderr.String(), "CRITERIA:") {
+		t.Fatalf("expected INIT to resume directly to DEVELOP without CRITERIA, got log %q", stderr.String())
 	}
 }
 

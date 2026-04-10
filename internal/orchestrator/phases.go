@@ -252,23 +252,6 @@ func (a *App) phaseOpenPR(ctx context.Context, root string, env []string, repo s
 	return nextState, nil
 }
 
-func (a *App) phaseCriteria(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
-	complexity := strings.TrimSpace(metadata.EstimatedComplexity)
-	if complexity == "" {
-		complexity = "medium"
-	}
-	a.logInfo("CRITERIA: issue #%d complexity=%s type=%s", issueNumber, complexity, defaultString(metadata.Type, "task"))
-	nextState, err := updateStateJSON(stateJSON, func(state map[string]any) {
-		state["phase"] = "CRITERIA"
-		state["complexity"] = complexity
-		state["issue_type"] = defaultString(metadata.Type, "task")
-	})
-	if err != nil {
-		return "", err
-	}
-	return nextState, nil
-}
-
 func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string) (string, issueRunnerResult, error) {
 	a.ensureSubApps()
 	a.logInfo("DEVELOP: issue #%d", issueNumber)

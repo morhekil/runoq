@@ -2,7 +2,7 @@
 
 This document describes the major runtime sequences in `runoq`: iterative planning, execution, reconciliation, mention handling, and maintenance review.
 
-For `runoq run`, the orchestrator owns the phase machine and uses a bounded develop-round helper for `DEVELOP`. The orchestrator drives phase transitions (INIT, CRITERIA, DEVELOP, VERIFY, REVIEW, DECIDE, FINALIZE, INTEGRATE), spawns agents for bounded reasoning tasks, and handles mention triage. The develop helper runs one codex round and leaves deterministic checks to the separate `VERIFY` phase.
+For `runoq run`, the orchestrator owns the phase machine and uses a bounded develop-round helper for `DEVELOP`. The orchestrator drives phase transitions (INIT, DEVELOP, VERIFY, REVIEW, DECIDE, FINALIZE, INTEGRATE), spawns agents for bounded reasoning tasks, and handles mention triage. The develop helper runs one codex round and leaves deterministic checks to the separate `VERIFY` phase.
 
 ## `runoq tick`
 
@@ -146,7 +146,6 @@ sequenceDiagram
   participant WT as worktree.sh
   participant PR as gh-pr-lifecycle.sh
   participant State as state.sh
-  participant BarSet as bar-setter agent
   participant IssRun as issue-runner.sh
   participant Verify as verify.sh
   participant GH as GitHub
@@ -174,16 +173,8 @@ sequenceDiagram
   Orch->>PR: create draft PR
   PR->>GH: create draft PR from issue branch
   Orch->>State: save INIT breadcrumb
-  alt estimated_complexity is medium or higher
-    Orch->>State: save CRITERIA breadcrumb
-    Orch->>BarSet: spawn with spec, worktree, branch
-    BarSet->>FS: read spec, write acceptance tests, commit
-    BarSet-->>Orch: criteria_commit, criteria_files, summary
-    Orch->>PR: comment criteria summary
-    Orch->>State: record criteria_commit in state
-  end
   Orch->>State: save DEVELOP breadcrumb
-  Orch->>IssRun: invoke with payload including criteria_commit
+  Orch->>IssRun: invoke with payload including any prior checklist or legacy criteria_commit
   IssRun->>FS: run codex dev loop in sibling worktree
   IssRun->>State: validate or reconstruct payload
   IssRun->>PR: comment codex payload

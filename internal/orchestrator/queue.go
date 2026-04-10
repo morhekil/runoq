@@ -140,7 +140,8 @@ func (a *App) Setup(ctx context.Context, repo string) []string {
 	return env
 }
 
-// RunIssue runs a single issue through the phase machine (INIT→CRITERIA→DEVELOP→REVIEW→DECIDE→FINALIZE).
+// RunIssue advances a single issue by one phase boundary in the implementation
+// state machine (INIT→DEVELOP→VERIFY→REVIEW→DECIDE→FINALIZE).
 // The caller provides metadata so no additional API call is needed for issue details.
 func (a *App) RunIssue(ctx context.Context, repo string, issueNumber int, dryRun bool, title string, metadata IssueMetadata) (string, error) {
 	a.ensureSubApps()
@@ -203,7 +204,7 @@ func (a *App) runIssueWithEnv(ctx context.Context, root string, env []string, re
 		return stateJSON, nil
 	}
 
-	return a.runFromCriteria(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+	return stateJSON, nil
 }
 
 func (a *App) resumeFromState(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
@@ -237,8 +238,9 @@ func (a *App) resumeFromState(ctx context.Context, root string, env []string, re
 			return "", fmt.Errorf("unsupported RESPOND resume target %q", state.ResumePhase)
 		}
 	case "INIT":
-		return a.runFromCriteria(ctx, root, env, repo, issueNumber, stateJSON, metadata)
+		return a.runFromDevelop(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 	case "CRITERIA":
+		// Legacy recovery path for older PR state snapshots.
 		return a.runFromDevelop(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 	case "DEVELOP":
 		return a.runFromVerify(ctx, root, env, repo, issueNumber, stateJSON, metadata)
@@ -277,15 +279,6 @@ func (a *App) resumeFromState(ctx context.Context, root string, env []string, re
 	default:
 		return "", fmt.Errorf("unsupported resume phase %q", state.Phase)
 	}
-}
-
-func (a *App) runFromCriteria(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, metadata IssueMetadata) (string, error) {
-	var err error
-	stateJSON, err = a.phaseCriteria(ctx, root, env, repo, issueNumber, stateJSON, metadata)
-	if err != nil {
-		return "", err
-	}
-	return a.runFromDevelop(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 }
 
 // maxTransientRetries is the number of consecutive transient failures before

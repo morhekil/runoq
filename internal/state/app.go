@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/saruman/runoq/internal/gitops"
+	"github.com/saruman/runoq/internal/shell"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,8 +16,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"github.com/saruman/runoq/internal/gitops"
-	"github.com/saruman/runoq/internal/shell"
 )
 
 const usageText = `Usage:
@@ -662,14 +662,13 @@ func validatePhaseTransition(from string, to string) error {
 	}
 	allowed := map[string]struct{}{
 		"INIT:DEVELOP":     {},
-		"INIT:CRITERIA":    {},
 		"INIT:FINALIZE":    {},
 		"INIT:FAILED":      {},
-		"CRITERIA:DEVELOP": {},
-		"CRITERIA:REVIEW":  {},
-		"CRITERIA:FAILED":  {},
-		"DEVELOP:REVIEW":   {},
+		"DEVELOP:VERIFY":   {},
 		"DEVELOP:FAILED":   {},
+		"VERIFY:REVIEW":    {},
+		"VERIFY:DECIDE":    {},
+		"VERIFY:FAILED":    {},
 		"REVIEW:DECIDE":    {},
 		"REVIEW:FAILED":    {},
 		"DECIDE:DEVELOP":   {},
@@ -995,4 +994,3 @@ func marshalJSON(value any) ([]byte, error) {
 	}
 	return data, nil
 }
-

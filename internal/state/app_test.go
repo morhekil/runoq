@@ -74,20 +74,20 @@ func TestSaveAllowsFailedToInitRetry(t *testing.T) {
 	}
 }
 
-func TestSaveAllowsCriteriaToReviewTransition(t *testing.T) {
+func TestSaveAllowsVerifyToReviewTransition(t *testing.T) {
 	t.Parallel()
 
 	stateDir := filepath.Join(t.TempDir(), "state")
 	env := []string{"RUNOQ_STATE_DIR=" + stateDir}
 
-	firstCode, _, firstErr := runApp(t, []string{"save", "42"}, env, ".", `{"phase":"CRITERIA","round":1}`, nil)
+	firstCode, _, firstErr := runApp(t, []string{"save", "42"}, env, ".", `{"phase":"VERIFY","round":1}`, nil)
 	if firstCode != 0 {
 		t.Fatalf("first save code=%d stderr=%q", firstCode, firstErr)
 	}
 
 	secondCode, secondOut, secondErr := runApp(t, []string{"save", "42"}, env, ".", `{"phase":"REVIEW","round":1}`, nil)
 	if secondCode != 0 {
-		t.Fatalf("criteria->review save code=%d stderr=%q", secondCode, secondErr)
+		t.Fatalf("verify->review save code=%d stderr=%q", secondCode, secondErr)
 	}
 	if !strings.Contains(secondOut, `"phase": "REVIEW"`) {
 		t.Fatalf("expected review phase in save output: %q", secondOut)
