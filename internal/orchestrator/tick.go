@@ -435,6 +435,7 @@ func (t *tickRunner) handlePendingReview(ctx context.Context, pending *issue) in
 		}); err != nil {
 			t.warn(fmt.Sprintf("Comment handler failed for #%d: %v", pending.Number, err))
 			_, _ = fmt.Fprintf(t.cfg.Stdout, "Comment handler failed for #%d\n", pending.Number)
+			return 1
 		} else {
 			t.success(fmt.Sprintf("Responded to comments on #%d", pending.Number))
 			_, _ = fmt.Fprintf(t.cfg.Stdout, "Responded to comments on #%d\n", pending.Number)
@@ -507,8 +508,17 @@ func (t *tickRunner) handleApprovedPlanning(ctx context.Context, reviewView stri
 		}
 	} else {
 		t.info("creating task issues under epic #" + reviewParent)
+		type createdTask struct {
+			title         string
+			key           string
+			number        string
+			nodeID        string
+			dependsOnKeys []string
+		}
+
 		keyToNumber := make(map[string]string)
 		keyToNodeID := make(map[string]string)
+		createdTasks := make([]createdTask, 0, len(filtered.Items))
 		for _, item := range filtered.Items {
 			body := item.Body
 			complexity := cmp.Or(item.EstimatedComplexity, "medium")
@@ -516,33 +526,45 @@ func (t *tickRunner) handleApprovedPlanning(ctx context.Context, reviewView stri
 
 			issueNum, err := t.issueCreate(ctx, t.cfg.Repo, item.Title, body, createOpts...)
 			if err != nil {
-				t.info(fmt.Sprintf("failed to create task: %s: %v", item.Title, err))
-				continue
+				return t.fail("create task %q: %v", item.Title, err)
+			}
+
+			created := createdTask{
+				title:         item.Title,
+				key:           item.Key,
+				number:        issueNum,
+				dependsOnKeys: append([]string(nil), item.DependsOnKeys...),
 			}
 			if item.Key != "" {
 				keyToNumber[item.Key] = issueNum
-				// Get the node ID for GraphQL dependency linking
-				nodeID := t.issueNodeID(ctx, issueNum)
-				if nodeID != "" {
-					keyToNodeID[item.Key] = nodeID
-				}
 			}
-
-			// Set native GitHub dependencies via addBlockedBy
-			for _, depKey := range item.DependsOnKeys {
-				depNodeID, ok := keyToNodeID[depKey]
-				if !ok {
-					continue
-				}
-				taskNodeID := t.issueNodeID(ctx, issueNum)
-				if taskNodeID == "" {
-					continue
-				}
-				t.addBlockedBy(ctx, taskNodeID, depNodeID)
+			created.nodeID = t.issueNodeID(ctx, issueNum)
+			if item.Key != "" && created.nodeID != "" {
+				keyToNodeID[item.Key] = created.nodeID
 			}
+			createdTasks = append(createdTasks, created)
 
 			t.info(fmt.Sprintf("created task #%s: %s (%s)", issueNum, item.Title, complexity))
 		}
+
+		for _, task := range createdTasks {
+			if len(task.dependsOnKeys) == 0 {
+				continue
+			}
+			if task.nodeID == "" {
+				return t.fail("resolve node ID for task #%s", task.number)
+			}
+			for _, depKey := range task.dependsOnKeys {
+				depNodeID, ok := keyToNodeID[depKey]
+				if !ok || depNodeID == "" {
+					return t.fail("resolve dependency %q for task #%s", depKey, task.number)
+				}
+				if err := t.addBlockedBy(ctx, task.nodeID, depNodeID); err != nil {
+					return t.fail("link dependency %q for task #%s: %v", depKey, task.number, err)
+				}
+			}
+		}
+
 		t.info(fmt.Sprintf("closing review #%d", reviewNumber))
 		if err := t.issueSetStatus(ctx, t.cfg.Repo, fmt.Sprintf("%d", reviewNumber), "done"); err != nil {
 			return t.fail("close review #%d: %v", reviewNumber, err)
@@ -613,7 +635,7 @@ func (t *tickRunner) handleApprovedAdjustment(ctx context.Context, reviewView st
 				return t.fail("create milestone %q: %v", title, err)
 			}
 		default:
-			t.info(fmt.Sprintf("applying %s adjustment", adj.Type))
+			return t.fail("unsupported adjustment type %q", adj.Type)
 		}
 	}
 
@@ -1034,9 +1056,10 @@ func extractJSONFromCodeFence(body string) string {
 	return strings.TrimSpace(content[:end])
 }
 
-func (t *tickRunner) addBlockedBy(ctx context.Context, issueNodeID, blockingNodeID string) {
+func (t *tickRunner) addBlockedBy(ctx context.Context, issueNodeID, blockingNodeID string) error {
 	query := fmt.Sprintf(`mutation { addBlockedBy(input: { issueId: %q, blockingIssueId: %q }) { blockedIssue { number } } }`, issueNodeID, blockingNodeID)
-	_, _ = t.ghOutput(ctx, "api", "graphql", "-f", "query="+query)
+	_, err := t.ghOutput(ctx, "api", "graphql", "-f", "query="+query)
+	return err
 }
 
 func (t *tickRunner) fetchParentEpics(ctx context.Context) {

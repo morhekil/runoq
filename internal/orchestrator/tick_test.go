@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -1070,6 +1071,189 @@ func TestHandleApprovedAdjustmentReportsAdjustmentOutcome(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "Applied adjustments from #88") {
 		t.Fatalf("expected adjustment-specific output, got %q", stdout.String())
+	}
+}
+
+func TestHandleApprovedPlanningFailsWhenTaskCreationFails(t *testing.T) {
+	t.Parallel()
+
+	reviewView := "{\"body\":\"<!-- runoq:payload:plan-proposal -->\\n```json\\n{\\\"items\\\":[{\\\"title\\\":\\\"Task A\\\",\\\"type\\\":\\\"implementation\\\",\\\"body\\\":\\\"A body\\\"}]}\\n```\"}"
+
+	var closedReview bool
+	runner := &tickRunner{
+		cfg: TickConfig{
+			Repo:             "owner/repo",
+			ReadyLabel:       "runoq:ready",
+			InProgressLabel:  "runoq:in-progress",
+			DoneLabel:        "runoq:done",
+			NeedsReviewLabel: "runoq:needs-human-review",
+			BlockedLabel:     "runoq:blocked",
+			Stdout:           io.Discard,
+			Stderr:           io.Discard,
+		},
+		issues: []issue{{Number: 9, Title: "Milestone", State: "OPEN", IssueType: "epic"}},
+	}
+	runner.cfg.ExecCommand = func(_ context.Context, req shell.CommandRequest) error {
+		args := strings.Join(req.Args, " ")
+		switch {
+		case strings.Contains(args, "issue view 9") && strings.Contains(args, "--json title"):
+			_, _ = io.WriteString(req.Stdout, `{"title":"Milestone"}`)
+			return nil
+		case strings.Contains(args, "issue view 88") && strings.Contains(args, "--json labels"):
+			_, _ = io.WriteString(req.Stdout, `{"labels":[{"name":"runoq:planning"}]}`)
+			return nil
+		case strings.Contains(args, "issue create"):
+			return errors.New("create failed")
+		case strings.Contains(args, "issue edit 88"), strings.Contains(args, "issue close 88"):
+			closedReview = true
+			return nil
+		default:
+			return nil
+		}
+	}
+
+	result := runner.handleApprovedPlanning(t.Context(), reviewView, 88, "9", comments.ItemSelection{})
+	if result != 1 {
+		t.Fatalf("handleApprovedPlanning = %d, want 1", result)
+	}
+	if closedReview {
+		t.Fatal("expected review to remain open when task creation fails")
+	}
+}
+
+func TestHandleApprovedPlanningLinksDependenciesCreatedLater(t *testing.T) {
+	t.Parallel()
+
+	reviewView := "{\"body\":\"<!-- runoq:payload:plan-proposal -->\\n```json\\n{\\\"items\\\":[{\\\"key\\\":\\\"a\\\",\\\"title\\\":\\\"Task A\\\",\\\"type\\\":\\\"implementation\\\",\\\"body\\\":\\\"A body\\\",\\\"depends_on_keys\\\":[\\\"b\\\"]},{\\\"key\\\":\\\"b\\\",\\\"title\\\":\\\"Task B\\\",\\\"type\\\":\\\"implementation\\\",\\\"body\\\":\\\"B body\\\"}]}\\n```\"}"
+
+	var addBlockedByQueries []string
+	var stderr bytes.Buffer
+	runner := &tickRunner{
+		cfg: TickConfig{
+			Repo:             "owner/repo",
+			ReadyLabel:       "runoq:ready",
+			InProgressLabel:  "runoq:in-progress",
+			DoneLabel:        "runoq:done",
+			NeedsReviewLabel: "runoq:needs-human-review",
+			BlockedLabel:     "runoq:blocked",
+			Stdout:           io.Discard,
+			Stderr:           &stderr,
+		},
+		issues: []issue{{Number: 9, Title: "Milestone", State: "OPEN", IssueType: "epic"}},
+	}
+	runner.cfg.ExecCommand = func(_ context.Context, req shell.CommandRequest) error {
+		args := strings.Join(req.Args, " ")
+		switch {
+		case strings.Contains(args, "issue view 9") && strings.Contains(args, "--json title"):
+			_, _ = io.WriteString(req.Stdout, `{"title":"Milestone"}`)
+			return nil
+		case strings.Contains(args, "issue view 88") && strings.Contains(args, "--json labels"):
+			_, _ = io.WriteString(req.Stdout, `{"labels":[{"name":"runoq:planning"}]}`)
+			return nil
+		case strings.Contains(args, "issue create") && strings.Contains(args, "Task A"):
+			_, _ = io.WriteString(req.Stdout, "https://example.test/issues/101")
+			return nil
+		case strings.Contains(args, "issue create") && strings.Contains(args, "Task B"):
+			_, _ = io.WriteString(req.Stdout, "https://example.test/issues/102")
+			return nil
+		case strings.Contains(args, "api repos/owner/repo/issues/101") && strings.Contains(args, "node_id"):
+			_, _ = io.WriteString(req.Stdout, "NODE_A\n")
+			return nil
+		case strings.Contains(args, "api repos/owner/repo/issues/102") && strings.Contains(args, "node_id"):
+			_, _ = io.WriteString(req.Stdout, "NODE_B\n")
+			return nil
+		case strings.Contains(args, "api graphql") && strings.Contains(args, "addBlockedBy"):
+			addBlockedByQueries = append(addBlockedByQueries, args)
+			return nil
+		case strings.Contains(args, "issue edit 88"), strings.Contains(args, "issue close 88"):
+			return nil
+		default:
+			return nil
+		}
+	}
+
+	result := runner.handleApprovedPlanning(t.Context(), reviewView, 88, "9", comments.ItemSelection{})
+	if result != 0 {
+		t.Fatalf("handleApprovedPlanning = %d, want 0; stderr=%q", result, stderr.String())
+	}
+	if len(addBlockedByQueries) != 1 {
+		t.Fatalf("expected one addBlockedBy mutation, got %v", addBlockedByQueries)
+	}
+	if !strings.Contains(addBlockedByQueries[0], "issueId: \"NODE_A\"") || !strings.Contains(addBlockedByQueries[0], "blockingIssueId: \"NODE_B\"") {
+		t.Fatalf("unexpected dependency link mutation: %q", addBlockedByQueries[0])
+	}
+}
+
+func TestHandlePendingReviewFailsWhenCommentHandlingFails(t *testing.T) {
+	t.Parallel()
+
+	issueView := `{"number":88,"title":"Review","body":"<!-- runoq:payload:plan-proposal -->","state":"OPEN","labels":[{"name":"runoq:planning"}],"comments":[{"id":"IC1","author":{"login":"human"},"body":"Please revise","reactionGroups":[]}]}`
+
+	runner := &tickRunner{
+		cfg: TickConfig{
+			Repo:   "owner/repo",
+			Stdout: io.Discard,
+			Stderr: io.Discard,
+		},
+	}
+	runner.cfg.ExecCommand = func(_ context.Context, req shell.CommandRequest) error {
+		args := strings.Join(req.Args, " ")
+		switch {
+		case strings.Contains(args, "issue view 88") && strings.Contains(args, "--json number,title,body,comments,labels,state"):
+			_, _ = io.WriteString(req.Stdout, issueView)
+			return nil
+		case strings.Contains(args, "issue view 88") && strings.Contains(args, "--json number,title,body,comments"):
+			_, _ = io.WriteString(req.Stdout, issueView)
+			return nil
+		case strings.Contains(args, "api graphql") && strings.Contains(args, "addReaction"):
+			return errors.New("reaction failed")
+		default:
+			t.Fatalf("unexpected command: %s %s", req.Name, args)
+			return nil
+		}
+	}
+
+	result := runner.handlePendingReview(t.Context(), &issue{
+		Number: 88,
+		Title:  "Review",
+		State:  "OPEN",
+		Body:   "<!-- runoq:payload:plan-proposal -->",
+		Labels: []label{{Name: "runoq:planning"}},
+	})
+	if result != 1 {
+		t.Fatalf("handlePendingReview = %d, want 1", result)
+	}
+}
+
+func TestHandleApprovedAdjustmentFailsOnUnsupportedType(t *testing.T) {
+	t.Parallel()
+
+	reviewView := "{\"body\":\"## Adjustment Review\\n\\n```json\\n{\\\"milestone_number\\\":9,\\\"milestone_title\\\":\\\"Current milestone\\\",\\\"summary\\\":\\\"done\\\",\\\"recommended_verdict\\\":\\\"APPROVE\\\",\\\"proposed_adjustments\\\":[{\\\"type\\\":\\\"archive\\\",\\\"description\\\":\\\"Archive this milestone\\\"}]}\\n```\"}"
+
+	var closed bool
+	runner := &tickRunner{
+		cfg: TickConfig{
+			Repo:   "owner/repo",
+			Stdout: io.Discard,
+			Stderr: io.Discard,
+		},
+	}
+	runner.cfg.ExecCommand = func(_ context.Context, req shell.CommandRequest) error {
+		args := strings.Join(req.Args, " ")
+		if strings.Contains(args, "issue edit 88") || strings.Contains(args, "issue close 88") || strings.Contains(args, "issue edit 9") || strings.Contains(args, "issue close 9") {
+			closed = true
+			return nil
+		}
+		t.Fatalf("unexpected command: %s %s", req.Name, args)
+		return nil
+	}
+
+	result := runner.handleApprovedAdjustment(t.Context(), reviewView, 88, "9", comments.ItemSelection{})
+	if result != 1 {
+		t.Fatalf("handleApprovedAdjustment = %d, want 1", result)
+	}
+	if closed {
+		t.Fatal("expected review and parent to remain open on unsupported adjustment type")
 	}
 }
 
