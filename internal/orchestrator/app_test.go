@@ -800,6 +800,153 @@ func TestRunFromReviewRoundTwoUsesFreshReviewerInvocation(t *testing.T) {
 	}
 }
 
+func TestPhaseReviewRepairsMalformedReviewerOutputInSameThread(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var stderr bytes.Buffer
+	var calls []string
+	var commentBody string
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, &stderr)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		calls:       &calls,
+		issueNumber: 42,
+		issueTitle:  "Implement queue",
+		customHandler: func(req shell.CommandRequest) (bool, error) {
+			args := strings.Join(req.Args, " ")
+			switch {
+			case req.Name == "git" && req.Stdout != nil:
+				_, _ = io.WriteString(req.Stdout, "HEAD branch: main\n")
+				return false, nil
+			case (req.Name == "claude" || strings.HasSuffix(req.Name, "/claude")) && strings.Contains(args, "stream-json"):
+				if strings.Contains(args, "--resume review-thread-123") {
+					repaired := "## PERFECT-D Scorecard\n- Determinism: 5/5\n\nVERDICT: PASS\nSCORE: 39/40\nCHECKLIST:\n- OK.\n"
+					resultLine, _ := json.Marshal(map[string]any{"type": "result", "result": repaired})
+					_, _ = fmt.Fprintf(req.Stdout, "%s\n", resultLine)
+					return true, nil
+				}
+				events := []map[string]any{
+					{"type": "session.started", "session_id": "review-thread-123"},
+					{"type": "result", "result": "VERDICT: PASS\nSCORE: 39/40\nCHECKLIST:\n- OK.\n"},
+				}
+				for _, event := range events {
+					line, _ := json.Marshal(event)
+					_, _ = fmt.Fprintf(req.Stdout, "%s\n", line)
+				}
+				return true, nil
+			}
+			return false, nil
+		},
+		ghHandler: func(ghArgs string, req shell.CommandRequest) (bool, error) {
+			if strings.Contains(ghArgs, "pr comment 87") && strings.Contains(ghArgs, "--body-file") {
+				for i, arg := range req.Args {
+					if arg == "--body-file" && i+1 < len(req.Args) {
+						data, _ := os.ReadFile(req.Args[i+1])
+						commentBody = string(data)
+						break
+					}
+				}
+				return true, nil
+			}
+			return false, nil
+		},
+	}))
+
+	stateJSON := `{"issue":42,"phase":"VERIFY","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":87,"round":1,"baseline_hash":"base","head_hash":"head","changed_files":["main.go"],"related_files":[],"spec_requirements":"## AC","verification_passed":true}`
+
+	result, err := app.phaseReview(ctx, root, app.env, "owner/repo", 42, stateJSON)
+	if err != nil {
+		t.Fatalf("phaseReview: %v", err)
+	}
+
+	if !strings.Contains(result, `"review_thread_id":"review-thread-123"`) {
+		t.Fatalf("expected review_thread_id in state, got %s", result)
+	}
+	if !strings.Contains(result, `"review_contract_valid":true`) {
+		t.Fatalf("expected review_contract_valid=true, got %s", result)
+	}
+	if !containsCall(calls, "--resume review-thread-123") {
+		t.Fatalf("expected same-thread repair call, got calls: %v", calls)
+	}
+	if !strings.Contains(commentBody, "## PERFECT-D Scorecard") {
+		t.Fatalf("expected repaired scorecard in comment, got %q", commentBody)
+	}
+}
+
+func TestPhaseReviewFailsClosedWhenRepairStillMalformed(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var stderr bytes.Buffer
+	var calls []string
+	var commentBody string
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, &stderr)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		calls:       &calls,
+		issueNumber: 42,
+		issueTitle:  "Implement queue",
+		customHandler: func(req shell.CommandRequest) (bool, error) {
+			args := strings.Join(req.Args, " ")
+			switch {
+			case req.Name == "git" && req.Stdout != nil:
+				_, _ = io.WriteString(req.Stdout, "HEAD branch: main\n")
+				return false, nil
+			case (req.Name == "claude" || strings.HasSuffix(req.Name, "/claude")) && strings.Contains(args, "stream-json"):
+				events := []map[string]any{
+					{"type": "session.started", "session_id": "review-thread-123"},
+					{"type": "result", "result": "VERDICT: PASS\nSCORE: 39/40\nCHECKLIST:\n- OK.\n"},
+				}
+				for _, event := range events {
+					line, _ := json.Marshal(event)
+					_, _ = fmt.Fprintf(req.Stdout, "%s\n", line)
+				}
+				return true, nil
+			}
+			return false, nil
+		},
+		ghHandler: func(ghArgs string, req shell.CommandRequest) (bool, error) {
+			if strings.Contains(ghArgs, "pr comment 87") && strings.Contains(ghArgs, "--body-file") {
+				for i, arg := range req.Args {
+					if arg == "--body-file" && i+1 < len(req.Args) {
+						data, _ := os.ReadFile(req.Args[i+1])
+						commentBody = string(data)
+						break
+					}
+				}
+				return true, nil
+			}
+			return false, nil
+		},
+	}))
+
+	stateJSON := `{"issue":42,"phase":"VERIFY","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":87,"round":1,"baseline_hash":"base","head_hash":"head","changed_files":["main.go"],"related_files":[],"spec_requirements":"## AC","verification_passed":true}`
+
+	result, err := app.phaseReview(ctx, root, app.env, "owner/repo", 42, stateJSON)
+	if err != nil {
+		t.Fatalf("phaseReview: %v", err)
+	}
+
+	if !strings.Contains(result, `"verdict":"FAIL"`) {
+		t.Fatalf("expected FAIL verdict, got %s", result)
+	}
+	if !strings.Contains(result, `"review_contract_valid":false`) {
+		t.Fatalf("expected review_contract_valid=false, got %s", result)
+	}
+	if !strings.Contains(result, `"scorecard_missing"`) {
+		t.Fatalf("expected scorecard_missing in state, got %s", result)
+	}
+	if !containsCall(calls, "--resume review-thread-123") {
+		t.Fatalf("expected single same-thread repair attempt, got calls: %v", calls)
+	}
+	if !strings.Contains(commentBody, "reviewer output invalid") {
+		t.Fatalf("expected invalid-review reason in comment, got %q", commentBody)
+	}
+}
+
 // TestRunFromDecideReturnsOnIterate verifies that runFromDecide returns at the
 // tick boundary when the verdict is ITERATE, posting an audit comment so the
 // next tick can derive state. It should NOT chain to runFromDevelop.

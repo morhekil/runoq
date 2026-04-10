@@ -552,6 +552,7 @@ func (a *App) phaseReview(ctx context.Context, root string, env []string, repo s
 		ChangedFiles      []string `json:"changed_files"`
 		RelatedFiles      []string `json:"related_files"`
 		PreviousChecklist string   `json:"previous_checklist"`
+		ReviewThreadID    string   `json:"review_thread_id"`
 	}
 	if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
 		return "", fmt.Errorf("failed to parse state for review: %v", err)
@@ -608,18 +609,22 @@ func (a *App) phaseReview(ctx context.Context, root string, env []string, repo s
 	}
 
 	var reviewStderr bytes.Buffer
-	if err := claude.Stream(ctx, a.execCommand, claude.StreamConfig{
+	streamResult, err := claude.Stream(ctx, a.execCommand, claude.StreamConfig{
 		OutputFile: reviewOutputPath,
 		WorkDir:    state.Worktree,
 		Args:       []string{"--permission-mode", "bypassPermissions", "--agent", "diff-reviewer", "--add-dir", root, "--", reviewPayload},
 		Env:        env,
 		Stderr:     &reviewStderr,
-	}); err != nil {
+	})
+	if err != nil {
 		a.logInfo("REVIEW: claude_stream error: %v stderr: %s", err, reviewStderr.String())
 		return "", err
 	}
 	if reviewStderr.Len() > 0 {
 		a.logInfo("REVIEW: claude_stream stderr: %s", reviewStderr.String())
+	}
+	if strings.TrimSpace(streamResult.ThreadID) != "" {
+		state.ReviewThreadID = streamResult.ThreadID
 	}
 
 	reviewLogAbs := strings.TrimSpace(state.ReviewLogPath)
@@ -646,16 +651,71 @@ func (a *App) phaseReview(ctx context.Context, root string, env []string, repo s
 		}
 	}
 
+	reviewContractValid := false
+	reviewContractErrorsList := reviewContractErrors(verdictResult)
+	reviewRepairAttempted := false
+	if len(reviewContractErrorsList) > 0 && strings.TrimSpace(state.ReviewThreadID) != "" {
+		reviewRepairAttempted = true
+		a.logInfo("REVIEW: malformed reviewer output detected (%s); attempting same-thread repair", strings.Join(reviewContractErrorsList, ", "))
+
+		reviewRepairOutputFile, err := os.CreateTemp("", "runoq-review-repair-out.*")
+		if err != nil {
+			return "", err
+		}
+		reviewRepairOutputPath := reviewRepairOutputFile.Name()
+		defer func() {
+			_ = os.Remove(reviewRepairOutputPath)
+		}()
+		if err := reviewRepairOutputFile.Close(); err != nil {
+			return "", err
+		}
+
+		var repairStderr bytes.Buffer
+		_, err = claude.ResumeStream(ctx, a.execCommand, state.ReviewThreadID, claude.StreamConfig{
+			OutputFile: reviewRepairOutputPath,
+			WorkDir:    state.Worktree,
+			Args:       []string{"--permission-mode", "bypassPermissions", "--add-dir", root, "--", reviewRepairPrompt(reviewContractErrorsList)},
+			Env:        env,
+			Stderr:     &repairStderr,
+		})
+		if err != nil {
+			a.logInfo("REVIEW: repair resume error: %v stderr: %s", err, repairStderr.String())
+			return "", err
+		}
+		if repairStderr.Len() > 0 {
+			a.logInfo("REVIEW: repair resume stderr: %s", repairStderr.String())
+		}
+
+		parsed, err := parseReviewVerdict(reviewRepairOutputPath)
+		if err != nil {
+			return "", err
+		}
+		verdictResult = parsed
+		reviewContractErrorsList = reviewContractErrors(verdictResult)
+	}
+	reviewContractValid = len(reviewContractErrorsList) == 0
+
 	verdict := strings.TrimSpace(verdictResult.Verdict)
-	if verdict == "" || verdict == "null" {
-		verdict = "FAIL"
-		a.logError("Could not parse review verdict; treating as FAIL")
-	}
 	score := strings.TrimSpace(verdictResult.Score)
-	if score == "" || score == "null" {
-		score = "0"
-	}
 	reviewChecklist := verdictResult.Checklist
+	if !reviewContractValid {
+		verdict = "FAIL"
+		score = "0"
+		reviewChecklist = invalidReviewChecklist(reviewContractErrorsList)
+		repairAttempts := 0
+		if reviewRepairAttempted {
+			repairAttempts = 1
+		}
+		a.logError("Reviewer output invalid after %d repair attempt(s): %s", repairAttempts, strings.Join(reviewContractErrorsList, ", "))
+	} else {
+		if verdict == "" || verdict == "null" {
+			verdict = "FAIL"
+			a.logError("Could not parse review verdict; treating as FAIL")
+		}
+		if score == "" || score == "null" {
+			score = "0"
+		}
+	}
 	a.logInfo("REVIEW: verdict=%s score=%s", verdict, score)
 
 	cfg := a.cfg
@@ -666,17 +726,33 @@ func (a *App) phaseReview(ctx context.Context, root string, env []string, repo s
 		}
 	}
 	reviewBody := fmt.Sprintf("<!-- runoq:agent:diff-reviewer -->\n## Diff Review - round %d / %d\n\n> Posted by `orchestrator` via `diff-reviewer` agent\n\n| Field | Value |\n|-------|-------|\n| **Verdict** | %s |\n| **Score** | %s |\n| **Commit range** | `%s..%s` |\n| **Changed files** | %s |\n", round, cfg.MaxRounds, verdict, score, truncateHash(state.BaselineHash), truncateHash(state.HeadHash), changedFilesDisplay)
+	reviewBody += fmt.Sprintf("| **Contract valid** | %s |\n", yesNo(reviewContractValid))
+	if strings.TrimSpace(state.ReviewThreadID) != "" {
+		reviewBody += fmt.Sprintf("| **Review thread** | `%s` |\n", state.ReviewThreadID)
+	}
+	if reviewRepairAttempted {
+		reviewBody += "| **Repair attempted** | yes |\n"
+	}
 	if strings.TrimSpace(verdictResult.Scorecard) != "" {
 		reviewBody += "\n" + verdictResult.Scorecard + "\n"
+	}
+	if len(reviewContractErrorsList) > 0 {
+		reviewBody += "\n### Contract Errors\n"
+		for _, item := range reviewContractErrorsList {
+			reviewBody += "- " + item + "\n"
+		}
 	}
 	if strings.TrimSpace(reviewChecklist) != "" {
 		reviewBody += "\n### Checklist\n" + reviewChecklist + "\n"
 	}
-	reviewState, err := updateStateJSON(stateJSON, func(state map[string]any) {
-		state["phase"] = "REVIEW"
-		state["verdict"] = verdict
-		state["score"] = score
-		state["review_checklist"] = reviewChecklist
+	reviewState, err := updateStateJSON(stateJSON, func(s map[string]any) {
+		s["phase"] = "REVIEW"
+		s["verdict"] = verdict
+		s["score"] = score
+		s["review_checklist"] = reviewChecklist
+		s["review_thread_id"] = state.ReviewThreadID
+		s["review_contract_valid"] = reviewContractValid
+		s["review_contract_errors"] = reviewContractErrorsList
 	})
 	if err != nil {
 		return "", err

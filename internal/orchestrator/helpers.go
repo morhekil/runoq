@@ -77,6 +77,50 @@ type reviewVerdictResult struct {
 	Scorecard  string // Full PERFECT-D scorecard + metrics sections from the review log
 }
 
+func reviewContractErrors(result reviewVerdictResult) []string {
+	errorsList := make([]string, 0, 3)
+	if trimmed := strings.TrimSpace(result.Verdict); trimmed == "" || trimmed == "null" {
+		errorsList = append(errorsList, "verdict_missing")
+	}
+	if trimmed := strings.TrimSpace(result.Score); trimmed == "" || trimmed == "null" {
+		errorsList = append(errorsList, "score_missing")
+	}
+	if strings.TrimSpace(result.Scorecard) == "" {
+		errorsList = append(errorsList, "scorecard_missing")
+	}
+	return errorsList
+}
+
+func invalidReviewChecklist(errorsList []string) string {
+	if len(errorsList) == 0 {
+		return "- reviewer output invalid"
+	}
+
+	lines := make([]string, 0, len(errorsList))
+	for _, item := range errorsList {
+		lines = append(lines, "- reviewer output invalid: "+item)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func reviewRepairPrompt(errorsList []string) string {
+	problems := strings.Join(errorsList, ", ")
+	if problems == "" {
+		problems = "unknown contract violation"
+	}
+
+	return fmt.Sprintf(`Your last review response failed the required output contract: %s.
+
+Do not perform a second review. Do not run more tools or commands.
+Re-emit the same substantive review only, with the required terminal structure:
+- a scorecard section
+- VERDICT: <value>
+- SCORE: <value>
+- CHECKLIST:
+
+Return only the corrected review text.`, problems)
+}
+
 func parseReviewVerdict(path string) (reviewVerdictResult, error) {
 	file, err := os.Open(path)
 	if err != nil {
