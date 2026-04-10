@@ -839,6 +839,53 @@ func TestDispatchTaskReturnsWaitingForWaitingDevelopState(t *testing.T) {
 	}
 }
 
+func TestDispatchTaskIncludesWaitingReasonInOutput(t *testing.T) {
+	t.Parallel()
+
+	waitingState := `{"phase":"DEVELOP","issue":42,"pr_number":87,"branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","round":1,"waiting":true,"waiting_reason":"transient_backoff","summary":"transient codex error: Selected model is at capacity","transient_retry_after":"2099-01-01T00:00:00Z"}`
+
+	var stdout bytes.Buffer
+	runner := &tickRunner{
+		cfg: TickConfig{
+			Repo:   "owner/repo",
+			Env:    []string{"RUNOQ_ROOT=/tmp/runoq", "TARGET_ROOT=/tmp/target"},
+			Stdout: &stdout,
+			Stderr: io.Discard,
+			ExecCommand: func(_ context.Context, req shell.CommandRequest) error {
+				args := strings.Join(req.Args, " ")
+				switch {
+				case req.Name == "gh" && strings.Contains(args, "pr list") && strings.Contains(args, "closes #42"):
+					_, _ = io.WriteString(req.Stdout, `[{"number":87,"headRefName":"runoq/42-implement-queue"}]`)
+					return nil
+				case req.Name == "gh" && strings.Contains(args, "pr view 87") && strings.Contains(args, "comments"):
+					_, _ = io.WriteString(req.Stdout, `{"comments":[{"body":"<!-- runoq:bot:orchestrator:develop -->\n<!-- runoq:state:`+strings.ReplaceAll(waitingState, `"`, `\"`)+` -->\n> develop"}]}`)
+					return nil
+				case req.Name == "gh" && strings.Contains(args, "api repos/owner/repo/issues/87/comments"):
+					_, _ = io.WriteString(req.Stdout, `[]`)
+					return nil
+				default:
+					t.Fatalf("unexpected command: %s %s", req.Name, args)
+					return nil
+				}
+			},
+		},
+	}
+
+	result := runner.dispatchTask(t.Context(), &issue{
+		Number: 42,
+		Title:  "Implement queue",
+		State:  "OPEN",
+		Body:   "## Acceptance Criteria\n\n- [ ] Works.",
+		URL:    "https://example.test/issues/42",
+	})
+	if result != 2 {
+		t.Fatalf("dispatchTask = %d, want 2", result)
+	}
+	if !strings.Contains(stdout.String(), "Selected model is at capacity") {
+		t.Fatalf("expected waiting output to include transient reason, got %q", stdout.String())
+	}
+}
+
 func TestHandleApprovedAdjustmentSeedsNextPlanningIssueOnce(t *testing.T) {
 	t.Parallel()
 

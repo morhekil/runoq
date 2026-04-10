@@ -775,7 +775,13 @@ func (t *tickRunner) dispatchTask(ctx context.Context, task *issue) int {
 
 	if waitingReasonFromState(stateJSON) != "" {
 		t.warn(fmt.Sprintf("Issue #%d waiting: %s", task.Number, waitingReasonFromState(stateJSON)))
-		_, _ = fmt.Fprintf(t.cfg.Stdout, "Issue #%d — phase: %s (waiting)\n", task.Number, phase)
+		waitingOutput := fmt.Sprintf("Issue #%d — phase: %s (waiting)", task.Number, phase)
+		if summary, ok := state["summary"].(string); ok && strings.TrimSpace(summary) != "" {
+			waitingOutput += ": " + strings.TrimSpace(summary)
+		} else {
+			waitingOutput += ": " + waitingReasonFromState(stateJSON)
+		}
+		_, _ = fmt.Fprintln(t.cfg.Stdout, waitingOutput)
 		return 2
 	}
 
