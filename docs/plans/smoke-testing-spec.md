@@ -21,6 +21,78 @@ Both tiers use the same validation functions — the difference is only what dri
 
 Planning smoke must cover bootstrap, planning review, approved planning application, and approved adjustment application. The minimum observable planning scenarios are listed later in this document so the tier is no longer undocumented.
 
+### Scenario: Bootstrap project planning
+
+No epics exist yet, so the tick bootstraps the planning lane.
+
+- [ ] The tick creates a `Project Planning` epic
+- [ ] The tick creates a planning issue under that epic
+- [ ] The tick runs milestone decomposition immediately for that planning issue
+- [ ] The planning issue body is updated with the generated proposal payload/content
+- [ ] The planning issue is assigned after the proposal is posted
+- [ ] Terminal output reports `Created planning milestone. Proposal posted on #<n>`
+
+### Scenario: Pending planning review with unanswered comments
+
+A planning or adjustment review issue is open, unapproved, and has unanswered human comments.
+
+- [ ] The tick responds to the unanswered comments before doing other work
+- [ ] The tick exits after responding instead of continuing to implementation dispatch
+- [ ] Terminal output reports `Responded to comments on #<n>`
+
+### Scenario: Pending planning review awaiting human decision
+
+A planning or adjustment review issue is open, unapproved, and has no unanswered comments.
+
+- [ ] The tick does not dispatch new planning or implementation work
+- [ ] Terminal output reports `Awaiting human decision on #<n>`
+- [ ] The tick returns a waiting result
+
+### Scenario: Pending planning review without a proposal is redispatched
+
+A planning review issue is pending, but the proposal payload has not been posted to the issue body yet.
+
+- [ ] The tick treats the review as not yet actionable
+- [ ] The tick continues to the normal planning dispatch path for that planning issue
+- [ ] Terminal output ultimately reflects proposal posting rather than human-decision waiting
+
+### Scenario: Approved planning review for the project-planning epic
+
+An approved planning review applies milestone epics.
+
+- [ ] The tick creates the selected milestone epics
+- [ ] The tick seeds a planning issue for the first open milestone epic when one does not already exist
+- [ ] The approved review issue is closed/moved to done
+- [ ] The parent `Project Planning` issue is closed/moved to done
+
+### Scenario: Approved planning review for a milestone epic
+
+An approved planning review applies task issues under a milestone epic.
+
+- [ ] The tick creates task issues under the reviewed epic
+- [ ] Dependency metadata from the proposal is materialized onto the created tasks
+- [ ] The approved review issue is closed/moved to done
+- [ ] The parent planning issue is closed/moved to done
+
+### Scenario: Approved adjustment review
+
+An approved adjustment review applies milestone adjustments and advances planning.
+
+- [ ] The approved adjustment review issue is closed/moved to done
+- [ ] The parent milestone review issue is closed/moved to done
+- [ ] The tick refreshes issue state after applying adjustments
+- [ ] The tick seeds a planning issue for the next open epic when one does not already exist
+- [ ] Terminal output reports `Applied adjustments from #<n>`
+
+### Scenario: Milestone completion produces adjustment review
+
+All tasks under an epic are complete, so the tick asks for milestone review.
+
+- [ ] The tick invokes the milestone reviewer
+- [ ] The tick creates an adjustment review issue under the milestone epic
+- [ ] The adjustment review issue is assigned
+- [ ] Terminal output reports `Milestone #<n> review complete. Adjustments proposed on #<m>`
+
 ---
 
 ## Tier 2: Fixture Smoke — Implementation Flow
@@ -69,6 +141,23 @@ When multiple ready tasks exist, queue-mode dispatch prefers a ready task that d
 - [ ] After one task completes, the next queue tick prefers a ready direct dependent of that task over unrelated ready siblings when such a dependent exists
 - [ ] If no ready direct dependent exists, normal depth/priority selection resumes
 - [ ] The loop driver carries the last completed issue number forward between ticks when selecting the next ready implementation task
+
+### Scenario: Queue is waiting because tasks are in progress but none are ready
+
+An epic still has open children, but no task is currently dispatchable.
+
+- [ ] The tick does not start a new implementation phase machine
+- [ ] Terminal output reports `<n> tasks in progress, none ready`
+- [ ] The tick returns a waiting result
+
+### Scenario: Queue is fully blocked
+
+Ready dispatch finds no runnable task because of dependency blocking or a dependency cycle.
+
+- [ ] The tick emits blocked reasons for blocked tasks
+- [ ] If a dependency cycle exists, terminal/log output reports the cycle members
+- [ ] Terminal output reports `All tasks blocked`
+- [ ] The tick returns a waiting result
 
 ### Scenario: Targeted issue dispatch mode
 
@@ -352,6 +441,12 @@ Fixture reviewer returns `PASS` but finalize routes to needs-review due to confi
 - [ ] The PR body is not allowed to silently miss the `## Final Status` table while the issue is reported complete
 - [ ] Terminal/log output surfaces the PR body update failure
 
+**Finalize audit comment fails** — the durable finalize audit comment cannot be posted:
+
+- [ ] The tick exits with an error instead of returning `DONE`
+- [ ] The runtime does not mark the PR ready/merged before the finalize audit comment succeeds
+- [ ] The runtime does not transition the issue label/status before the finalize audit comment succeeds
+
 ### Scenario: Verification failure drives iteration across ticks
 
 Verification fails on the first `VERIFY` tick. A later round succeeds after `DECIDE(iterate)` sends the issue back through `DEVELOP`.
@@ -421,6 +516,14 @@ The tick scans active in-progress conversations before normal queue selection.
 - [ ] An in-progress task with an unprocessed PR comment is handled before any new ready task is selected
 - [ ] The tick emits `RESPOND`-only output for that task
 - [ ] Normal implementation dispatch is deferred until a later tick
+
+### Scenario: RESPOND failure is surfaced instead of reported as success
+
+Posting the acknowledgment reply or marking the original comment processed fails.
+
+- [ ] The tick exits with an error instead of printing a successful `Responded to comments ...` message
+- [ ] The PR comment thread is not reported as handled when processing was incomplete
+- [ ] The runtime does not persist a misleading `RESPOND` state claiming all comments were handled
 
 ### Scenario: Resume after DECIDE(iterate) crash
 
@@ -510,6 +613,14 @@ An issue already has a linked PR, but the PR comments do not contain a structure
 - [ ] A fresh dispatch does not create a duplicate PR or worktree
 - [ ] The issue receives a skip comment explaining that an open PR already tracks the branch
 - [ ] Queue-mode terminal output reports the issue as skipped
+
+### Scenario: All milestones complete
+
+At least one epic exists, but there are no open epics left to process.
+
+- [ ] The tick does not bootstrap planning again
+- [ ] Terminal output reports `All milestones complete`
+- [ ] The tick exits with the completion result
 
 ### Scenario: Recoverable work exists but PR is missing
 
