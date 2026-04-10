@@ -15,23 +15,11 @@ Both tiers use the same validation functions — the difference is only what dri
 
 ## Tier 1: Fixture Smoke — Planning Flow
 
-**What exists today** (`smoke-tick.sh`): validates the planning orchestration through milestone decomposition, human approval, task materialization, and adjustment reviews.
-
-**No changes needed** — this passed with 21/21 checks. It already exercises:
-- Bootstrap (runoq init → project planning issue)
-- Proposal posting (agent writes proposal into issue body)
-- Human comment handling (eyes reaction → response → +1 reaction)
-- Awaiting-review state detection
-- Milestone materialization (approved plan → epic issues created)
-- Task decomposition (planning issue → task issues under epic)
-- Milestone review and adjustment cycle
-- All-milestones-complete terminal state
+_TODO document_
 
 ---
 
 ## Tier 2: Fixture Smoke — Implementation Flow
-
-**Does not exist yet.** This is the critical gap.
 
 ### Setup
 
@@ -41,26 +29,35 @@ Same repo and fixture infrastructure as the planning smoke. After tasks are mate
 2. Commits and pushes to origin
 3. Writes valid JSONL events to stdout (with `thread.started` and token counts)
 4. Writes a valid last-message payload to the `-o` path (matching the required schema)
+5. Validates that a consistent thread ID is used across all runs
 
 And a **fixture diff-reviewer** response for the `claude stream-json --agent diff-reviewer` invocation that returns a PASS verdict with a score.
+diff-reviewer fixture must also validate that it receives correct consistent resume thread ID throughout the whole PR review work.
 
 ### Scenario: Happy path (6 ticks)
 
 **Tick 1 — Init:**
+
 ```
 tick_once
 ```
+
 Verify on GitHub:
+
 - [ ] Issue has `runoq:in-progress` label (not `runoq:ready`)
 - [ ] A draft PR for correct branch exists with `Closes #<issue>` in body
-- [ ] PR audit comment contains `<!-- runoq:state:{...} -->` with `"phase":"INIT"`
-- [ ] No code commits are pushed yet
+- [ ] PR audit comment contains correct state/phase and implementor agent attribution
+- [ ] The issue branch has been pushed to origin with the initial empty bootstrap commit
+- [ ] No implementation code commits are pushed yet
 
 **Tick 2 — Develop:**
+
 ```
 tick_once
 ```
+
 Verify on GitHub:
+
 - [ ] Code commits are pushed to PR
 - [ ] PR has a new `DEVELOP` audit comment with implementor attribution
 - [ ] No `VERIFY` or `REVIEW` comments are posted yet
@@ -68,19 +65,25 @@ Verify on GitHub:
 Verify correct output on terminal.
 
 **Tick 3 — Verify:**
+
 ```
 tick_once
 ```
+
 Verify on GitHub:
+
 - [ ] PR has a new `VERIFY` audit comment with verifier attribution
 - [ ] Verification result is posted separately from `DEVELOP`
 - [ ] Issue still has `runoq:in-progress` label
 
 **Tick 4 — Review:**
+
 ```
 tick_once
 ```
+
 Verify on GitHub:
+
 - [ ] PR has new audit comment with review state and reviewer agent attribution
 - [ ] Review comment contains verdict (`PASS`, `ITERATE`, or `FAIL`)
 - [ ] Review comment contains score
@@ -91,19 +94,25 @@ Verify on GitHub:
 Verify correct output on terminal.
 
 **Tick 5 — Decide:**
+
 ```
 tick_once
 ```
+
 Verify on GitHub:
+
 - [ ] PR has a new `DECIDE` audit comment
 - [ ] The decision comment does not also finalize in the same tick
 - [ ] Issue still has `runoq:in-progress` label
 
 **Tick 6 — Finalize (PASS path):**
+
 ```
 tick_once
 ```
+
 Verify on GitHub:
+
 - [ ] Issue has `runoq:done` label (not `runoq:in-progress`)
 - [ ] Issue is closed
 - [ ] PR is merged (or has auto-merge enabled)
@@ -118,21 +127,28 @@ Same as happy path but the fixture reviewer returns `ITERATE` on first review.
 **Tick 1** — Develop + Open PR (same checks as happy path tick 1)
 
 **Tick 2** — Review returns ITERATE verdict
+
 - [ ] PR has review comment with `ITERATE` verdict and reviewer agent attribution
 - [ ] Issue still `runoq:in-progress`
 
 **Tick 3** — Decide: iterate
+
 - [ ] PR has audit comment for decide phase with orchestrator agent attribution, containing "iterate" decision
 - [ ] State includes review checklist carried forward as `previous_checklist`
 
 **Tick 4** — Develop round 2
+
 - [ ] New commits pushed to branch (from second codex round)
 - [ ] PR has new develop audit comment for round 2 with implementor agent attribution
+- [ ] Implementor codex has been launched via resume with its correct consistent thread id for this PR and a modified propmpt that includes review feedback and allows for different responses: address and modify code, or push back with an explanation
 
 **Tick 5** — Review (PASS this time)
+
 - [ ] PR has review comment with `PASS` verdict and reviewer agent attribution
+- [ ] Reviewer claude has been launched with --resume with its correct consistent thread id for this PR
 
 **Tick 6** — Decide + Finalize
+
 - [ ] Same finalize checks as happy path tick 3
 
 ### Scenario: Needs-review path (1 tick)
@@ -140,6 +156,7 @@ Same as happy path but the fixture reviewer returns `ITERATE` on first review.
 Fixture codex produces no commits (simulates failure).
 
 **Tick 1** — Develop fails verification, creates PR, sets needs-review
+
 - [ ] PR exists (work is visible even on failure)
 - [ ] PR is marked ready for review
 - [ ] Issue has `runoq:needs-human-review` label
@@ -151,6 +168,7 @@ Fixture codex produces no commits (simulates failure).
 Fixture codex returns `budget_exhausted` status (simulates token budget exceeded).
 
 **Before-round exhaustion** — budget exhausted before starting a developer round
+
 - [ ] PR exists so the branch is visible
 - [ ] PR is marked ready for review
 - [ ] Issue has `runoq:needs-human-review` label
@@ -158,6 +176,7 @@ Fixture codex returns `budget_exhausted` status (simulates token budget exceeded
 - [ ] PR has durable handoff audit comment indicating budget exhaustion before the round started
 
 **After-round exhaustion** — budget exhausted after a developer round completes
+
 - [ ] PR exists so the branch is visible
 - [ ] PR is marked ready for review
 - [ ] Issue has `runoq:needs-human-review` label
@@ -169,6 +188,7 @@ Fixture codex returns `budget_exhausted` status (simulates token budget exceeded
 Same as iterate path but the fixture reviewer returns `ITERATE` on every review until `maxRounds` is reached.
 
 After final review tick (ITERATE at max round) — Decide + Finalize to needs-review:
+
 - [ ] DECIDE falls through to `finalize-needs-review` (round >= maxRounds)
 - [ ] Issue has `runoq:needs-human-review` label
 - [ ] PR is marked ready for review, reviewer assigned
@@ -179,6 +199,7 @@ After final review tick (ITERATE at max round) — Decide + Finalize to needs-re
 Fixture simulates worktree creation or branch push failure during INIT.
 
 **Tick 1** — INIT fails, issue returned to queue
+
 - [ ] Issue reverts to `runoq:ready` label (not `runoq:in-progress`)
 - [ ] No PR created
 - [ ] No worktree left behind
@@ -188,11 +209,13 @@ Fixture simulates worktree creation or branch push failure during INIT.
 Fixture reviewer returns `PASS` but finalize routes to needs-review due to config constraints.
 
 **PASS with caveats** — reviewer returns PASS with caveats:
+
 - [ ] Issue has `runoq:needs-human-review` (not `runoq:done`)
 - [ ] PR finalize comment shows reason: caveats present
 - [ ] PR marked ready, reviewer assigned (not auto-merged)
 
 **PASS with auto-merge disabled** — config has `auto_merge_enabled=false`:
+
 - [ ] Issue has `runoq:needs-human-review`
 - [ ] PR finalize comment shows reason: auto-merge disabled
 
@@ -210,12 +233,14 @@ Verification fails on the first `VERIFY` tick. A later round succeeds after `DEC
 Fixture codex writes an invalid final payload block but includes a valid `thread.started` event.
 
 **Schema retry succeeds**
+
 - [ ] `state validate-payload` fails for the first payload
 - [ ] Same-thread schema retry is attempted
 - [ ] The corrected payload is accepted without re-running development commands
 - [ ] Tick stops in `DEVELOP`; verification still happens later in the separate `VERIFY` tick
 
 **Schema retry fails**
+
 - [ ] `state validate-payload` remains invalid after bounded retries
 - [ ] `DEVELOP` still completes and persists the invalid payload state
 - [ ] The later `VERIFY` tick records the deterministic failure
@@ -226,6 +251,7 @@ Fixture codex writes an invalid final payload block but includes a valid `thread
 Process crashes after tick 2 (`DEVELOP` complete, state persisted in a PR comment). A new `tick_once` call starts fresh.
 
 **Next tick** — Derives state from PR comments, resumes correctly
+
 - [ ] `deriveStateFromGitHub` finds existing PR and extracts state from audit comment
 - [ ] Tick resumes from `DEVELOP` state and runs `VERIFY`, not `INIT` or `DEVELOP`
 - [ ] No duplicate PR created
@@ -245,6 +271,7 @@ An unprocessed PR comment exists before a normal implementation phase starts.
 Process crashes after the DECIDE tick has posted an `iterate` audit comment, but before the next DEVELOP tick starts.
 
 **Next tick** — Derives iterate state from PR comments and resumes correctly
+
 - [ ] `deriveStateFromGitHub` extracts the latest DECIDE state from the PR audit comment
 - [ ] `previous_checklist` is preserved into the resumed DEVELOP round
 - [ ] Tick resumes directly into the next developer round
@@ -264,20 +291,26 @@ A human posts a comment on the PR while the issue is in-progress.
 
 Fixture codex returns a `turn.failed` event with capacity error.
 
-**Before PR exists** — transient failure on the first developer round
+**First developer round** — transient failure on the first developer round
+
 - [ ] Issue stays `runoq:in-progress` (not needs-review)
-- [ ] No PR is created yet
+- [ ] A PR already exists for the issue
+- [ ] The PR remains open
 - [ ] Tick exits in a waiting/retryable state rather than escalating
+- [ ] Retry/backoff state is persisted for the next tick
 - [ ] Terminal output clearly reports a transient/retryable failure reason
 
-**After PR exists** — transient failure on a later developer round
+**Later developer round** — transient failure on a later developer round
+
 - [ ] Issue stays `runoq:in-progress` (not needs-review)
 - [ ] Existing PR remains open
 - [ ] PR has diagnostic comment about the transient failure
+- [ ] Retry/backoff state is persisted for the next tick
 - [ ] Exit code indicates "waiting/retryable" (not error)
 
 **Tick 2** — Retry succeeds
-- [ ] Normal develop + PR creation flow
+
+- [ ] Normal develop retry flow resumes against the existing PR
 
 ---
 
@@ -296,11 +329,10 @@ Validations and verifications are to be derived from fixture smokes above, with 
 
 Lifesmoke target project needs to be set up in a way that would maximise verification pathways, at the same time keeping it practical and feasible in terms of implementation time required.
 
-
 ## Tier Structure Summary
 
-| Tier | Agents | GitHub | Runtime | Runs when | Validates |
-|------|--------|--------|---------|-----------|-----------|
-| Fixture — Planning | fixture-claude | real API | ~2 min | every change | orchestration logic, human interaction flow |
-| Fixture — Implementation | fixture-codex + fixture-reviewer | real API | ~3 min | every change | tick-per-phase boundaries, PR lifecycle, label transitions, agent communication |
-| Live — End-to-end | real codex + real claude | real API | ~15-30 min | pre-release / scheduled | actual code generation, review quality, full convergence |
+| Tier                     | Agents                           | GitHub   | Runtime    | Runs when               | Validates                                                                       |
+| ------------------------ | -------------------------------- | -------- | ---------- | ----------------------- | ------------------------------------------------------------------------------- |
+| Fixture — Planning       | fixture-claude                   | real API | ~2 min     | every change            | orchestration logic, human interaction flow                                     |
+| Fixture — Implementation | fixture-codex + fixture-reviewer | real API | ~3 min     | every change            | tick-per-phase boundaries, PR lifecycle, label transitions, agent communication |
+| Live — End-to-end        | real codex + real claude         | real API | ~15-30 min | pre-release / scheduled | actual code generation, review quality, full convergence                        |
