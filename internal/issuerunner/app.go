@@ -168,7 +168,7 @@ func (a *App) developmentLoop(ctx context.Context, input *inputPayload, state *r
 	payloadValid := a.validatePayload(ctx, input.Worktree, state.baseline, lastMsgFile, payloadFile)
 	roundTokens := a.extractTokens(eventLog)
 
-	const maxSchemaRetries = 2
+	const maxSchemaRetries = 1
 	schemaRetryCount := 0
 	for !payloadValid && threadID != "" && schemaRetryCount < maxSchemaRetries {
 		schemaRetryCount++

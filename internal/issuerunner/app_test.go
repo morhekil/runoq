@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -689,11 +690,7 @@ func TestDevelopmentLoop_SchemaRetryUsesResumeWithSameThreadID(t *testing.T) {
 		"state.sh": func(req shell.CommandRequest) error {
 			validateCount++
 			if req.Stdout != nil {
-				if validateCount == 1 {
-					mustWriteReqStdout(t, req, `{"payload_schema_valid":false}`)
-				} else {
-					mustWriteReqStdout(t, req, `{"payload_schema_valid":true}`)
-				}
+				mustWriteReqStdout(t, req, `{"payload_schema_valid":false}`)
 			}
 			return nil
 		},
@@ -743,6 +740,12 @@ func TestDevelopmentLoop_SchemaRetryUsesResumeWithSameThreadID(t *testing.T) {
 	}
 	if len(codexCalls[1]) < 3 || codexCalls[1][0] != "exec" || codexCalls[1][1] != "resume" || codexCalls[1][2] != "thread-42" {
 		t.Fatalf("schema retry call = %v, want exec resume thread-42", codexCalls[1])
+	}
+	if !strings.Contains(out.Summary, "schema issues") {
+		t.Fatalf("summary = %q, want schema issue warning", out.Summary)
+	}
+	if !slices.Contains(out.Caveats, "codex payload schema invalid after 1 resume attempt(s)") {
+		t.Fatalf("caveats = %v, want single retry caveat", out.Caveats)
 	}
 }
 
