@@ -36,10 +36,19 @@ And a **fixture diff-reviewer** response for the `claude stream-json --agent dif
 ### Agent invocation policy
 
 - `INIT` is its own tick. A fresh implementation dispatch should stop after opening the PR and posting initial audit state.
+- Every implementation tick runs reconciliation before normal queue dispatch. Fixture smoke should exercise this pre-dispatch recovery behavior explicitly.
 - Later `DEVELOP` rounds should start with a fresh codex invocation. Cross-round continuity must come from explicit carry-forward state such as `previous_checklist`, not hidden thread memory.
 - Codex `resume` is allowed only for same-round schema-retry repair after an invalid payload block, and the current runtime performs at most one same-thread retry.
 - Reviewer invocations should be fresh on every `REVIEW` tick. There is no cross-round reviewer resume contract.
 - Reviewer contract repair is a separate same-thread behavior within a single `REVIEW` tick. It is not a cross-round resume contract.
+
+### Scenario: Reconciliation before dispatch
+
+Before normal queue selection, the tick reconciles stale implementation state against GitHub.
+
+- [ ] A stale issue labeled `runoq:in-progress` with no linked PR is reset to `runoq:ready`
+- [ ] The issue receives a comment explaining that it was returned to the queue because no linked PR exists
+- [ ] The tick performs reconciliation before selecting the next implementation task
 
 ### Scenario: Happy path (6 ticks)
 
@@ -237,6 +246,34 @@ Fixture simulates worktree creation or branch push failure during INIT.
 - [ ] No PR created
 - [ ] No worktree left behind
 
+### Scenario: INIT eligibility rejection paths
+
+Eligibility rejection is observable even though no worktree or PR is created.
+
+**Missing acceptance criteria**
+
+- [ ] Issue remains `runoq:ready`
+- [ ] No PR is created
+- [ ] The issue receives a skip comment explaining that acceptance criteria are missing
+
+**Blocked dependency**
+
+- [ ] Issue remains `runoq:ready`
+- [ ] No PR is created
+- [ ] The issue receives a skip comment explaining which dependency is still incomplete
+
+**Existing open PR for branch**
+
+- [ ] A fresh dispatch does not create a duplicate PR or worktree
+- [ ] The issue receives a skip comment explaining that an open PR already tracks the branch
+- [ ] Queue-mode terminal output reports the issue as skipped instead of advancing the phase machine
+
+**Branch conflict**
+
+- [ ] Issue remains `runoq:ready`
+- [ ] No PR is created
+- [ ] The issue receives a skip comment explaining that the branch has unresolved conflicts
+
 ### Scenario: Finalize decision sub-paths
 
 Fixture reviewer returns `PASS` but finalize routes to needs-review due to config constraints.
@@ -251,6 +288,13 @@ Fixture reviewer returns `PASS` but finalize routes to needs-review due to confi
 
 - [ ] Issue has `runoq:needs-human-review`
 - [ ] PR finalize comment shows reason: auto-merge disabled
+
+**PR finalization fails** — `pr ready` or merge operation fails:
+
+- [ ] Issue does not move to `runoq:done`
+- [ ] Issue is not closed
+- [ ] Terminal output reports a finalize failure
+- [ ] The tick exits with an error instead of silently completing the issue
 
 ### Scenario: Verification failure drives iteration across ticks
 
@@ -313,6 +357,14 @@ An unprocessed PR comment exists before a normal implementation phase starts.
 - [ ] The comment is acknowledged and marked processed
 - [ ] The implementation phase does not advance in the same tick
 - [ ] The following tick resumes the interrupted target phase
+
+### Scenario: Tick-level conversation sweep
+
+The tick scans active in-progress conversations before normal queue selection.
+
+- [ ] An in-progress task with an unprocessed PR comment is handled before any new ready task is selected
+- [ ] The tick emits `RESPOND`-only output for that task
+- [ ] Normal implementation dispatch is deferred until a later tick
 
 ### Scenario: Resume after DECIDE(iterate) crash
 
@@ -399,7 +451,9 @@ An issue already has a linked PR, but the PR comments do not contain a structure
 
 - [ ] `deriveStateFromGitHub` finds the linked PR but returns `found=false`
 - [ ] A fresh dispatch does not silently resume from non-structured prose comments
-- [ ] The smoke should verify the chosen operator-facing behavior explicitly when a PR exists without recoverable state
+- [ ] A fresh dispatch does not create a duplicate PR or worktree
+- [ ] The issue receives a skip comment explaining that an open PR already tracks the branch
+- [ ] Queue-mode terminal output reports the issue as skipped
 
 ### Scenario: Fixture Smoke — Planning Flow
 
@@ -409,27 +463,12 @@ Minimum observable scenarios:
 
 - [ ] Bootstrap path with no existing epics creates the planning epic and planning issue, then posts a proposal
 - [ ] Pending planning review with unresolved human comments responds to those comments and does not advance in the same tick
+- [ ] Planning review can remain in an awaiting-human-decision state across ticks without materializing milestones early
 - [ ] Approved planning review materializes milestone or task issues and closes the review issue
+- [ ] Approved planning review posts task proposals for newly created task-planning issues
 - [ ] Approved adjustment review applies accepted adjustments, closes the review issue, and seeds the next planning issue when appropriate
-
-### Scenario: Epic integration flow
-
-Epic integration is implemented and externally observable after task queues drain.
-
-**Integrate pending**
-
-- [ ] If not all child tasks are `runoq:done`, the epic remains non-terminal
-- [ ] State returns to `DECIDE` with `decision=integrate-pending` and `next_phase=INTEGRATE`
-
-**Integrate success**
-
-- [ ] When all child tasks are done and integration verification passes, the epic moves to `runoq:done`
-- [ ] The epic issue is closed
-
-**Integrate failure**
-
-- [ ] Integration verification failure moves the epic to `runoq:needs-human-review`
-- [ ] Failure details are persisted in state for operator inspection
+- [ ] When a milestone's child tasks drain, the tick runs milestone review and creates an adjustment review issue
+- [ ] When all milestones are complete, the terminal output reports that all milestones are complete
 
 ---
 

@@ -64,7 +64,7 @@ Queue issues use native GitHub APIs instead of body metadata blocks:
 - **Dependencies**: set via GraphQL `addBlockedBy` mutation
 - **Parent-child**: linked via the sub-issues REST API
 
-Epic issues use issueType=Epic. Child tasks are tracked via GitHub's native sub-issues API. The queue runner skips epics during normal dispatch; epics are completed via the INTEGRATE phase after all children reach `runoq:done`.
+Epic issues use issueType=Epic. Child tasks are tracked via GitHub's native sub-issues API. The queue runner skips epics during normal task dispatch; when child tasks drain, tick-level milestone review may create adjustment-review issues for follow-up planning.
 
 ### Required acceptance criteria section
 

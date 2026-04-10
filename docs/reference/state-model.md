@@ -113,7 +113,6 @@ Fields commonly written by `run.sh` and `orchestrator.sh`:
 - `REVIEW`
 - `DECIDE`
 - `FINALIZE`
-- `INTEGRATE`
 - `DONE`
 - `FAILED`
 
@@ -133,12 +132,9 @@ Fields commonly written by `run.sh` and `orchestrator.sh`:
 - `REVIEW -> FAILED`
 - `DECIDE -> DEVELOP`
 - `DECIDE -> FINALIZE`
-- `DECIDE -> INTEGRATE`
 - `DECIDE -> FAILED`
 - `FINALIZE -> DONE`
 - `FINALIZE -> FAILED`
-- `INTEGRATE -> DONE`
-- `INTEGRATE -> FAILED`
 
 `DONE` and `FAILED` are terminal. Any later transition is rejected.
 

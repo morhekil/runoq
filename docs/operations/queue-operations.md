@@ -108,7 +108,7 @@ Single-issue mode still performs the full phase sequence:
 - DEVELOP: one bounded Codex dev round runs
 - VERIFY: deterministic verification reruns from the pushed branch
 - REVIEW: diff-reviewer evaluates the diff
-- DECIDE: route to another DEVELOP round, FINALIZE, or INTEGRATE
+- DECIDE: route to another DEVELOP round or FINALIZE
 - FINALIZE: PR finalization, label transition, worktree cleanup
 
 It stops after that one issue.
@@ -127,7 +127,7 @@ Queue mode:
 - processes task issues in dependency-safe priority order
 - resets the consecutive-failure counter after each clean completion
 - stops when no actionable `runoq:ready` task issue remains
-- performs an **epic sweep** after the task queue drains: evaluates each `runoq:ready` epic to check whether all child tasks are done, and runs the INTEGRATE phase for completed epics
+- runs milestone review after task queues drain and can create adjustment-review issues for follow-up planning
 
 ## Finalization Outcomes
 
@@ -161,17 +161,6 @@ Common triggers:
 - complexity exceeding the auto-merge threshold
 - auto-merge disabled in config
 - unrecoverable interrupted state at reconciliation time
-
-## Epic Integration
-
-Epics are grouping issues created by `runoq plan` with `type: epic`. They do not go through the normal DEVELOP/REVIEW cycle. Instead, after the task queue drains, the orchestrator performs an epic sweep:
-
-1. For each `runoq:ready` epic, check whether all child tasks (linked via the GitHub sub-issues API) are `runoq:done`
-2. If all children are done, run the **INTEGRATE** phase:
-   - If the epic has a legacy `criteria_commit`, run `verify.sh integrate` against it to confirm acceptance criteria are met
-   - If no criteria commit exists, mark the epic done directly
-3. On integration success, the epic moves to `runoq:done`
-4. On integration failure, the epic moves to `runoq:needs-human-review` with failure details
 
 ## Circuit Breaker Behavior
 

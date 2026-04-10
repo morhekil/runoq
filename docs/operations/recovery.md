@@ -140,19 +140,18 @@ Fix:
 - inspect the existing branch and resolve or discard it
 - if the branch belongs to stale work, clean up the PR/branch before retrying
 
-## Epic Integration Failures
+## Milestone Review Follow-Up
 
-The INTEGRATE phase runs after the task queue drains, when all child tasks of an epic are `runoq:done`. It verifies the combined work meets the epic-level acceptance criteria.
+After child tasks drain, tick runs milestone review and may open an adjustment-review issue instead of directly completing the epic.
 
 Symptoms:
 
-- `.runoq/state/<epic>.json` has `phase: "FAILED"` with `integrate_failures`
-- The epic is labeled `runoq:needs-human-review`
-- `verify.sh integrate` reported failures
+- terminal output reports `Milestone #<n> review complete. Adjustments proposed on #<m>`
+- a new adjustment issue exists under the milestone
 
 What to do:
 
-- Inspect the `integrate_failures` field in the state file for specific failure details
+- inspect the adjustment-review issue and decide whether to accept, reject, or revise the proposed follow-up work
 - Check whether the criteria commit is still reachable
 - Fix the underlying integration failures (often test/build failures across combined child work)
 - Rerun `runoq run` — the epic sweep will retry integration for epics whose children are all done

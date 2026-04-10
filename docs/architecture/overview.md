@@ -145,9 +145,9 @@ flowchart LR
 | `scripts/worktree.sh` | Branch naming, sibling worktree creation/removal | Queue selection, GitHub state |
 | `scripts/gh-pr-lifecycle.sh` | Draft PR creation, audit comments, summary mutation, finalize actions, mention polling, permission checks | Queue ordering, local state transitions |
 | `scripts/state.sh` | Atomic state writes, phase transition validation, payload extraction/normalization, processed-mention tracking | GitHub audit comments, verification commands |
-| `scripts/verify.sh` | Ground-truth diff checks, branch push checks, test/build execution, payload consistency checks, criteria tamper check, epic integration verification | Final PR or issue decisions |
+| `scripts/verify.sh` | Ground-truth diff checks, branch push checks, test/build execution, payload consistency checks, criteria tamper check | Final PR or issue decisions |
 | `scripts/run.sh` | End-to-end issue execution flow, queue loop, circuit breaker, audit comment sequencing | Phase dispatch, review reasoning |
-| `scripts/orchestrator.sh` | Phase dispatch state machine (INIT, DEVELOP, VERIFY, REVIEW, DECIDE, FINALIZE, INTEGRATE), mention triage via haiku classification, agent spawning, decision table | Implementation, review reasoning |
+| `scripts/orchestrator.sh` | Phase dispatch state machine (INIT, DEVELOP, VERIFY, REVIEW, DECIDE, FINALIZE), agent spawning, decision table | Implementation, review reasoning |
 | `internal/issuerunner` (via orchestrator) | Execute one bounded codex develop round, capture artifacts, normalize payloads, track token budget for the round | Verification routing, PR lifecycle, queue decisions |
 | `scripts/maintenance.sh` | Partition derivation, maintenance tracking issue lifecycle, findings storage, triage-to-issue filing | Code modification |
 | `scripts/mentions.sh` | Mention polling, permission gating, deny comments, deduplication via state | Queue dispatch decisions |
@@ -162,7 +162,6 @@ The core architectural rule is that durable behavior belongs in Go packages and 
 - The Go runtime owns queue ordering, label transitions, worktree paths, PR creation, verification gates, state transitions, mention authorization, maintenance triage side effects, phase dispatch (orchestrator), and the develop-round helper logic.
 - The orchestrator and issuerunner helper are deterministic dispatch, not agents. Their work is state machine transitions and payload normalization, not reasoning.
 - Agents and skills are intentionally thin. They consume typed inputs, make bounded decisions, and are expected to call repository scripts instead of issuing ad hoc `gh` commands. Current agents: diff-reviewer (opus, code review), mention-responder (sonnet, PR question answering), maintenance-reviewer (opus, code health review).
-- Mention triage uses a haiku structured-output call for classification (question, change-request, approval, irrelevant), not a full agent.
 
 ### Audit trail vs recovery breadcrumbs
 

@@ -98,7 +98,7 @@ During a successful run, `runoq` drives the issue through a deterministic phase 
 2. **DEVELOP** — one bounded Codex dev round runs in the worktree and posts its result to the PR
 3. **VERIFY** — deterministic verification reruns from the pushed branch on a fresh worktree
 4. **REVIEW** — the `diff-reviewer` agent evaluates the diff against the spec
-5. **DECIDE** — the orchestrator routes to another DEVELOP round (if the review verdict is `ITERATE` and rounds remain), to FINALIZE, or to INTEGRATE for epics
+5. **DECIDE** — the orchestrator routes to another DEVELOP round (if the review verdict is `ITERATE` and rounds remain) or to FINALIZE
 6. **FINALIZE** — PR finalization, label transition, worktree cleanup
 
 GitHub PR audit comments are the durable record for phase progression and resume.
@@ -115,7 +115,7 @@ runoq run
 
 Queue selection is based on open issues labeled `runoq:ready`. The runtime skips issues whose dependencies are not yet labeled `runoq:done` and continues until there are no actionable items left or the consecutive-failure circuit breaker halts the queue.
 
-After the task queue drains, the orchestrator performs an **epic sweep**: it checks all `runoq:ready` epics to see whether all of their child tasks are `runoq:done`. For each completed epic, it runs the **INTEGRATE** phase — which verifies acceptance criteria against the combined work of all child tasks — and marks the epic `runoq:done` if integration passes.
+After the task queue drains, the orchestrator can run milestone review and open adjustment-review issues when follow-up planning is needed.
 
 Use queue mode after `runoq tick` has already materialized task issues for the current milestone and you want the runtime to keep draining ready work without naming each issue manually.
 

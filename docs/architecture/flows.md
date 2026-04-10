@@ -2,7 +2,7 @@
 
 This document describes the major runtime sequences in `runoq`: iterative planning, execution, reconciliation, mention handling, and maintenance review.
 
-For `runoq run`, the orchestrator owns the phase machine and uses a bounded develop-round helper for `DEVELOP`. The orchestrator drives phase transitions (INIT, DEVELOP, VERIFY, REVIEW, DECIDE, FINALIZE, INTEGRATE), spawns agents for bounded reasoning tasks, and handles mention triage. The develop helper runs one codex round and leaves deterministic checks to the separate `VERIFY` phase.
+For `runoq run`, the orchestrator owns the phase machine and uses a bounded develop-round helper for `DEVELOP`. The orchestrator drives phase transitions (INIT, DEVELOP, VERIFY, REVIEW, DECIDE, FINALIZE), spawns agents for bounded reasoning tasks, and handles tick-level PR conversation replies. The develop helper runs one codex round and leaves deterministic checks to the separate `VERIFY` phase.
 
 ## `runoq tick`
 
@@ -342,79 +342,31 @@ sequenceDiagram
 | Collaborator permission below `authorization.minimumPermission` | Deny with comment or ignore silently based on `authorization.denyResponse` |
 | Permission sufficient | Return `action: "process"` and let the caller apply domain-specific logic |
 
-## Epic Completion And Integration
+## Milestone Completion Review
 
-When all child tasks of an epic reach `runoq:done`, the orchestrator triggers the INTEGRATE phase.
+When child tasks drain, tick runs milestone review and may create an adjustment-review issue for follow-up planning instead of triggering a separate implementation phase.
+
+## PR Conversation Response
+
+The orchestrator handles active PR conversations as a tick-level preemption step before normal implementation dispatch.
 
 ```mermaid
 sequenceDiagram
+  participant Tick as tick
   participant Orch as orchestrator.sh
-  participant Queue as gh-issue-queue.sh
-  participant WT as worktree.sh
-  participant Verify as verify.sh
-  participant State as state.sh
   participant GH as GitHub
-  participant FS as target repo and sibling worktree
-
-  Orch->>Queue: epic-status REPO epic-number
-  Queue-->>Orch: all children runoq:done
-  Orch->>WT: create integration worktree from main
-  WT->>FS: git worktree add from origin/main (with all child PRs merged)
-  Orch->>State: save INTEGRATE breadcrumb
-  Orch->>Verify: integrate worktree criteria_commit
-  Verify->>FS: confirm epic criteria files unchanged, run test suite
-  Verify-->>Orch: ok=true/false, failures
-  alt integration passes
-    Orch->>Queue: set-status done for epic
-    Queue->>GH: replace epic label with runoq:done
-    Orch->>State: save DONE with outcome
-    Orch->>WT: remove integration worktree
-  else integration fails
-    Orch->>Queue: create fix task under epic
-    Queue->>GH: create runoq:ready fix issue with parent_epic
-    Orch->>State: save FAILED with outcome
-  end
-```
-
-### Integration decision table
-
-| Condition | Outcome |
-| --- | --- |
-| All child tasks `runoq:done` and `verify.sh integrate` passes | Mark epic `done`, remove integration worktree |
-| `verify.sh integrate` fails (criteria tampered or tests fail) | Create a fix task under the epic, back to queue |
-| Not all children are `runoq:done` | Epic stays in current state, no integration attempted |
-
-## Mention Triage And Response
-
-The orchestrator handles mention triage using a haiku structured-output call for classification, then dispatches to the appropriate handler.
-
-```mermaid
-sequenceDiagram
-  participant Orch as orchestrator.sh
-  participant Poll as gh-pr-lifecycle.sh poll-mentions
-  participant Haiku as haiku classification call
   participant Responder as mention-responder agent
   participant State as state.sh
-  participant GH as GitHub
 
-  Orch->>Poll: poll-mentions repo handle
-  Poll-->>Orch: unprocessed mentions
-  loop each mention
-    Orch->>Haiku: classify mention text
-    Haiku-->>Orch: question | change-request | approval | irrelevant
-    alt question
-      Orch->>Responder: spawn with PR context
-      Responder->>GH: post reply with runoq:bot marker
-      Orch->>State: record-mention
-    else change-request
-      Orch->>Orch: extract checklist, feed into DEVELOP loop
-      Orch->>State: record-mention
-    else approval
-      Orch->>Orch: handle label change or merge
-      Orch->>State: record-mention
-    else irrelevant
-      Orch->>State: record-mention, no action
-    end
+  Tick->>Orch: inspect in-progress task PRs
+  Orch->>GH: read actionable comments
+  GH-->>Orch: unprocessed human comments
+  alt comment exists
+    Orch->>Responder: answer in PR context
+    Responder-->>Orch: reply body
+    Orch->>GH: pr comment
+    Orch->>GH: add +1 reaction to original comment
+    Orch->>State: save RESPOND breadcrumb
   end
 ```
 

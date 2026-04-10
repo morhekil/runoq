@@ -35,7 +35,7 @@ Notes:
 - `next` sorts actionable items by metadata priority, then issue number.
 - `next` skips issues with `type: epic` — only tasks are dispatched directly.
 - `create` accepts `--type`, `--parent-epic`, and `--complexity-rationale` flags for hierarchical issue structures and rationale tracking.
-- `epic-status` checks whether all children of an epic have the `runoq:done` label, enabling INTEGRATE phase triggering.
+- `epic-status` checks whether all children of an epic have the `runoq:done` label, enabling milestone-complete review flows.
 - dependency checks require upstream issues to carry the configured done label.
 - `gh-issue-queue.sh` remains the stable shell entrypoint and dispatches to the Go runtime queue engine (`RUNOQ_RUNTIME_BIN` first, then `go run` fallback from `RUNOQ_ROOT`).
 - `assign` adds the operator as issue assignee (resolves via `RUNOQ_OPERATOR_LOGIN` or `gh api user`).
@@ -158,7 +158,6 @@ Primary callers: `run.sh`, tests.
 | Subcommand | Arguments | JSON/stdout contract | Side effects |
 | --- | --- | --- | --- |
 | `run` | `<repo> [--issue N] [--dry-run]` | JSON object with phase progression, outcome, and audit trail references | creates worktree, draft PR, runs develop/verify/review rounds, posts audit comments, finalizes PR |
-| `mention-triage` | `<repo> <pr-number>` | JSON array of classified mentions with `comment_id`, `classification`, `action_taken` | polls mentions, classifies via haiku structured-output call, dispatches to mention-responder or feeds change-requests into DEVELOP |
 
 Phase transitions driven by orchestrator:
 
@@ -170,14 +169,10 @@ Phase transitions driven by orchestrator:
 - `DECIDE -> DEVELOP` (iterate)
 - `DECIDE -> FINALIZE`
 - `FINALIZE -> DONE`
-- `INTEGRATE -> DONE` (epic completion)
-
-Mention classification values: `question`, `change-request`, `approval`, `irrelevant`.
 
 Notes:
 
 - The orchestrator does not perform reasoning. It dispatches to agents for bounded tasks and applies a deterministic decision table for phase transitions.
-- Mention triage uses a haiku structured-output call, not a full agent invocation.
 - `orchestrator.sh` remains the stable shell entrypoint and dispatches to the Go runtime orchestrator (`RUNOQ_RUNTIME_BIN` first, then `go run` fallback from `RUNOQ_ROOT`).
 
 ## `issue-runner.sh`
@@ -246,9 +241,8 @@ Allowed phase transitions:
 - `DEVELOP -> VERIFY | FAILED`
 - `VERIFY -> REVIEW | DECIDE | FAILED`
 - `REVIEW -> DECIDE | FAILED`
-- `DECIDE -> DEVELOP | FINALIZE | INTEGRATE | FAILED`
+- `DECIDE -> DEVELOP | FINALIZE | FAILED`
 - `FINALIZE -> DONE | FAILED`
-- `INTEGRATE -> DONE | FAILED`
 
 Terminal phases `DONE` and `FAILED` reject further transitions.
 
