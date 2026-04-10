@@ -633,7 +633,11 @@ func (t *tickRunner) handleApprovedAdjustment(ctx context.Context, reviewView st
 	if err := json.Unmarshal([]byte(raw), &t.issues); err != nil {
 		return t.fail("parse refreshed issues: %v", err)
 	}
-	if next := t.firstOpenEpic(); next != nil {
+	if err := t.fetchDependencies(ctx); err != nil {
+		return t.fail("%v", err)
+	}
+	t.fetchParentEpics(ctx)
+	if next := t.firstOpenEpic(); next != nil && t.findPlanningChild(next.Number) == nil {
 		t.info(fmt.Sprintf("seeding planning issue for next epic #%d", next.Number))
 		if _, err := t.issueCreate(ctx, t.cfg.Repo, "Break down "+next.Title+" into tasks", "## Acceptance Criteria\n\n- [ ] Tasks proposed.", "--type", "planning", "--priority", "1", "--estimated-complexity", "low", "--parent-epic", fmt.Sprintf("%d", next.Number)); err != nil {
 			return t.fail("seed planning issue for epic #%d: %v", next.Number, err)
@@ -641,7 +645,7 @@ func (t *tickRunner) handleApprovedAdjustment(ctx context.Context, reviewView st
 	}
 
 	t.success(fmt.Sprintf("Applied adjustments from #%d", reviewNumber))
-	_, _ = fmt.Fprintf(t.cfg.Stdout, "Applied approvals from #%d, created issues\n", reviewNumber)
+	_, _ = fmt.Fprintf(t.cfg.Stdout, "Applied adjustments from #%d\n", reviewNumber)
 	return 0
 }
 

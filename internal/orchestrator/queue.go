@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -449,10 +450,13 @@ func (a *App) runFromDevelop(ctx context.Context, root string, env []string, rep
 	return stateJSON, nil
 }
 
-// ensurePRCreated calls phaseOpenPR if pr_number is not set in the state.
+// ensurePRCreated backfills a missing PR for legacy or recovered develop states
+// without introducing a separate pseudo-phase in the state machine.
 func (a *App) ensurePRCreated(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, title string) (string, error) {
 	var state struct {
-		PRNumber int `json:"pr_number"`
+		Phase    string `json:"phase"`
+		PRNumber int    `json:"pr_number"`
+		Branch   string `json:"branch"`
 	}
 	if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
 		return "", err
@@ -460,7 +464,32 @@ func (a *App) ensurePRCreated(ctx context.Context, root string, env []string, re
 	if state.PRNumber != 0 {
 		return stateJSON, nil
 	}
-	return a.phaseOpenPR(ctx, root, env, repo, issueNumber, stateJSON, title)
+	if strings.TrimSpace(state.Branch) == "" {
+		return "", errors.New("state is missing branch")
+	}
+
+	prResult, err := a.createDraftPR(ctx, repo, state.Branch, issueNumber, title)
+	if err != nil {
+		return "", fmt.Errorf("create draft PR: %w", err)
+	}
+	if prResult.Number == 0 {
+		return "", errors.New("draft PR creation returned an invalid payload")
+	}
+
+	nextState, err := updateStateJSON(stateJSON, func(state map[string]any) {
+		state["pr_number"] = prResult.Number
+	})
+	if err != nil {
+		return "", err
+	}
+
+	event := strings.ToLower(strings.TrimSpace(state.Phase))
+	if event == "" || event == "respond" || event == "done" || event == "finalize" {
+		event = "develop"
+	}
+	_ = a.postAuditCommentWithState(ctx, root, env, repo, prResult.Number, event, nextState, fmt.Sprintf("PR created. Branch: `%s`", state.Branch))
+
+	return nextState, nil
 }
 
 func (a *App) runFromVerify(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, _ IssueMetadata) (string, error) {

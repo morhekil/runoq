@@ -416,8 +416,8 @@ func TestFormatAuditCommentWithAgent(t *testing.T) {
 }
 
 func TestFormatAuditCommentWithoutAgent(t *testing.T) {
-	result := formatAuditComment("open-pr", `{"phase":"DEVELOP"}`, "PR created.")
-	if !strings.Contains(result, "> Posted by `orchestrator` — open-pr phase") {
+	result := formatAuditComment("init", `{"phase":"INIT"}`, "Initialized.")
+	if !strings.Contains(result, "> Posted by `orchestrator` — init phase") {
 		t.Fatalf("expected default attribution, got %q", result)
 	}
 	if strings.Contains(result, "runoq:agent:") {
@@ -1150,11 +1150,6 @@ func TestResumeFromStateBoundaries(t *testing.T) {
 		wantCallMatch  string // substring that must appear in gh calls
 		wantCallAbsent string // substring that must NOT appear
 	}{
-		{
-			name:         "OPEN-PR resume fails as unknown phase",
-			inputState:   `{"issue":42,"phase":"OPEN-PR","branch":"runoq/42-x","worktree":"/tmp/wt","pr_number":87,"round":1,"baseline_hash":"b","head_hash":"h","commit_range":"b..h","changed_files":["a.go"],"related_files":[],"spec_requirements":"## AC","verification_passed":true}`,
-			wantErrMatch: `unsupported resume phase "OPEN-PR"`,
-		},
 		{
 			name:         "arbitrary unknown phase is rejected",
 			inputState:   `{"issue":42,"phase":"WHATEVER","pr_number":87}`,
@@ -1952,36 +1947,6 @@ func dryRunMockExecutor(t *testing.T) shell.CommandExecutor {
 }
 
 // defaultOrchestratorConfig returns the standard test config with all labels and prefix set.
-func TestPhaseOpenPRCreatesPRAndSetsState(t *testing.T) {
-	ctx := t.Context()
-	root := t.TempDir()
-
-	var stderr bytes.Buffer
-	var calls []string
-
-	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, &stderr)
-	app.SetConfig(defaultOrchestratorConfig())
-	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{calls: &calls, issueNumber: 42, issueTitle: "Implement queue"}))
-
-	stateJSON := `{"issue":42,"phase":"DEVELOP","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":0,"round":1}`
-	result, err := app.phaseOpenPR(ctx, root, app.env, "owner/repo", 42, stateJSON, "Implement queue")
-	if err != nil {
-		t.Fatalf("phaseOpenPR: %v", err)
-	}
-	if !strings.Contains(result, `"phase":"DEVELOP"`) {
-		t.Fatalf("expected existing phase to be preserved, got %s", result)
-	}
-	if !strings.Contains(result, `"pr_number":87`) {
-		t.Fatalf("expected pr_number 87, got %s", result)
-	}
-	if !containsCall(calls, "pr create") {
-		t.Fatalf("expected pr create call, got %v", calls)
-	}
-	if !strings.Contains(stderr.String(), "OPEN-PR: created draft PR #87") {
-		t.Fatalf("expected OPEN-PR log, got %q", stderr.String())
-	}
-}
-
 func TestPhaseInitCreatesPRAndSetsState(t *testing.T) {
 	ctx := t.Context()
 	root := t.TempDir()
@@ -2043,6 +2008,53 @@ func TestEnsurePRCreatedSkipsWhenPRExists(t *testing.T) {
 		if strings.Contains(call, "pr create") {
 			t.Fatalf("should not have created PR when pr_number exists, got %v", calls)
 		}
+	}
+}
+
+func TestEnsurePRCreatedUsesDevelopAuditCommentWithoutOpenPRMarker(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var calls []string
+	var commentBody string
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, io.Discard)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		calls:       &calls,
+		issueNumber: 42,
+		issueTitle:  "Implement queue",
+		ghHandler: func(ghArgs string, req shell.CommandRequest) (bool, error) {
+			if strings.Contains(ghArgs, "pr comment 87") && strings.Contains(ghArgs, "--body-file") {
+				for i, arg := range req.Args {
+					if arg == "--body-file" && i+1 < len(req.Args) {
+						data, _ := os.ReadFile(req.Args[i+1])
+						commentBody = string(data)
+						break
+					}
+				}
+				return true, nil
+			}
+			return false, nil
+		},
+	}))
+
+	stateJSON := `{"issue":42,"phase":"DEVELOP","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":0,"round":1,"status":"completed"}`
+	result, err := app.ensurePRCreated(ctx, root, app.env, "owner/repo", 42, stateJSON, "Implement queue")
+	if err != nil {
+		t.Fatalf("ensurePRCreated: %v", err)
+	}
+	if !strings.Contains(result, `"pr_number":87`) {
+		t.Fatalf("expected pr_number 87, got %s", result)
+	}
+	if !containsCall(calls, "pr create") {
+		t.Fatalf("expected pr create call, got %v", calls)
+	}
+	if strings.Contains(commentBody, "runoq:bot:orchestrator:open-pr") {
+		t.Fatalf("expected no legacy open-pr audit marker, got %q", commentBody)
+	}
+	if !strings.Contains(commentBody, "runoq:bot:orchestrator:develop") {
+		t.Fatalf("expected develop audit marker when creating PR from develop state, got %q", commentBody)
 	}
 }
 

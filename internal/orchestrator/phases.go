@@ -114,49 +114,6 @@ func (a *App) phaseInit(ctx context.Context, root string, env []string, repo str
 	return stateJSON, nil
 }
 
-// phaseOpenPR creates a draft PR after code has been pushed. This defers PR
-// creation from INIT to after the first successful DEVELOP round, so the PR
-// is born with actual code rather than an empty placeholder.
-func (a *App) phaseOpenPR(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string, title string) (string, error) {
-	a.ensureSubApps()
-	a.logInfo("OPEN-PR: creating PR for issue #%d", issueNumber)
-
-	var state struct {
-		Phase    string `json:"phase"`
-		Branch   string `json:"branch"`
-		Worktree string `json:"worktree"`
-	}
-	if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
-		return "", fmt.Errorf("failed to parse state for open-pr: %v", err)
-	}
-	if strings.TrimSpace(state.Branch) == "" || strings.TrimSpace(state.Worktree) == "" {
-		return "", errors.New("OPEN-PR state is missing branch or worktree")
-	}
-
-	prResult, prErr := a.createDraftPR(ctx, repo, state.Branch, issueNumber, title)
-	if prErr != nil {
-		return "", fmt.Errorf("OPEN-PR: draft PR creation failed: %v", prErr)
-	}
-
-	prNumber := prResult.Number
-	if prNumber == 0 {
-		return "", errors.New("OPEN-PR: draft PR creation returned an invalid payload")
-	}
-
-	a.logInfo("OPEN-PR: created draft PR #%d for branch=%s", prNumber, state.Branch)
-
-	nextState, err := updateStateJSON(stateJSON, func(state map[string]any) {
-		state["pr_number"] = prNumber
-	})
-	if err != nil {
-		return "", err
-	}
-
-	_ = a.postAuditCommentWithState(ctx, root, env, repo, prNumber, "open-pr", nextState, fmt.Sprintf("PR created. Branch: `%s`", state.Branch))
-
-	return nextState, nil
-}
-
 func (a *App) phaseDevelop(ctx context.Context, root string, env []string, repo string, issueNumber int, stateJSON string) (string, issueRunnerResult, error) {
 	a.ensureSubApps()
 	a.logInfo("DEVELOP: issue #%d", issueNumber)

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/saruman/runoq/comments"
 	"github.com/saruman/runoq/internal/shell"
 )
 
@@ -835,6 +836,193 @@ func TestDispatchTaskReturnsWaitingForWaitingDevelopState(t *testing.T) {
 	})
 	if result != 2 {
 		t.Fatalf("dispatchTask = %d, want 2", result)
+	}
+}
+
+func TestHandleApprovedAdjustmentSeedsNextPlanningIssueOnce(t *testing.T) {
+	t.Parallel()
+
+	reviewView := "{\"body\":\"## Adjustment Review\\n\\n```json\\n{\\\"milestone_number\\\":9,\\\"milestone_title\\\":\\\"Current milestone\\\",\\\"summary\\\":\\\"done\\\",\\\"recommended_verdict\\\":\\\"APPROVE\\\",\\\"proposed_adjustments\\\":[]}\\n```\"}"
+
+	refreshedIssues := `[
+		{"number":20,"title":"Next milestone","state":"OPEN","body":"","labels":[],"url":"u"},
+		{"number":21,"title":"Break down Next milestone into tasks","state":"OPEN","body":"","labels":[{"name":"runoq:planning"}],"url":"u"}
+	]`
+
+	var createCalls []string
+	runner := &tickRunner{
+		cfg: TickConfig{
+			Repo:              "owner/repo",
+			PlanApprovedLabel: "runoq:plan-approved",
+			ReadyLabel:        "runoq:ready",
+			InProgressLabel:   "runoq:in-progress",
+			DoneLabel:         "runoq:done",
+			NeedsReviewLabel:  "runoq:needs-human-review",
+			BlockedLabel:      "runoq:blocked",
+			Stdout:            io.Discard,
+			Stderr:            io.Discard,
+		},
+	}
+	runner.cfg.ExecCommand = func(_ context.Context, req shell.CommandRequest) error {
+		args := strings.Join(req.Args, " ")
+		switch {
+		case strings.Contains(args, "issue view 88") && strings.Contains(args, "--json labels"):
+			_, _ = io.WriteString(req.Stdout, `{"labels":[{"name":"runoq:adjustment"}]}`)
+			return nil
+		case strings.Contains(args, "issue view 9") && strings.Contains(args, "--json labels"):
+			_, _ = io.WriteString(req.Stdout, `{"labels":[]}`)
+			return nil
+		case strings.Contains(args, "issue edit 88"), strings.Contains(args, "issue edit 9"):
+			return nil
+		case strings.Contains(args, "issue close 88"), strings.Contains(args, "issue close 9"):
+			return nil
+		case strings.Contains(args, "issue list") && strings.Contains(args, "--state all"):
+			_, _ = io.WriteString(req.Stdout, refreshedIssues)
+			return nil
+		case strings.Contains(args, "api graphql"):
+			_, _ = io.WriteString(req.Stdout, `{"data":{"repository":{"issues":{"nodes":[
+				{"number":20,"blockedBy":{"nodes":[]},"issueType":{"name":"Epic"}},
+				{"number":21,"blockedBy":{"nodes":[]},"issueType":{"name":"Task"}}
+			]}}}}`)
+			return nil
+		case strings.Contains(args, "sub_issues") && strings.Contains(args, "/issues/20/sub_issues"):
+			_, _ = io.WriteString(req.Stdout, "21\n")
+			return nil
+		case strings.Contains(args, "issue create"):
+			createCalls = append(createCalls, args)
+			_, _ = io.WriteString(req.Stdout, "https://example.test/issues/99")
+			return nil
+		default:
+			return nil
+		}
+	}
+
+	result := runner.handleApprovedAdjustment(t.Context(), reviewView, 88, "9", comments.ItemSelection{})
+	if result != 0 {
+		t.Fatalf("handleApprovedAdjustment = %d, want 0", result)
+	}
+	if len(createCalls) != 0 {
+		t.Fatalf("expected no duplicate planning issue to be created, got calls %v", createCalls)
+	}
+}
+
+func TestHandleApprovedAdjustmentSeedsNextPlanningIssueWhenMissing(t *testing.T) {
+	t.Parallel()
+
+	reviewView := "{\"body\":\"## Adjustment Review\\n\\n```json\\n{\\\"milestone_number\\\":9,\\\"milestone_title\\\":\\\"Current milestone\\\",\\\"summary\\\":\\\"done\\\",\\\"recommended_verdict\\\":\\\"APPROVE\\\",\\\"proposed_adjustments\\\":[]}\\n```\"}"
+
+	refreshedIssues := `[
+		{"number":20,"title":"Next milestone","state":"OPEN","body":"","labels":[],"url":"u"}
+	]`
+
+	var createCalls []string
+	runner := &tickRunner{
+		cfg: TickConfig{
+			Repo:              "owner/repo",
+			PlanApprovedLabel: "runoq:plan-approved",
+			ReadyLabel:        "runoq:ready",
+			InProgressLabel:   "runoq:in-progress",
+			DoneLabel:         "runoq:done",
+			NeedsReviewLabel:  "runoq:needs-human-review",
+			BlockedLabel:      "runoq:blocked",
+			Stdout:            io.Discard,
+			Stderr:            io.Discard,
+		},
+	}
+	runner.cfg.ExecCommand = func(_ context.Context, req shell.CommandRequest) error {
+		args := strings.Join(req.Args, " ")
+		switch {
+		case strings.Contains(args, "issue view 88") && strings.Contains(args, "--json labels"):
+			_, _ = io.WriteString(req.Stdout, `{"labels":[{"name":"runoq:adjustment"}]}`)
+			return nil
+		case strings.Contains(args, "issue view 9") && strings.Contains(args, "--json labels"):
+			_, _ = io.WriteString(req.Stdout, `{"labels":[]}`)
+			return nil
+		case strings.Contains(args, "issue edit 88"), strings.Contains(args, "issue edit 9"):
+			return nil
+		case strings.Contains(args, "issue close 88"), strings.Contains(args, "issue close 9"):
+			return nil
+		case strings.Contains(args, "issue list") && strings.Contains(args, "--state all"):
+			_, _ = io.WriteString(req.Stdout, refreshedIssues)
+			return nil
+		case strings.Contains(args, "api graphql"):
+			_, _ = io.WriteString(req.Stdout, `{"data":{"repository":{"issues":{"nodes":[
+				{"number":20,"blockedBy":{"nodes":[]},"issueType":{"name":"Epic"}}
+			]}}}}`)
+			return nil
+		case strings.Contains(args, "sub_issues") && strings.Contains(args, "/issues/20/sub_issues"):
+			_, _ = io.WriteString(req.Stdout, "")
+			return nil
+		case strings.Contains(args, "issue create"):
+			createCalls = append(createCalls, args)
+			_, _ = io.WriteString(req.Stdout, "https://example.test/issues/99")
+			return nil
+		default:
+			return nil
+		}
+	}
+
+	result := runner.handleApprovedAdjustment(t.Context(), reviewView, 88, "9", comments.ItemSelection{})
+	if result != 0 {
+		t.Fatalf("handleApprovedAdjustment = %d, want 0", result)
+	}
+	if len(createCalls) != 1 {
+		t.Fatalf("expected one planning issue to be seeded, got calls %v", createCalls)
+	}
+	if !strings.Contains(createCalls[0], "Break down Next milestone into tasks") {
+		t.Fatalf("expected planning issue creation for next epic, got %v", createCalls)
+	}
+}
+
+func TestHandleApprovedAdjustmentReportsAdjustmentOutcome(t *testing.T) {
+	t.Parallel()
+
+	reviewView := "{\"body\":\"## Adjustment Review\\n\\n```json\\n{\\\"milestone_number\\\":9,\\\"milestone_title\\\":\\\"Current milestone\\\",\\\"summary\\\":\\\"done\\\",\\\"recommended_verdict\\\":\\\"APPROVE\\\",\\\"proposed_adjustments\\\":[]}\\n```\"}"
+
+	refreshedIssues := `[]`
+	var stdout bytes.Buffer
+	runner := &tickRunner{
+		cfg: TickConfig{
+			Repo:             "owner/repo",
+			ReadyLabel:       "runoq:ready",
+			InProgressLabel:  "runoq:in-progress",
+			DoneLabel:        "runoq:done",
+			NeedsReviewLabel: "runoq:needs-human-review",
+			BlockedLabel:     "runoq:blocked",
+			Stdout:           &stdout,
+			Stderr:           io.Discard,
+		},
+	}
+	runner.cfg.ExecCommand = func(_ context.Context, req shell.CommandRequest) error {
+		args := strings.Join(req.Args, " ")
+		switch {
+		case strings.Contains(args, "issue view 88") && strings.Contains(args, "--json labels"):
+			_, _ = io.WriteString(req.Stdout, `{"labels":[{"name":"runoq:adjustment"}]}`)
+			return nil
+		case strings.Contains(args, "issue view 9") && strings.Contains(args, "--json labels"):
+			_, _ = io.WriteString(req.Stdout, `{"labels":[]}`)
+			return nil
+		case strings.Contains(args, "issue edit 88"), strings.Contains(args, "issue edit 9"):
+			return nil
+		case strings.Contains(args, "issue close 88"), strings.Contains(args, "issue close 9"):
+			return nil
+		case strings.Contains(args, "issue list") && strings.Contains(args, "--state all"):
+			_, _ = io.WriteString(req.Stdout, refreshedIssues)
+			return nil
+		default:
+			return nil
+		}
+	}
+
+	result := runner.handleApprovedAdjustment(t.Context(), reviewView, 88, "9", comments.ItemSelection{})
+	if result != 0 {
+		t.Fatalf("handleApprovedAdjustment = %d, want 0", result)
+	}
+	if strings.Contains(stdout.String(), "created issues") {
+		t.Fatalf("expected adjustment output to avoid stale 'created issues' wording, got %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Applied adjustments from #88") {
+		t.Fatalf("expected adjustment-specific output, got %q", stdout.String())
 	}
 }
 
