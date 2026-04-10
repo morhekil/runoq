@@ -423,9 +423,17 @@ func (t *tickRunner) handlePendingReview(ctx context.Context, pending *issue) in
 	}
 
 	issueType := issueTypeOf(*pending)
-	if issueType == "planning" && !strings.Contains(issueView, "runoq:payload:plan-proposal") {
-		t.info(fmt.Sprintf("planning issue #%d has no proposal yet — needs dispatch", pending.Number))
-		return 1
+	if issueType == "planning" {
+		var view struct {
+			Body string `json:"body"`
+		}
+		if err := json.Unmarshal([]byte(issueView), &view); err != nil {
+			return t.fail("parse review view: %v", err)
+		}
+		if !strings.Contains(view.Body, "runoq:payload:plan-proposal") {
+			t.info(fmt.Sprintf("planning issue #%d has no proposal yet — needs dispatch", pending.Number))
+			return 1
+		}
 	}
 
 	ids, _ := comments.FindUnrespondedCommentIDs(issueView)

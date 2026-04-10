@@ -1295,6 +1295,40 @@ func TestHandlePendingReviewFailsWhenCommentHandlingFails(t *testing.T) {
 	}
 }
 
+func TestHandlePendingReviewRedispatchesWhenProposalMarkerExistsOnlyInComments(t *testing.T) {
+	t.Parallel()
+
+	issueView := `{"number":88,"title":"Review","body":"## Acceptance Criteria\n\n- [ ] Review milestones.","state":"OPEN","labels":[{"name":"runoq:planning"}],"comments":[{"id":"IC1","author":{"login":"human"},"body":"I pasted <!-- runoq:payload:plan-proposal --> here for reference","reactionGroups":[{"content":"THUMBS_UP","users":{"totalCount":1}}]}]}`
+
+	runner := &tickRunner{
+		cfg: TickConfig{
+			Repo:   "owner/repo",
+			Stdout: io.Discard,
+			Stderr: io.Discard,
+		},
+	}
+	runner.cfg.ExecCommand = func(_ context.Context, req shell.CommandRequest) error {
+		args := strings.Join(req.Args, " ")
+		if strings.Contains(args, "issue view 88") && strings.Contains(args, "--json number,title,body,comments,labels,state") {
+			_, _ = io.WriteString(req.Stdout, issueView)
+			return nil
+		}
+		t.Fatalf("unexpected command: %s %s", req.Name, args)
+		return nil
+	}
+
+	result := runner.handlePendingReview(t.Context(), &issue{
+		Number: 88,
+		Title:  "Review",
+		State:  "OPEN",
+		Body:   "## Acceptance Criteria\n\n- [ ] Review milestones.",
+		Labels: []label{{Name: "runoq:planning"}},
+	})
+	if result != 1 {
+		t.Fatalf("handlePendingReview = %d, want 1", result)
+	}
+}
+
 func TestHandleApprovedAdjustmentFailsOnUnsupportedType(t *testing.T) {
 	t.Parallel()
 
