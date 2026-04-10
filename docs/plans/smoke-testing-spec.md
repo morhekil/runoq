@@ -28,7 +28,7 @@ Same repo and fixture infrastructure as the planning smoke. After tasks are mate
 1. Creates a real file in the worktree
 2. Commits and pushes to origin
 3. Writes valid JSONL events to stdout (with `thread.started` and token counts)
-4. Writes a valid last-message payload to the `-o` path (matching the required schema)
+4. Writes a last-message file to the `-o` path. Happy-path fixtures should include a valid payload block; failure fixtures may intentionally omit or malform it so `state validate-payload` can normalize it.
 5. Captures thread IDs so schema-retry scenarios can verify same-thread resume within a single develop round
 
 And a **fixture diff-reviewer** response for the `claude stream-json --agent diff-reviewer` invocation that returns a PASS verdict with a score.
@@ -171,11 +171,16 @@ Same as happy path but the fixture reviewer returns `ITERATE` on first review.
 
 - [ ] Same finalize checks as happy path tick 6
 
-### Scenario: Needs-review path (1 tick)
+### Scenario: Needs-review path
+
+Two observable entry points exist:
+
+- **Fresh issue path**: a fresh implementation dispatch still uses `INIT` first, so PR creation happens on the `INIT` tick and the deterministic needs-review handoff happens on the following `DEVELOP` tick.
+- **Post-INIT path**: if `INIT` has already completed and a PR already exists, the needs-review handoff happens in a single `DEVELOP` tick.
 
 Fixture codex produces no commits (simulates failure).
 
-**Tick 1** — Develop fails verification, creates PR, sets needs-review
+**DEVELOP tick** — Develop fails verification and routes to needs-review
 
 - [ ] PR exists (work is visible even on failure)
 - [ ] PR is marked ready for review
@@ -186,6 +191,8 @@ Fixture codex produces no commits (simulates failure).
 ### Scenario: Budget exhaustion path (2 sub-paths)
 
 Fixture codex returns `budget_exhausted` status (simulates token budget exceeded).
+
+As with other implementation failures, a fresh issue still reaches this path only after a prior `INIT` tick has already created the PR.
 
 **Before-round exhaustion** — budget exhausted before starting a developer round
 
@@ -207,9 +214,11 @@ Fixture codex returns `budget_exhausted` status (simulates token budget exceeded
 
 Same as iterate path but the fixture reviewer returns `ITERATE` on every review until `maxRounds` is reached.
 
-After final review tick (ITERATE at max round) — Decide + Finalize to needs-review:
+After final review tick (ITERATE at max round):
 
-- [ ] DECIDE falls through to `finalize-needs-review` (round >= maxRounds)
+- [ ] The next tick is `DECIDE`, not `FINALIZE`
+- [ ] `DECIDE` falls through to `finalize-needs-review` (round >= maxRounds)
+- [ ] The following tick performs `FINALIZE`
 - [ ] Issue has `runoq:needs-human-review` label
 - [ ] PR is marked ready for review, reviewer assigned
 - [ ] PR body has `## Final Status` table with ITERATE verdict and max round count
@@ -254,17 +263,24 @@ Fixture codex writes an invalid final payload block but includes a valid `thread
 
 **Schema retry succeeds**
 
-- [ ] `state validate-payload` fails for the first payload
+- [ ] `state validate-payload` returns normalized JSON with `payload_schema_valid=false` for the first payload
 - [ ] Same-thread schema retry is attempted
 - [ ] The corrected payload is accepted without re-running development commands
 - [ ] Tick stops in `DEVELOP`; verification still happens later in the separate `VERIFY` tick
 
 **Schema retry fails**
 
-- [ ] `state validate-payload` remains invalid after bounded retries
+- [ ] `state validate-payload` continues to return normalized JSON with `payload_schema_valid=false` after bounded retries
 - [ ] `DEVELOP` still completes and persists the invalid payload state
 - [ ] The later `VERIFY` tick records the deterministic failure
 - [ ] Tick does not loop indefinitely
+
+**No `thread.started` event**
+
+- [ ] `state validate-payload` returns normalized JSON with `payload_schema_valid=false`
+- [ ] No same-thread schema retry is attempted because no resumable thread ID is available
+- [ ] `DEVELOP` still completes and persists caveats indicating the payload remained invalid and no thread ID was available
+- [ ] The later `VERIFY` tick records the deterministic failure
 
 ### Scenario: Resume from crash (idempotency)
 
