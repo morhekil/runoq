@@ -627,7 +627,7 @@ func TestTickSelectsTaskAndCallsRunIssue(t *testing.T) {
 
 	graphqlResponse := `{"data":{"repository":{"issues":{"nodes":[
 		{"number":9,"blockedBy":{"nodes":[]},"issueType":{"name":"Epic"}},
-		{"number":10,"blockedBy":{"nodes":[]},"issueType":{"name":"Task"}},
+		{"number":10,"blockedBy":{"nodes":[{"number":11}]},"issueType":{"name":"Task"}},
 		{"number":11,"blockedBy":{"nodes":[]},"issueType":{"name":"Task"}}
 	]}}}}`
 
@@ -749,10 +749,83 @@ func TestRunTickTargetIssueDispatchesSpecificTask(t *testing.T) {
 	if !strings.Contains(stdout.String(), "Issue #42 — phase: INIT") {
 		t.Fatalf("expected targeted issue output, got %q", stdout.String())
 	}
-	for _, call := range stub.calls {
-		if strings.Contains(call, "sub_issues") {
-			t.Fatalf("targeted issue tick should not walk epic hierarchy, got calls: %v", stub.calls)
-		}
+}
+
+func TestRunTickFailsWhenReconcileFails(t *testing.T) {
+	t.Parallel()
+
+	var fetchedIssues bool
+	result := RunTick(t.Context(), TickConfig{
+		Repo:             "owner/repo",
+		ReadyLabel:       "runoq:ready",
+		InProgressLabel:  "runoq:in-progress",
+		DoneLabel:        "runoq:done",
+		NeedsReviewLabel: "runoq:needs-human-review",
+		BlockedLabel:     "runoq:blocked",
+		Stdout:           io.Discard,
+		Stderr:           io.Discard,
+		ExecCommand: func(_ context.Context, req shell.CommandRequest) error {
+			args := strings.Join(req.Args, " ")
+			switch {
+			case strings.Contains(args, "issue list") && strings.Contains(args, "--label runoq:in-progress"):
+				return errors.New("reconcile failed")
+			case strings.Contains(args, "issue list") && strings.Contains(args, "--state all"):
+				fetchedIssues = true
+				return nil
+			default:
+				return nil
+			}
+		},
+	})
+
+	if result != 1 {
+		t.Fatalf("RunTick = %d, want 1", result)
+	}
+	if fetchedIssues {
+		t.Fatal("expected tick to abort before fetching issues")
+	}
+}
+
+func TestRunTickTargetIssueRejectsEpicAfterLoadingDependencies(t *testing.T) {
+	t.Parallel()
+
+	issueList := `[{"number":42,"title":"Target epic","state":"OPEN","body":"","labels":[],"url":"u"}]`
+	graphqlResponse := `{"data":{"repository":{"issues":{"nodes":[{"number":42,"blockedBy":{"nodes":[]},"issueType":{"name":"Epic"}}]}}}}`
+
+	var stdout, stderr bytes.Buffer
+	result := RunTick(t.Context(), TickConfig{
+		Repo:             "owner/repo",
+		PlanFile:         "docs/plan.md",
+		RunoqRoot:        t.TempDir(),
+		TargetIssue:      42,
+		ReadyLabel:       "runoq:ready",
+		InProgressLabel:  "runoq:in-progress",
+		DoneLabel:        "runoq:done",
+		NeedsReviewLabel: "runoq:needs-human-review",
+		BlockedLabel:     "runoq:blocked",
+		Stdout:           &stdout,
+		Stderr:           &stderr,
+		ExecCommand: func(_ context.Context, req shell.CommandRequest) error {
+			args := strings.Join(req.Args, " ")
+			switch {
+			case strings.Contains(args, "issue list") && strings.Contains(args, "--label runoq:in-progress"):
+				_, _ = io.WriteString(req.Stdout, `[]`)
+			case strings.Contains(args, "issue list") && strings.Contains(args, "--state all"):
+				_, _ = io.WriteString(req.Stdout, issueList)
+			case strings.Contains(args, "api graphql"):
+				_, _ = io.WriteString(req.Stdout, graphqlResponse)
+			default:
+				return nil
+			}
+			return nil
+		},
+	})
+
+	if result != 1 {
+		t.Fatalf("RunTick = %d, want 1; stderr=%q", result, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "not an implementation task") {
+		t.Fatalf("expected targeted epic rejection, got stderr=%q", stderr.String())
 	}
 }
 
@@ -788,6 +861,11 @@ func TestDispatchTaskRespectsIssueStatusFromState(t *testing.T) {
 			stateJSON:     `{"phase":"DEVELOP"}`,
 			wantSetStatus: "",
 		},
+		{
+			name:          "finalize phase is not terminal for set-status",
+			stateJSON:     `{"phase":"FINALIZE","issue_status":"done"}`,
+			wantSetStatus: "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -799,6 +877,34 @@ func TestDispatchTaskRespectsIssueStatusFromState(t *testing.T) {
 				t.Errorf("issueStatusFromDoneState() = %q, want %q", got, tt.wantSetStatus)
 			}
 		})
+	}
+}
+
+func TestHandleImplementationReportsOpenTasksThatAreNotReady(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	runner := &tickRunner{
+		cfg: TickConfig{
+			ReadyLabel: "runoq:ready",
+			Stdout:     &stdout,
+			Stderr:     io.Discard,
+		},
+		issues: []issue{
+			{Number: 9, Title: "Epic", State: "OPEN", IssueType: "epic"},
+			{Number: 11, Title: "Needs review", State: "OPEN", IssueType: "task", ParentEpic: 9, Labels: []label{{Name: "runoq:needs-human-review"}}},
+		},
+	}
+
+	result := runner.handleImplementation(t.Context(), 9)
+	if result != 2 {
+		t.Fatalf("handleImplementation = %d, want 2", result)
+	}
+	if !strings.Contains(stdout.String(), "Open tasks exist but none are ready") {
+		t.Fatalf("expected explicit non-ready message, got %q", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "All tasks blocked") {
+		t.Fatalf("expected non-ready classification instead of blocked, got %q", stdout.String())
 	}
 }
 

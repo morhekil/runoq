@@ -2858,6 +2858,34 @@ func TestResumeFromStateUsesDevelopPathForWaitingState(t *testing.T) {
 	}
 }
 
+func TestResumeFromStateReentersFinalize(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var calls []string
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, io.Discard)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		calls:       &calls,
+		issueNumber: 42,
+		issueTitle:  "Implement queue",
+	}))
+
+	stateJSON := `{"issue":42,"phase":"FINALIZE","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":87,"round":1,"verdict":"PASS","score":"42","summary":"Ready to merge"}`
+
+	result, err := app.resumeFromState(ctx, root, app.env, "owner/repo", 42, stateJSON, IssueMetadata{Number: 42, Title: "Implement queue"})
+	if err != nil {
+		t.Fatalf("resumeFromState: %v", err)
+	}
+	if !strings.Contains(result, `"phase":"DONE"`) {
+		t.Fatalf("expected finalize recovery to reach DONE, got %s", result)
+	}
+	if !containsCall(calls, "pr ready 87") {
+		t.Fatalf("expected finalize recovery to rerun PR finalization, got %v", calls)
+	}
+}
+
 func TestTransientBackoffSchedule(t *testing.T) {
 	app := New(nil, nil, "", io.Discard, io.Discard)
 

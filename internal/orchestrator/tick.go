@@ -107,8 +107,10 @@ func (t *tickRunner) run(ctx context.Context) int {
 			BranchPrefix:    t.cfg.BranchPrefix,
 			WorktreePrefix:  t.cfg.WorktreePrefix,
 		})
+		if code := dsApp.Reconcile(ctx, t.cfg.Repo); code != 0 {
+			return t.fail("reconcile dispatch safety: exited %d", code)
+		}
 	}
-	dsApp.Reconcile(ctx, t.cfg.Repo)
 
 	t.step("Fetching issues")
 	raw, err := t.ghOutput(ctx, "issue", "list", "--repo", t.cfg.Repo, "--state", "all", "--limit", "200", "--json", "number,title,body,labels,state,url")
@@ -119,6 +121,11 @@ func (t *tickRunner) run(ctx context.Context) int {
 		return t.fail("parse issues: %v", err)
 	}
 	t.info(fmt.Sprintf("found %d issues", len(t.issues)))
+
+	// Populate dependency info from GitHub's native APIs
+	if err := t.fetchDependencies(ctx); err != nil {
+		return t.fail("%v", err)
+	}
 
 	if t.cfg.TargetIssue > 0 {
 		t.step(fmt.Sprintf("Dispatching target issue #%d", t.cfg.TargetIssue))
@@ -135,11 +142,6 @@ func (t *tickRunner) run(ctx context.Context) int {
 			return 3
 		}
 		return t.dispatchTask(ctx, target)
-	}
-
-	// Populate dependency info from GitHub's native APIs
-	if err := t.fetchDependencies(ctx); err != nil {
-		return t.fail("%v", err)
 	}
 
 	t.step("Finding current epic")
@@ -794,6 +796,11 @@ func (t *tickRunner) handleImplementation(ctx context.Context, epicNumber int) i
 
 	task := graph.NextAfter(t.cfg.LastCompletedIssue)
 	if task == nil {
+		if count := t.countNonReadyOpenTasks(epicNumber); count > 0 && !graph.HasCycle() {
+			t.warn(fmt.Sprintf("%d open task(s) exist but none are ready", count))
+			_, _ = fmt.Fprintln(t.cfg.Stdout, "Open tasks exist but none are ready")
+			return 2
+		}
 		if graph.HasCycle() {
 			members := graph.CycleMembers()
 			t.warn(fmt.Sprintf("dependency cycle detected: %v", members))
@@ -941,6 +948,9 @@ func issueStatusFromDoneState(stateJSON string) string {
 		return ""
 	}
 	if state.Phase != "DONE" && state.Phase != "FINALIZE" {
+		return ""
+	}
+	if state.Phase == "FINALIZE" {
 		return ""
 	}
 	// If the phase machine set an explicit issue_status, respect it.
@@ -1100,6 +1110,30 @@ func (t *tickRunner) countOpenChildren(epicNumber int) (int, bool) {
 		}
 	}
 	return count, hasTask
+}
+
+func (t *tickRunner) countNonReadyOpenTasks(epicNumber int) int {
+	if t.cfg.ReadyLabel == "" {
+		return 0
+	}
+	count := 0
+	for i := range t.issues {
+		iss := &t.issues[i]
+		if iss.State != "OPEN" {
+			continue
+		}
+		if issueParentEpic(iss) != epicNumber {
+			continue
+		}
+		if issueTypeOf(*iss) != "task" {
+			continue
+		}
+		if t.issueHasLabel(iss, t.cfg.ReadyLabel) {
+			continue
+		}
+		count++
+	}
+	return count
 }
 
 func (t *tickRunner) planningMaxRounds() int {

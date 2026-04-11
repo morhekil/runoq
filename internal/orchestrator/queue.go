@@ -76,11 +76,15 @@ func (a *App) runCommandEntry(ctx context.Context, root string, env []string, ar
 		a.logInfo("Bot remote configuration failed or skipped")
 	}
 
-	a.logInfo("Running reconciliation")
-	_ = a.dispatchSafetyApp.Reconcile(ctx, repo)
-
 	if issueNumber == "" {
 		return shell.Fail(a.stderr, "--issue is required. Use 'runoq tick' for queue processing.")
+	}
+
+	if a.cfg.ReadyLabel != "" {
+		a.logInfo("Running reconciliation")
+		if code := a.dispatchSafetyApp.Reconcile(ctx, repo); code != 0 {
+			return shell.Failf(a.stderr, "dispatch safety reconcile exited %d", code)
+		}
 	}
 
 	issue, _ := strconv.Atoi(issueNumber)
@@ -234,9 +238,11 @@ func (a *App) resumeFromState(ctx context.Context, root string, env []string, re
 	}
 
 	switch state.Phase {
-	case "DONE", "FINALIZE":
+	case "DONE":
 		a.logInfo("RESUME: issue #%d already at terminal phase %s", issueNumber, state.Phase)
 		return stateJSON, nil
+	case "FINALIZE":
+		return a.runFromFinalize(ctx, root, env, repo, issueNumber, stateJSON, metadata)
 	case "RESPOND":
 		switch state.ResumePhase {
 		case "DEVELOP":

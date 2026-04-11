@@ -25,15 +25,19 @@ Out of scope:
 
 - Completed:
   - Phase 1 comment and review correctness
+  - Phase 2 dispatch and recovery safety
   - per-comment planning comment handling
   - bot-marker-based processed detection for planning comments and PR RESPOND
   - approved-review precedence for fresh non-selection comments
   - pending no-payload review precedence for fresh comments
   - PR conversation discovery for issue comments, review comments, and review summaries
+  - reconcile failures now abort tick/run dispatch
+  - targeted issue validation now waits for loaded issue metadata
+  - stale `FINALIZE` state now resumes finalization instead of short-circuiting
+  - non-ready open tasks no longer report as dependency-blocked
 - In progress:
-  - Phase 2 dispatch and recovery safety
-- Pending:
   - Phase 3 planning and adjustment apply safety
+- Pending:
   - Phase 4 smoke spec alignment and coverage completion
 
 ## Guiding **Decisions**
@@ -176,6 +180,8 @@ Design constraint:
 
 ### 4. Recovery and Terminal-State Correctness
 
+Status: completed on 2026-04-11 for the dispatch/finalize recovery items in Phase 2; remaining smoke-spec coverage follow-up is still pending
+
 Purpose:
 
 - make persisted state replay-safe, especially around `FINALIZE`, `RESPOND`, and corrupted recovery inputs
@@ -215,6 +221,8 @@ Likely code areas:
 - `internal/orchestrator/tick.go`
 
 ### 5. Dispatch, Reconciliation, and Queue Correctness
+
+Status: completed on 2026-04-11 for reconcile failure propagation, targeted issue validation, and non-ready queue classification; smoke-spec follow-up remains pending
 
 Purpose:
 
@@ -294,6 +302,10 @@ Deliverables:
 - targeted issue validation fixed
 - non-ready queue outcome fixed
 - resumable `FINALIZE` recovery model
+
+Status:
+
+- completed on 2026-04-11
 
 ### Phase 3. Planning and adjustment apply safety
 
