@@ -85,8 +85,13 @@ func TestFindUnrespondedCommentIDs(t *testing.T) {
 			wantIDs:       []string{"IC1"},
 		},
 		{
-			name:          "human comment with +1 is skipped",
-			issueViewJSON: `{"comments":[{"author":{"login":"human"},"body":"done","id":"IC1","reactionGroups":[{"content":"THUMBS_UP","users":{"totalCount":1}}]}]}`,
+			name:          "human comment with human thumbs up is not skipped",
+			issueViewJSON: `{"comments":[{"author":{"login":"human"},"body":"done","id":"IC1","reactionGroups":[{"content":"THUMBS_UP","users":{"nodes":[{"login":"human2"}]}}]}]}`,
+			wantIDs:       []string{"IC1"},
+		},
+		{
+			name:          "human comment with bot thumbs up is skipped",
+			issueViewJSON: `{"comments":[{"author":{"login":"human"},"body":"done","id":"IC1","reactionGroups":[{"content":"THUMBS_UP","users":{"nodes":[{"login":"runoq"}]}}]}]}`,
 		},
 		{
 			name:          "human comment with eyes only is not skipped",
@@ -100,11 +105,18 @@ func TestFindUnrespondedCommentIDs(t *testing.T) {
 		{
 			name: "multiple: one responded one not",
 			issueViewJSON: `{"comments":[
-				{"author":{"login":"human"},"body":"first","id":"IC1","reactionGroups":[{"content":"THUMBS_UP","users":{"totalCount":1}}]},
+				{"author":{"login":"human"},"body":"first","id":"IC1","reactionGroups":[{"content":"THUMBS_UP","users":{"nodes":[{"login":"runoq"}]}}]},
 				{"author":{"login":"runoq"},"body":"<!-- runoq:bot:plan-comment-responder -->\nreply","id":"IC2","reactionGroups":[]},
 				{"author":{"login":"human"},"body":"second","id":"IC3","reactionGroups":[]}
 			]}`,
 			wantIDs: []string{"IC3"},
+		},
+		{
+			name: "bot reply marker for original comment skips it",
+			issueViewJSON: `{"comments":[
+				{"author":{"login":"human"},"body":"Please revise","id":"IC1","reactionGroups":[]},
+				{"author":{"login":"runoq"},"body":"<!-- runoq:bot:plan-comment-responder comment-id:IC1 -->\nDone.","id":"IC2","reactionGroups":[]}
+			]}`,
 		},
 	}
 

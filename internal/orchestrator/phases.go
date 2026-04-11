@@ -988,7 +988,7 @@ func (a *App) phaseRespond(ctx context.Context, root string, env []string, repo 
 	// Post acknowledgment reply for each unprocessed comment and mark processed via +1 reaction
 	for _, comment := range comments {
 		reply := fmt.Sprintf("Acknowledged feedback from %s. This will be addressed on the next runoq tick.", comment.CommenterIdentity)
-		body := fmt.Sprintf("<!-- runoq:bot:orchestrator:respond -->\n<!-- runoq:agent:codex -->\n> Re: comment by @%s\n\n%s", comment.Author, reply)
+		body := fmt.Sprintf("<!-- runoq:bot:orchestrator:respond source:%s -->\n<!-- runoq:agent:codex -->\n> Re: comment by @%s\n\n%s", responseSourceKey(comment), comment.Author, reply)
 		if err := a.commentPR(ctx, repo, state.PRNumber, body); err != nil {
 			a.logInfo("RESPOND: failed to post reply for comment %d: %v", comment.ID, err)
 			processingErrors = append(processingErrors, fmt.Errorf("reply to comment %d: %w", comment.ID, err))
@@ -996,11 +996,12 @@ func (a *App) phaseRespond(ctx context.Context, root string, env []string, repo 
 		}
 
 		// Mark as processed with +1 reaction
-		reactionEndpoint := fmt.Sprintf("repos/%s/issues/comments/%d/reactions", repo, comment.ID)
-		if _, err := a.ghOutput(ctx, env, "api", reactionEndpoint, "-f", "content=+1", "--method", "POST"); err != nil {
-			a.logInfo("RESPOND: failed to add +1 reaction to comment %d: %v", comment.ID, err)
-			processingErrors = append(processingErrors, fmt.Errorf("mark comment %d processed: %w", comment.ID, err))
-			continue
+		if reactionEndpoint := reactionEndpointForComment(repo, comment); reactionEndpoint != "" {
+			if _, err := a.ghOutput(ctx, env, "api", reactionEndpoint, "-f", "content=+1", "--method", "POST"); err != nil {
+				a.logInfo("RESPOND: failed to add +1 reaction to comment %d: %v", comment.ID, err)
+				processingErrors = append(processingErrors, fmt.Errorf("mark comment %d processed: %w", comment.ID, err))
+				continue
+			}
 		}
 
 		a.logInfo("RESPOND: replied to comment %d by %s", comment.ID, comment.Author)

@@ -2072,12 +2072,18 @@ func buildMockExecutor(t *testing.T, mc mockConfig) shell.CommandExecutor {
 			case strings.Contains(ghArgs, "pr list"):
 				_, _ = io.WriteString(req.Stdout, `[]`)
 				return nil
-			case strings.Contains(ghArgs, "api") && strings.Contains(ghArgs, "/issues/") && strings.Contains(ghArgs, "/comments"):
-				_, _ = io.WriteString(req.Stdout, `[]`)
-				return nil
-			case strings.Contains(ghArgs, "api") && strings.Contains(ghArgs, "sub_issues"):
-				_, _ = io.WriteString(req.Stdout, `[]`)
-				return nil
+				case strings.Contains(ghArgs, "api") && strings.Contains(ghArgs, "/issues/") && strings.Contains(ghArgs, "/comments"):
+					_, _ = io.WriteString(req.Stdout, `[]`)
+					return nil
+				case strings.Contains(ghArgs, "api") && strings.Contains(ghArgs, "/pulls/") && strings.Contains(ghArgs, "/comments"):
+					_, _ = io.WriteString(req.Stdout, `[]`)
+					return nil
+				case strings.Contains(ghArgs, "api") && strings.Contains(ghArgs, "/pulls/") && strings.Contains(ghArgs, "/reviews"):
+					_, _ = io.WriteString(req.Stdout, `[]`)
+					return nil
+				case strings.Contains(ghArgs, "api") && strings.Contains(ghArgs, "sub_issues"):
+					_, _ = io.WriteString(req.Stdout, `[]`)
+					return nil
 			case strings.Contains(ghArgs, "pr view") && strings.Contains(ghArgs, "body"):
 				_, _ = io.WriteString(req.Stdout, `{"body":"## Summary\n<!-- runoq:summary:start -->\nPending.\n<!-- runoq:summary:end -->\n\n## Linked Issue\nCloses #`+issueStr+`\n"}`)
 				return nil
@@ -2340,6 +2346,10 @@ func TestPhaseRespondAcknowledgesComments(t *testing.T) {
 				]`)
 				return true, nil
 			}
+			if strings.Contains(ghArgs, "api") && (strings.Contains(ghArgs, "pulls/87/comments") || strings.Contains(ghArgs, "pulls/87/reviews")) {
+				_, _ = io.WriteString(req.Stdout, `[]`)
+				return true, nil
+			}
 			if strings.Contains(ghArgs, "pr comment 87") && strings.Contains(ghArgs, "--body-file") {
 				for i, arg := range req.Args {
 					if arg == "--body-file" && i+1 < len(req.Args) {
@@ -2375,6 +2385,9 @@ func TestPhaseRespondAcknowledgesComments(t *testing.T) {
 	if !strings.Contains(commentBody, "runoq:bot") {
 		t.Fatalf("expected RESPOND reply to be tagged as bot output, got %q", commentBody)
 	}
+	if !strings.Contains(commentBody, "source:issue-comment:300") {
+		t.Fatalf("expected source marker in RESPOND reply, got %q", commentBody)
+	}
 	if !strings.Contains(stderr.String(), "RESPOND: replied to comment 300 by human1") {
 		t.Fatalf("expected respond log, got %q", stderr.String())
 	}
@@ -2396,6 +2409,10 @@ func TestPhaseRespondUsesGenericAcknowledgementText(t *testing.T) {
 				_, _ = io.WriteString(req.Stdout, `[
 					{"id": 300, "body": "Please add error handling", "user": {"login": "human1"}, "created_at": "2026-01-01T00:00:00Z", "reactions": {"+1": 0}}
 				]`)
+				return true, nil
+			}
+			if strings.Contains(ghArgs, "api") && (strings.Contains(ghArgs, "pulls/87/comments") || strings.Contains(ghArgs, "pulls/87/reviews")) {
+				_, _ = io.WriteString(req.Stdout, `[]`)
 				return true, nil
 			}
 			if strings.Contains(ghArgs, "pr comment 87") && strings.Contains(ghArgs, "--body-file") {
@@ -2424,6 +2441,61 @@ func TestPhaseRespondUsesGenericAcknowledgementText(t *testing.T) {
 	}
 	if !strings.Contains(commentBody, "next runoq tick") {
 		t.Fatalf("expected generic tick wording in acknowledgement, got %q", commentBody)
+	}
+}
+
+func TestPhaseRespondAcknowledgesInlineReviewComments(t *testing.T) {
+	ctx := t.Context()
+	root := t.TempDir()
+
+	var calls []string
+	var commentBody string
+
+	app := New(nil, []string{"RUNOQ_ROOT=" + root, "TARGET_ROOT=" + root}, root, io.Discard, io.Discard)
+	app.SetConfig(defaultOrchestratorConfig())
+	app.SetCommandExecutor(buildMockExecutor(t, mockConfig{
+		calls:       &calls,
+		issueNumber: 42,
+		issueTitle:  "Implement queue",
+		ghHandler: func(ghArgs string, req shell.CommandRequest) (bool, error) {
+			switch {
+			case strings.Contains(ghArgs, "issues/87/comments") && !strings.Contains(ghArgs, "reactions"):
+				_, _ = io.WriteString(req.Stdout, `[]`)
+				return true, nil
+			case strings.Contains(ghArgs, "pulls/87/comments"):
+				_, _ = io.WriteString(req.Stdout, `[
+					{"id": 301, "body": "Inline feedback", "user": {"login": "reviewer1"}, "created_at": "2026-01-01T00:00:00Z"}
+				]`)
+				return true, nil
+			case strings.Contains(ghArgs, "pulls/87/reviews"):
+				_, _ = io.WriteString(req.Stdout, `[]`)
+				return true, nil
+			case strings.Contains(ghArgs, "pr comment 87") && strings.Contains(ghArgs, "--body-file"):
+				for i, arg := range req.Args {
+					if arg == "--body-file" && i+1 < len(req.Args) {
+						data, _ := os.ReadFile(req.Args[i+1])
+						commentBody = string(data)
+						break
+					}
+				}
+				return true, nil
+			case strings.Contains(ghArgs, "api") && strings.Contains(ghArgs, "pulls/comments/301/reactions") && strings.Contains(ghArgs, "+1"):
+				return true, nil
+			default:
+				return false, nil
+			}
+		},
+	}))
+
+	stateJSON := `{"issue":42,"phase":"REVIEW","branch":"runoq/42-implement-queue","worktree":"/tmp/runoq-wt-42","pr_number":87,"round":1}`
+	if _, err := app.phaseRespond(ctx, root, app.env, "owner/repo", 42, stateJSON); err != nil {
+		t.Fatalf("phaseRespond: %v", err)
+	}
+	if !strings.Contains(commentBody, "source:review-comment:301") {
+		t.Fatalf("expected review-comment source marker, got %q", commentBody)
+	}
+	if !containsCall(calls, "api repos/owner/repo/pulls/comments/301/reactions") {
+		t.Fatalf("expected review-comment reaction call, got %v", calls)
 	}
 }
 

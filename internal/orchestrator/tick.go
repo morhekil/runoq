@@ -182,6 +182,35 @@ func (t *tickRunner) run(ctx context.Context) int {
 		if err != nil {
 			return t.fail("load review: %v", err)
 		}
+		pendingComments, err := comments.FindUnrespondedComments(reviewView)
+		if err != nil {
+			return t.fail("find fresh review comments: %v", err)
+		}
+		if commentID, ok := firstNonSelectionCommentID(pendingComments); ok {
+			t.step(fmt.Sprintf("Responding to fresh review comments on #%d", approved.Number))
+			invoker := agents.NewInvoker(agents.InvokerConfig{
+				LogRoot: filepath.Join(t.cfg.RunoqRoot, "log"),
+			})
+			ghClient := &tickGHAdapter{runner: t, ctx: ctx}
+			if err := comments.HandleComments(ctx, comments.HandleCommentsConfig{
+				Repo:              t.cfg.Repo,
+				IssueNumber:       approved.Number,
+				CommentID:         commentID,
+				PlanFile:          t.cfg.PlanFile,
+				RunoqRoot:         t.cfg.RunoqRoot,
+				PlanApprovedLabel: t.cfg.PlanApprovedLabel,
+				ClaudeBin:         envOrDefault(t.cfg.Env, "RUNOQ_CLAUDE_BIN", "claude"),
+				GH:                ghClient,
+				Invoker:           invoker,
+			}); err != nil {
+				t.warn(fmt.Sprintf("Comment handler failed for #%d: %v", approved.Number, err))
+				_, _ = fmt.Fprintf(t.cfg.Stdout, "Comment handler failed for #%d\n", approved.Number)
+				return 1
+			}
+			t.success(fmt.Sprintf("Responded to comments on #%d", approved.Number))
+			_, _ = fmt.Fprintf(t.cfg.Stdout, "Responded to comments on #%d\n", approved.Number)
+			return 0
+		}
 		selectionJSON, _ := comments.ParseHumanCommentSelection(reviewView)
 
 		switch reviewType {
@@ -424,22 +453,11 @@ func (t *tickRunner) handlePendingReview(ctx context.Context, pending *issue) in
 		return t.fail("load review: %v", err)
 	}
 
-	issueType := issueTypeOf(*pending)
-	if issueType == "planning" {
-		var view struct {
-			Body string `json:"body"`
-		}
-		if err := json.Unmarshal([]byte(issueView), &view); err != nil {
-			return t.fail("parse review view: %v", err)
-		}
-		if !strings.Contains(view.Body, "runoq:payload:plan-proposal") {
-			t.info(fmt.Sprintf("planning issue #%d has no proposal yet — needs dispatch", pending.Number))
-			return 1
-		}
+	pendingComments, err := comments.FindUnrespondedComments(issueView)
+	if err != nil {
+		return t.fail("find unresponded comments: %v", err)
 	}
-
-	ids, _ := comments.FindUnrespondedCommentIDs(issueView)
-	if len(ids) > 0 {
+	if len(pendingComments) > 0 {
 		t.step(fmt.Sprintf("Responding to unanswered comments on #%d", pending.Number))
 		invoker := agents.NewInvoker(agents.InvokerConfig{
 			LogRoot: filepath.Join(t.cfg.RunoqRoot, "log"),
@@ -458,11 +476,24 @@ func (t *tickRunner) handlePendingReview(ctx context.Context, pending *issue) in
 			t.warn(fmt.Sprintf("Comment handler failed for #%d: %v", pending.Number, err))
 			_, _ = fmt.Fprintf(t.cfg.Stdout, "Comment handler failed for #%d\n", pending.Number)
 			return 1
-		} else {
-			t.success(fmt.Sprintf("Responded to comments on #%d", pending.Number))
-			_, _ = fmt.Fprintf(t.cfg.Stdout, "Responded to comments on #%d\n", pending.Number)
 		}
+		t.success(fmt.Sprintf("Responded to comments on #%d", pending.Number))
+		_, _ = fmt.Fprintf(t.cfg.Stdout, "Responded to comments on #%d\n", pending.Number)
 		return 0
+	}
+
+	issueType := issueTypeOf(*pending)
+	if issueType == "planning" {
+		var view struct {
+			Body string `json:"body"`
+		}
+		if err := json.Unmarshal([]byte(issueView), &view); err != nil {
+			return t.fail("parse review view: %v", err)
+		}
+		if !strings.Contains(view.Body, "runoq:payload:plan-proposal") {
+			t.info(fmt.Sprintf("planning issue #%d has no proposal yet — needs dispatch", pending.Number))
+			return 1
+		}
 	}
 
 	t.warn(fmt.Sprintf("Awaiting human decision on #%d", pending.Number))
@@ -922,6 +953,16 @@ func issueStatusFromDoneState(stateJSON string) string {
 		return "done"
 	}
 	return state.IssueStatus
+}
+
+func firstNonSelectionCommentID(pending []comments.PendingComment) (string, bool) {
+	for _, comment := range pending {
+		if comments.CommentHasSelection(comment.Body) {
+			continue
+		}
+		return comment.ID, true
+	}
+	return "", false
 }
 
 // --- Issue queries ---

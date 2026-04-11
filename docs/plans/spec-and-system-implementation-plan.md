@@ -21,6 +21,21 @@ Out of scope:
 - prompt-only fixes that duplicate deterministic runtime rules
 - broad architecture changes that do not reduce one of the identified failure modes
 
+## Status Snapshot
+
+- Completed:
+  - Phase 1 comment and review correctness
+  - per-comment planning comment handling
+  - bot-marker-based processed detection for planning comments and PR RESPOND
+  - approved-review precedence for fresh non-selection comments
+  - pending no-payload review precedence for fresh comments
+  - PR conversation discovery for issue comments, review comments, and review summaries
+- In progress:
+  - Phase 2 dispatch and recovery safety
+- Pending:
+  - Phase 3 planning and adjustment apply safety
+  - Phase 4 smoke spec alignment and coverage completion
+
 ## Guiding **Decisions**
 
 Several issues are blocked on target-semantics decisions. The implementation should start by locking these down in code comments, tests, and the smoke spec.
@@ -72,6 +87,8 @@ Implementation notes:
 - where runtime behavior is misleading or unsafe, spec the intended corrected behavior, then land code to match
 
 ### 2. Review and Comment Handling Semantics
+
+Status: completed on 2026-04-11
 
 Purpose:
 
@@ -260,6 +277,10 @@ Deliverables:
 - bot-only processed markers
 - PR conversation discovery covering review comments
 - idempotent retry handling for RESPOND and planning replies
+
+Status:
+
+- completed on 2026-04-11
 
 ### Phase 2. Dispatch and recovery safety
 

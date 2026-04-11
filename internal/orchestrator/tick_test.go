@@ -503,6 +503,8 @@ func TestHandleActiveConversationsFindsAndResponds(t *testing.T) {
 			_, _ = io.WriteString(req.Stdout, `[{"number":87}]`)
 		case strings.Contains(args, "api") && strings.Contains(args, "issues/87/comments") && !strings.Contains(args, "reactions"):
 			_, _ = io.WriteString(req.Stdout, `[{"id":300,"body":"Fix this please","user":{"login":"human1"},"created_at":"2026-01-01T00:00:00Z","reactions":{"+1":0}}]`)
+		case strings.Contains(args, "api") && (strings.Contains(args, "pulls/87/comments") || strings.Contains(args, "pulls/87/reviews")):
+			_, _ = io.WriteString(req.Stdout, `[]`)
 		case strings.Contains(args, "pr comment 87"):
 			prCommentPosted = true
 		case strings.Contains(args, "api") && strings.Contains(args, "reactions"):
@@ -824,6 +826,9 @@ func TestDispatchTaskUsesImplementationDefaultsForIterateDecision(t *testing.T) 
 				case req.Name == "gh" && strings.Contains(args, "api repos/owner/repo/issues/87/comments"):
 					_, _ = io.WriteString(req.Stdout, `[]`)
 					return nil
+				case req.Name == "gh" && (strings.Contains(args, "api repos/owner/repo/pulls/87/comments") || strings.Contains(args, "api repos/owner/repo/pulls/87/reviews")):
+					_, _ = io.WriteString(req.Stdout, `[]`)
+					return nil
 				case req.Name == "gh" && strings.Contains(args, "pr comment 87"):
 					for i, arg := range req.Args {
 						if arg == "--body-file" && i+1 < len(req.Args) {
@@ -882,12 +887,15 @@ func TestDispatchTaskReturnsWaitingForWaitingDevelopState(t *testing.T) {
 				case req.Name == "gh" && strings.Contains(args, "pr view 87") && strings.Contains(args, "comments"):
 					_, _ = io.WriteString(req.Stdout, `{"comments":[{"body":"<!-- runoq:bot:orchestrator:develop -->\n<!-- runoq:state:`+strings.ReplaceAll(waitingState, `"`, `\"`)+` -->\n> develop"}]}`)
 					return nil
-				case req.Name == "gh" && strings.Contains(args, "api repos/owner/repo/issues/87/comments"):
-					_, _ = io.WriteString(req.Stdout, `[]`)
-					return nil
-				default:
-					t.Fatalf("unexpected command: %s %s", req.Name, args)
-					return nil
+					case req.Name == "gh" && strings.Contains(args, "api repos/owner/repo/issues/87/comments"):
+						_, _ = io.WriteString(req.Stdout, `[]`)
+						return nil
+					case req.Name == "gh" && (strings.Contains(args, "api repos/owner/repo/pulls/87/comments") || strings.Contains(args, "api repos/owner/repo/pulls/87/reviews")):
+						_, _ = io.WriteString(req.Stdout, `[]`)
+						return nil
+					default:
+						t.Fatalf("unexpected command: %s %s", req.Name, args)
+						return nil
 				}
 			},
 		},
@@ -926,12 +934,15 @@ func TestDispatchTaskIncludesWaitingReasonInOutput(t *testing.T) {
 				case req.Name == "gh" && strings.Contains(args, "pr view 87") && strings.Contains(args, "comments"):
 					_, _ = io.WriteString(req.Stdout, `{"comments":[{"body":"<!-- runoq:bot:orchestrator:develop -->\n<!-- runoq:state:`+strings.ReplaceAll(waitingState, `"`, `\"`)+` -->\n> develop"}]}`)
 					return nil
-				case req.Name == "gh" && strings.Contains(args, "api repos/owner/repo/issues/87/comments"):
-					_, _ = io.WriteString(req.Stdout, `[]`)
-					return nil
-				default:
-					t.Fatalf("unexpected command: %s %s", req.Name, args)
-					return nil
+					case req.Name == "gh" && strings.Contains(args, "api repos/owner/repo/issues/87/comments"):
+						_, _ = io.WriteString(req.Stdout, `[]`)
+						return nil
+					case req.Name == "gh" && (strings.Contains(args, "api repos/owner/repo/pulls/87/comments") || strings.Contains(args, "api repos/owner/repo/pulls/87/reviews")):
+						_, _ = io.WriteString(req.Stdout, `[]`)
+						return nil
+					default:
+						t.Fatalf("unexpected command: %s %s", req.Name, args)
+						return nil
 				}
 			},
 		},
@@ -1298,7 +1309,7 @@ func TestHandlePendingReviewFailsWhenCommentHandlingFails(t *testing.T) {
 func TestHandlePendingReviewRedispatchesWhenProposalMarkerExistsOnlyInComments(t *testing.T) {
 	t.Parallel()
 
-	issueView := `{"number":88,"title":"Review","body":"## Acceptance Criteria\n\n- [ ] Review milestones.","state":"OPEN","labels":[{"name":"runoq:planning"}],"comments":[{"id":"IC1","author":{"login":"human"},"body":"I pasted <!-- runoq:payload:plan-proposal --> here for reference","reactionGroups":[{"content":"THUMBS_UP","users":{"totalCount":1}}]}]}`
+	issueView := `{"number":88,"title":"Review","body":"## Acceptance Criteria\n\n- [ ] Review milestones.","state":"OPEN","labels":[{"name":"runoq:planning"}],"comments":[{"id":"IC1","author":{"login":"human"},"body":"I pasted <!-- runoq:payload:plan-proposal --> here for reference","reactionGroups":[]},{"id":"IC2","author":{"login":"runoq"},"body":"<!-- runoq:bot:plan-comment-responder comment-id:IC1 -->\nHandled.","reactionGroups":[]}]}`
 
 	runner := &tickRunner{
 		cfg: TickConfig{
@@ -1326,6 +1337,120 @@ func TestHandlePendingReviewRedispatchesWhenProposalMarkerExistsOnlyInComments(t
 	})
 	if result != 1 {
 		t.Fatalf("handlePendingReview = %d, want 1", result)
+	}
+}
+
+func TestHandlePendingReviewHandlesFreshCommentsBeforeRedispatch(t *testing.T) {
+	t.Parallel()
+
+	issueView := `{"number":88,"title":"Review","body":"## Acceptance Criteria\n\n- [ ] Review milestones.","state":"OPEN","labels":[{"name":"runoq:planning"}],"comments":[{"id":"IC1","author":{"login":"human"},"body":"Please answer this first","reactionGroups":[]}]}`
+	claudeBin := writeExecutable(t, "#!/bin/sh\nprintf '%s\n' '{\"action\":\"question\",\"reply\":\"Answer posted.\"}'\n")
+
+	var calls []string
+	runner := &tickRunner{
+		cfg: TickConfig{
+			Repo:   "owner/repo",
+			Env:    []string{"RUNOQ_CLAUDE_BIN=" + claudeBin},
+			RunoqRoot: t.TempDir(),
+			Stdout: io.Discard,
+			Stderr: io.Discard,
+		},
+	}
+	runner.cfg.ExecCommand = func(_ context.Context, req shell.CommandRequest) error {
+		cmd := req.Name + " " + strings.Join(req.Args, " ")
+		calls = append(calls, cmd)
+		switch {
+		case strings.Contains(cmd, "issue view 88") && strings.Contains(cmd, "--json number,title,body,comments,labels,state"):
+			_, _ = io.WriteString(req.Stdout, issueView)
+			return nil
+		case strings.Contains(cmd, "issue view 88") && strings.Contains(cmd, "--json number,title,body,comments"):
+			_, _ = io.WriteString(req.Stdout, issueView)
+			return nil
+		case strings.Contains(cmd, "api graphql") && strings.Contains(cmd, "addReaction"):
+			return nil
+		case strings.Contains(cmd, "issue comment 88"):
+			return nil
+		default:
+			t.Fatalf("unexpected command: %s", cmd)
+			return nil
+		}
+	}
+
+	result := runner.handlePendingReview(t.Context(), &issue{
+		Number: 88,
+		Title:  "Review",
+		State:  "OPEN",
+		Body:   "## Acceptance Criteria\n\n- [ ] Review milestones.",
+		Labels: []label{{Name: "runoq:planning"}},
+	})
+	if result != 0 {
+		t.Fatalf("handlePendingReview = %d, want 0", result)
+	}
+	if !containsStringSlice(calls, "issue comment 88") {
+		t.Fatalf("expected comment response before redispatch, got %v", calls)
+	}
+}
+
+func TestRunTickApprovedReviewRespondsToFreshNonSelectionCommentBeforeApply(t *testing.T) {
+	t.Parallel()
+
+	reviewView := "{\"number\":88,\"title\":\"Review\",\"body\":\"<!-- runoq:payload:plan-proposal -->\\n```json\\n{\\\"items\\\":[{\\\"title\\\":\\\"Milestone A\\\",\\\"type\\\":\\\"implementation\\\"}]}\\n```\",\"state\":\"OPEN\",\"labels\":[{\"name\":\"runoq:planning\"},{\"name\":\"runoq:plan-approved\"}],\"comments\":[{\"id\":\"IC1\",\"author\":{\"login\":\"human\"},\"body\":\"Can you explain this first?\",\"reactionGroups\":[]},{\"id\":\"IC2\",\"author\":{\"login\":\"human\"},\"body\":\"approve item 1\",\"reactionGroups\":[]}]}"
+	issuesJSON := `[{"number":9,"title":"Project Planning","state":"OPEN","body":"","labels":[],"url":"u"},{"number":88,"title":"Review","state":"OPEN","body":"","labels":[{"name":"runoq:planning"},{"name":"runoq:plan-approved"}],"url":"u"}]`
+	depsJSON := `{"data":{"repository":{"issues":{"nodes":[{"number":9,"blockedBy":{"nodes":[]},"issueType":{"name":"Epic"}},{"number":88,"blockedBy":{"nodes":[]},"issueType":{"name":"Task"}}]}}}}`
+	root := t.TempDir()
+	configPath := filepath.Join(root, "runoq.json")
+	if err := os.WriteFile(configPath, []byte(`{"labels":{"ready":"runoq:ready","inProgress":"runoq:in-progress","done":"runoq:done","needsReview":"runoq:needs-human-review","blocked":"runoq:blocked","planApproved":"runoq:plan-approved"}}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	claudeBin := writeExecutable(t, "#!/bin/sh\nprintf '%s\n' '{\"action\":\"question\",\"reply\":\"Answer posted.\"}'\n")
+
+	var calls []string
+	var stdout, stderr bytes.Buffer
+	result := RunTick(t.Context(), TickConfig{
+		Repo:              "owner/repo",
+		PlanFile:          "docs/plan.md",
+		RunoqRoot:         root,
+		PlanApprovedLabel: "runoq:plan-approved",
+		Env:               []string{"RUNOQ_CONFIG=" + configPath, "RUNOQ_CLAUDE_BIN=" + claudeBin},
+		Stdout:            &stdout,
+		Stderr:            &stderr,
+		ExecCommand: func(_ context.Context, req shell.CommandRequest) error {
+			cmd := req.Name + " " + strings.Join(req.Args, " ")
+			calls = append(calls, cmd)
+			switch {
+			case strings.Contains(cmd, "issue list") && strings.Contains(cmd, "--state all"):
+				_, _ = io.WriteString(req.Stdout, issuesJSON)
+				return nil
+			case strings.Contains(cmd, "api graphql") && strings.Contains(cmd, "repository(owner:"):
+				_, _ = io.WriteString(req.Stdout, depsJSON)
+				return nil
+			case strings.Contains(cmd, "issue view 88") && strings.Contains(cmd, "--json number,title,body,comments,labels,state"):
+				_, _ = io.WriteString(req.Stdout, reviewView)
+				return nil
+			case strings.Contains(cmd, "issue view 88") && strings.Contains(cmd, "--json number,title,body,comments"):
+				_, _ = io.WriteString(req.Stdout, reviewView)
+				return nil
+			case strings.Contains(cmd, "api graphql") && strings.Contains(cmd, "addReaction"):
+				return nil
+			case strings.Contains(cmd, "issue comment 88"):
+				return nil
+			case strings.Contains(cmd, "issue create"):
+				t.Fatalf("unexpected apply before responding to comment: %s", cmd)
+				return nil
+			default:
+				return nil
+			}
+		},
+	})
+
+	if result != 0 {
+		t.Fatalf("RunTick = %d, want 0; stderr=%q", result, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Responded to comments on #88") {
+		t.Fatalf("expected comment response output, got %q", stdout.String())
+	}
+	if !containsStringSlice(calls, "issue comment 88") {
+		t.Fatalf("expected approved review comment handling, got %v", calls)
 	}
 }
 
@@ -1590,4 +1715,22 @@ func TestExtractJSONFromCodeFenceNoFence(t *testing.T) {
 	if got != body {
 		t.Errorf("expected body unchanged, got %q", got)
 	}
+}
+
+func containsStringSlice(values []string, needle string) bool {
+	for _, value := range values {
+		if strings.Contains(value, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func writeExecutable(t *testing.T, contents string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "fixture.sh")
+	if err := os.WriteFile(path, []byte(contents), 0o755); err != nil {
+		t.Fatalf("write executable: %v", err)
+	}
+	return path
 }

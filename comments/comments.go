@@ -38,7 +38,14 @@ var (
 	rejectPattern    = regexp.MustCompile(`(?i)(?:drop|reject|removed?)\s*[^0-9]*([0-9][0-9 ,and]*)`)
 	rejectAltPattern = regexp.MustCompile(`(?i)items?\s*([0-9][0-9 ,and]*)\s+(?:removed|dropped|rejected)`)
 	numberPattern    = regexp.MustCompile(`[0-9]+`)
+	replyMarker      = regexp.MustCompile(`<!--\s*runoq:bot:plan-comment-responder(?:\s+comment-id:([^\s]+))?\s*-->`)
 )
+
+// PendingComment is a human planning comment that still needs handling.
+type PendingComment struct {
+	ID   string
+	Body string
+}
 
 // ParseHumanCommentSelection extracts approved/rejected item numbers from
 // issue view JSON comments. Skips bot comments and event-tagged comments.
@@ -63,16 +70,7 @@ func ParseHumanCommentSelection(issueViewJSON string) (ItemSelection, error) {
 		if strings.Contains(c.Body, "runoq:bot") {
 			continue
 		}
-		body := c.Body
-		if m := approvePattern.FindStringSubmatch(body); m != nil {
-			sel.Approved = append(sel.Approved, extractNumbers(m[1])...)
-		}
-		if m := rejectPattern.FindStringSubmatch(body); m != nil {
-			sel.Rejected = append(sel.Rejected, extractNumbers(m[1])...)
-		}
-		if m := rejectAltPattern.FindStringSubmatch(body); m != nil {
-			sel.Rejected = append(sel.Rejected, extractNumbers(m[1])...)
-		}
+		sel = mergeSelections(sel, parseSelectionFromBody(c.Body))
 	}
 	return sel, nil
 }
@@ -81,6 +79,20 @@ func ParseHumanCommentSelection(issueViewJSON string) (ItemSelection, error) {
 // not been marked as responded to (no THUMBS_UP reaction). Skips bot comments
 // and event-tagged comments.
 func FindUnrespondedCommentIDs(issueViewJSON string) ([]string, error) {
+	comments, err := FindUnrespondedComments(issueViewJSON)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(comments))
+	for _, comment := range comments {
+		ids = append(ids, comment.ID)
+	}
+	return ids, nil
+}
+
+// FindUnrespondedComments returns human planning comments that do not have a
+// bot-authored processed marker yet.
+func FindUnrespondedComments(issueViewJSON string) ([]PendingComment, error) {
 	var view struct {
 		Comments []struct {
 			Author struct {
@@ -91,7 +103,9 @@ func FindUnrespondedCommentIDs(issueViewJSON string) ([]string, error) {
 			ReactionGroups []struct {
 				Content string `json:"content"`
 				Users   struct {
-					TotalCount int `json:"totalCount"`
+					Nodes []struct {
+						Login string `json:"login"`
+					} `json:"nodes"`
 				} `json:"users"`
 			} `json:"reactionGroups"`
 		} `json:"comments"`
@@ -100,27 +114,42 @@ func FindUnrespondedCommentIDs(issueViewJSON string) ([]string, error) {
 		return nil, fmt.Errorf("parse issue view: %w", err)
 	}
 
-	var ids []string
+	respondedByMarker := make(map[string]struct{}, len(view.Comments))
 	for _, c := range view.Comments {
-		if c.Author.Login == "runoq" {
+		if !isRunoqBotLogin(c.Author.Login) {
+			continue
+		}
+		match := replyMarker.FindStringSubmatch(c.Body)
+		if len(match) < 2 || strings.TrimSpace(match[1]) == "" {
+			continue
+		}
+		respondedByMarker[strings.TrimSpace(match[1])] = struct{}{}
+	}
+
+	var pending []PendingComment
+	for _, c := range view.Comments {
+		if isRunoqBotLogin(c.Author.Login) {
 			continue
 		}
 		if strings.Contains(c.Body, "runoq:bot") {
 			continue
 		}
-		hasThumbsUp := false
-		for _, rg := range c.ReactionGroups {
-			if rg.Content == "THUMBS_UP" && rg.Users.TotalCount > 0 {
-				hasThumbsUp = true
-				break
-			}
-		}
-		if hasThumbsUp {
+		if _, ok := respondedByMarker[c.ID]; ok {
 			continue
 		}
-		ids = append(ids, c.ID)
+		if hasBotThumbsUp(c.ReactionGroups) {
+			continue
+		}
+		pending = append(pending, PendingComment{ID: c.ID, Body: c.Body})
 	}
-	return ids, nil
+	return pending, nil
+}
+
+// CommentHasSelection reports whether a comment body contains approve/reject
+// selection directives that should influence apply selection.
+func CommentHasSelection(body string) bool {
+	sel := parseSelectionFromBody(body)
+	return len(sel.Approved) > 0 || len(sel.Rejected) > 0
 }
 
 // ParseAgentResponse parses and validates the structured JSON output from a
@@ -181,4 +210,50 @@ func extractNumbers(s string) []int {
 		}
 	}
 	return nums
+}
+
+func parseSelectionFromBody(body string) ItemSelection {
+	var sel ItemSelection
+	if m := approvePattern.FindStringSubmatch(body); m != nil {
+		sel.Approved = append(sel.Approved, extractNumbers(m[1])...)
+	}
+	if m := rejectPattern.FindStringSubmatch(body); m != nil {
+		sel.Rejected = append(sel.Rejected, extractNumbers(m[1])...)
+	}
+	if m := rejectAltPattern.FindStringSubmatch(body); m != nil {
+		sel.Rejected = append(sel.Rejected, extractNumbers(m[1])...)
+	}
+	return sel
+}
+
+func mergeSelections(left, right ItemSelection) ItemSelection {
+	left.Approved = append(left.Approved, right.Approved...)
+	left.Rejected = append(left.Rejected, right.Rejected...)
+	return left
+}
+
+func isRunoqBotLogin(login string) bool {
+	login = strings.TrimSpace(login)
+	return login == "runoq" || login == "runoq[bot]"
+}
+
+func hasBotThumbsUp(groups []struct {
+	Content string `json:"content"`
+	Users   struct {
+		Nodes []struct {
+			Login string `json:"login"`
+		} `json:"nodes"`
+	} `json:"users"`
+}) bool {
+	for _, group := range groups {
+		if group.Content != "THUMBS_UP" {
+			continue
+		}
+		for _, user := range group.Users.Nodes {
+			if isRunoqBotLogin(user.Login) {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -22,6 +22,7 @@ type GHClient interface {
 type HandleCommentsConfig struct {
 	Repo              string
 	IssueNumber       int
+	CommentID         string
 	PlanFile          string
 	RunoqRoot         string
 	PlanApprovedLabel string
@@ -35,10 +36,9 @@ type AgentInvoker interface {
 	Invoke(ctx context.Context, opts agents.InvokeOptions) (agents.Response, error)
 }
 
-// HandleComments processes unresponded human comments on a planning issue.
-// For each batch of unresponded comments: adds eyes reaction, calls the
-// comment-responder agent, posts the reply, dispatches side effects
-// (change-request → update body, approve → add label), and adds thumbs_up.
+// HandleComments processes one unresponded human comment on a planning issue in
+// deterministic order. It handles the selected comment, posts a bot-tagged
+// reply marker for that specific comment, and then adds a thumbs_up reaction.
 func HandleComments(ctx context.Context, cfg HandleCommentsConfig) error {
 	// Fetch issue with comments
 	issueView, err := cfg.GH.IssueView(ctx, cfg.Repo, cfg.IssueNumber, "number,title,body,comments")
@@ -46,26 +46,18 @@ func HandleComments(ctx context.Context, cfg HandleCommentsConfig) error {
 		return fmt.Errorf("fetch issue: %w", err)
 	}
 
-	// Find unresponded comment IDs
-	ids, err := FindUnrespondedCommentIDs(issueView)
+	// Find the next unresponded comment.
+	pendingComments, err := FindUnrespondedComments(issueView)
 	if err != nil {
 		return fmt.Errorf("find unresponded: %w", err)
 	}
-	if len(ids) == 0 {
+	comment, ok := selectPendingComment(pendingComments, cfg.CommentID)
+	if !ok {
 		return nil
 	}
 
-	// Gather comment bodies
-	commentBody, err := extractCommentBodies(issueView, ids)
-	if err != nil {
-		return fmt.Errorf("extract comment bodies: %w", err)
-	}
-
-	// Mark as picked up (eyes)
-	for _, id := range ids {
-		if err := cfg.GH.AddReaction(ctx, id, "EYES"); err != nil {
-			return fmt.Errorf("add eyes reaction to %s: %w", id, err)
-		}
+	if err := cfg.GH.AddReaction(ctx, comment.ID, "EYES"); err != nil {
+		return fmt.Errorf("add eyes reaction to %s: %w", comment.ID, err)
 	}
 
 	// Build agent payload
@@ -83,7 +75,7 @@ func HandleComments(ctx context.Context, cfg HandleCommentsConfig) error {
 		"planPath":    cfg.PlanFile,
 		"issueTitle":  issueData.Title,
 		"issueBody":   issueData.Body,
-		"commentBody": commentBody,
+		"commentBody": comment.Body,
 	})
 
 	// Call agent
@@ -109,15 +101,6 @@ func HandleComments(ctx context.Context, cfg HandleCommentsConfig) error {
 		return fmt.Errorf("parse agent response: %w", err)
 	}
 
-	// Post reply comment
-	replyBody := agentResp.Reply
-	if !strings.Contains(replyBody, "runoq:bot") {
-		replyBody = "<!-- runoq:bot:plan-comment-responder -->\n\n" + replyBody
-	}
-	if err := cfg.GH.IssueComment(ctx, cfg.Repo, cfg.IssueNumber, replyBody); err != nil {
-		return fmt.Errorf("post reply: %w", err)
-	}
-
 	// Dispatch side effects
 	switch agentResp.Action {
 	case ActionApprove:
@@ -140,11 +123,17 @@ func HandleComments(ctx context.Context, cfg HandleCommentsConfig) error {
 		}
 	}
 
-	// Mark as responded (thumbs_up)
-	for _, id := range ids {
-		if err := cfg.GH.AddReaction(ctx, id, "THUMBS_UP"); err != nil {
-			return fmt.Errorf("add thumbs_up reaction to %s: %w", id, err)
-		}
+	replyBody := agentResp.Reply
+	replyMarker := fmt.Sprintf("<!-- runoq:bot:plan-comment-responder comment-id:%s -->", comment.ID)
+	if !strings.Contains(replyBody, replyMarker) {
+		replyBody = replyMarker + "\n\n" + strings.TrimSpace(strings.TrimPrefix(replyBody, "<!-- runoq:bot:plan-comment-responder -->"))
+	}
+	if err := cfg.GH.IssueComment(ctx, cfg.Repo, cfg.IssueNumber, replyBody); err != nil {
+		return fmt.Errorf("post reply: %w", err)
+	}
+
+	if err := cfg.GH.AddReaction(ctx, comment.ID, "THUMBS_UP"); err != nil {
+		return fmt.Errorf("add thumbs_up reaction to %s: %w", comment.ID, err)
 	}
 
 	return nil
@@ -197,27 +186,17 @@ func replaceProposalInBody(existingBody, newProposal string) string {
 	return existingBody + "\n\n" + proposalStartMarker + "\n" + newProposal
 }
 
-func extractCommentBodies(issueViewJSON string, ids []string) (string, error) {
-	var view struct {
-		Comments []struct {
-			ID   string `json:"id"`
-			Body string `json:"body"`
-		} `json:"comments"`
+func selectPendingComment(comments []PendingComment, targetID string) (PendingComment, bool) {
+	if targetID == "" {
+		if len(comments) == 0 {
+			return PendingComment{}, false
+		}
+		return comments[0], true
 	}
-	if err := json.Unmarshal([]byte(issueViewJSON), &view); err != nil {
-		return "", err
-	}
-
-	idSet := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		idSet[id] = true
-	}
-
-	var bodies []string
-	for _, c := range view.Comments {
-		if idSet[c.ID] {
-			bodies = append(bodies, c.Body)
+	for _, comment := range comments {
+		if comment.ID == targetID {
+			return comment, true
 		}
 	}
-	return strings.Join(bodies, "\n\n---\n\n"), nil
+	return PendingComment{}, false
 }

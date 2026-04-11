@@ -15,6 +15,7 @@ type fakeGH struct {
 	reactionErr error
 	labelAddErr error
 	editedBody  string
+	commentBody string
 }
 
 func (f *fakeGH) IssueView(_ context.Context, repo string, number int, fields string) (string, error) {
@@ -24,6 +25,7 @@ func (f *fakeGH) IssueView(_ context.Context, repo string, number int, fields st
 
 func (f *fakeGH) IssueComment(_ context.Context, repo string, number int, body string) error {
 	f.calls = append(f.calls, "issue-comment")
+	f.commentBody = body
 	return nil
 }
 
@@ -211,7 +213,8 @@ func TestHandleCommentsNoUnrespondedSkips(t *testing.T) {
 
 	gh := &fakeGH{
 		issueView: `{"number":2,"title":"Review","body":"body","comments":[
-			{"author":{"login":"human"},"body":"Done","id":"IC1","reactionGroups":[{"content":"THUMBS_UP","users":{"totalCount":1}}]}
+			{"author":{"login":"human"},"body":"Done","id":"IC1","reactionGroups":[]},
+			{"author":{"login":"runoq"},"body":"<!-- runoq:bot:plan-comment-responder comment-id:IC1 -->\nHandled.","id":"IC2","reactionGroups":[]}
 		]}`,
 	}
 
@@ -255,6 +258,50 @@ func TestHandleCommentsReturnsReactionError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected reaction error")
+	}
+}
+
+func TestHandleCommentsProcessesOneCommentAtATime(t *testing.T) {
+	t.Parallel()
+
+	gh := &fakeGH{
+		issueView: `{"number":2,"title":"Review","body":"proposal body","comments":[
+			{"author":{"login":"human"},"body":"First question","id":"IC1","reactionGroups":[]},
+			{"author":{"login":"human"},"body":"Second question","id":"IC2","reactionGroups":[]}
+		]}`,
+	}
+	invoker := &fakeInvoker{
+		responseText: `{"action":"question","reply":"Answer for the first comment."}`,
+	}
+
+	err := HandleComments(t.Context(), HandleCommentsConfig{
+		Repo:        "owner/repo",
+		IssueNumber: 2,
+		PlanFile:    "docs/plan.md",
+		RunoqRoot:   t.TempDir(),
+		GH:          gh,
+		Invoker:     invoker,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if strings.Contains(invoker.lastOpts.Payload, "Second question") {
+		t.Fatalf("expected only the first comment in payload, got %q", invoker.lastOpts.Payload)
+	}
+	if !strings.Contains(invoker.lastOpts.Payload, "First question") {
+		t.Fatalf("expected first comment in payload, got %q", invoker.lastOpts.Payload)
+	}
+	if strings.Contains(gh.commentBody, "comment-id:IC2") {
+		t.Fatalf("expected reply marker for first comment only, got %q", gh.commentBody)
+	}
+	if !strings.Contains(gh.commentBody, "comment-id:IC1") {
+		t.Fatalf("expected reply marker for first comment, got %q", gh.commentBody)
+	}
+	for _, call := range gh.calls {
+		if call == "reaction:EYES:IC2" || call == "reaction:THUMBS_UP:IC2" {
+			t.Fatalf("expected second comment to remain untouched, got calls %v", gh.calls)
+		}
 	}
 }
 
