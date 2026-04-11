@@ -32,6 +32,14 @@ No epics exist yet, so the tick bootstraps the planning lane.
 - [ ] The planning issue is assigned after the proposal is posted
 - [ ] Terminal output reports `Created planning milestone. Proposal posted on #<n>`
 
+### Scenario: Bootstrap or planning-dispatch assignment fails after proposal posting
+
+The runtime has already created or updated the review issue body, but the later assignment step fails.
+
+- [ ] The tick exits with an error instead of reporting proposal-post success
+- [ ] The created or updated planning issue remains visible on GitHub
+- [ ] No terminal output claims `Proposal posted on #<n>` after the assignment failure
+
 ### Scenario: Pending planning review with unanswered comments
 
 A planning or adjustment review issue is open, unapproved, and has unanswered human comments.
@@ -41,6 +49,7 @@ A planning or adjustment review issue is open, unapproved, and has unanswered hu
 - [ ] A responder `question` reply posts a bot-marked answer without mutating proposal state or approval labels
 - [ ] A responder `change-request` reply rewrites the proposal payload/body on the review issue
 - [ ] A responder `approve` reply adds the configured plan-approved label to the review issue
+- [ ] Each outstanding human comment is handled independently in deterministic order rather than being collapsed into one aggregate action
 - [ ] Successfully handled human comments receive a final reaction marking them responded
 - [ ] The tick exits after responding instead of continuing to implementation dispatch
 - [ ] Terminal output reports `Responded to comments on #<n>`
@@ -63,11 +72,19 @@ A planning or adjustment review issue is open, unapproved, and has no unanswered
 
 ### Scenario: Pending planning review without a proposal is redispatched
 
-A planning review issue is pending, but the proposal payload has not been posted to the issue body yet.
+A planning review issue is pending, has no unanswered human comments, and the proposal payload has not been posted to the issue body yet.
 
 - [ ] The tick treats the review as not yet actionable
 - [ ] The tick continues to the normal planning dispatch path for that planning issue
 - [ ] Terminal output ultimately reflects proposal posting rather than human-decision waiting
+
+### Scenario: Pending planning review without a proposal still handles fresh comments first
+
+A planning review is missing its proposal payload but has fresh human comments.
+
+- [ ] The tick responds to fresh human comments before redispatching decomposition
+- [ ] The tick does not regenerate or repost the proposal in the same tick that handled those comments
+- [ ] A later tick may redispatch planning only if the review still lacks a proposal payload
 
 ### Scenario: Planning dispatch reaches max review rounds
 
@@ -84,7 +101,8 @@ An approved planning review applies milestone epics.
 
 - [ ] The tick creates the selected milestone epics
 - [ ] If human selection comments approve only a subset, only the selected milestone items are materialized
-- [ ] The tick seeds a planning issue for the first open milestone epic when one does not already exist
+- [ ] The tick seeds a planning issue only for the first newly created milestone epic
+- [ ] If the filtered approval selection resolves to zero milestone items, the tick fails closed and leaves the review open
 - [ ] The approved review issue is closed/moved to done
 - [ ] The parent `Project Planning` issue is closed/moved to done
 
@@ -94,6 +112,7 @@ An approved planning review applies task issues under a milestone epic.
 
 - [ ] The tick creates task issues under the reviewed epic
 - [ ] If human selection comments approve only a subset, only the selected task items are materialized
+- [ ] If the filtered approval selection resolves to zero task items, the tick fails closed and leaves the review open
 - [ ] Dependency metadata from the proposal is materialized onto the created tasks
 - [ ] The approved review issue is closed/moved to done
 - [ ] The parent milestone epic remains open
@@ -106,16 +125,17 @@ Task creation or dependency linking fails while applying an approved milestone-s
 - [ ] The review issue remains open/unapproved
 - [ ] No partial-success terminal output claims the review was applied
 - [ ] Forward references in dependency keys are linked correctly when all task creation succeeds
+- [ ] If some tasks were already created before the failure, the next tick resumes from durable apply-state instead of duplicating already-created tasks or dependency links
 
 ### Scenario: Approved adjustment review
 
 An approved adjustment review applies milestone adjustments and advances planning.
 
 - [ ] If human selection comments approve only a subset, only the selected adjustments are applied
-- [ ] The approved adjustment review issue is closed/moved to done
-- [ ] The parent milestone epic is closed/moved to done
 - [ ] The tick refreshes issue state after applying adjustments
 - [ ] The tick seeds a planning issue for the next open epic when one does not already exist
+- [ ] The approved adjustment review issue is closed/moved to done only after refresh and planning advancement succeed
+- [ ] The parent milestone epic is closed/moved to done only after refresh and planning advancement succeed
 - [ ] Terminal output reports `Applied adjustments from #<n>`
 
 ### Scenario: Approved adjustment review rejects unsupported adjustment types
@@ -125,6 +145,7 @@ An approved adjustment review contains an unsupported adjustment type.
 - [ ] The tick exits with an error instead of silently ignoring the adjustment
 - [ ] The review issue remains open/unapproved
 - [ ] The parent milestone epic remains open
+- [ ] No earlier valid adjustment in the same selected batch is allowed to mutate state before the failure is surfaced
 
 ### Scenario: Approved adjustment review rejects malformed supported adjustments
 
@@ -135,6 +156,14 @@ An approved adjustment review contains a supported adjustment type but omits req
 - [ ] The parent milestone epic remains open
 - [ ] No terminal output claims the adjustments were applied
 
+### Scenario: Approved review with fresh human comments
+
+An approval label is already present, but fresh non-selection human comments were posted afterwards.
+
+- [ ] The tick responds to fresh human comments before closing or materializing the approved review
+- [ ] Pure item-selection comments may still influence which proposal items or adjustments are applied
+- [ ] The review is not closed in the same tick that still had unanswered non-selection comments
+
 ### Scenario: Milestone completion produces adjustment review
 
 All tasks under an epic are complete, so the tick asks for milestone review.
@@ -143,6 +172,14 @@ All tasks under an epic are complete, so the tick asks for milestone review.
 - [ ] The tick creates an adjustment review issue under the milestone epic
 - [ ] The adjustment review issue is assigned
 - [ ] Terminal output reports `Milestone #<n> review complete. Adjustments proposed on #<m>`
+
+### Scenario: Milestone review creation fails after the adjustment review issue is created
+
+The milestone reviewer succeeds far enough to create the adjustment review issue, but the later assignment step fails.
+
+- [ ] The tick exits with an error instead of reporting milestone-review success
+- [ ] The new adjustment review issue remains visible on GitHub
+- [ ] No terminal output claims the review was fully proposed or assigned
 
 ---
 
@@ -451,6 +488,13 @@ Fixture simulates worktree creation or branch push failure during INIT.
 - [ ] No PR created
 - [ ] No worktree left behind
 
+### Scenario: INIT draft-PR creation fails after the branch was already pushed
+
+- [ ] The issue is returned to `runoq:ready`
+- [ ] No draft PR remains open
+- [ ] No orphan worktree is left behind
+- [ ] The tick does not report INIT success
+
 ### Scenario: INIT state persistence fails after PR creation
 
 `INIT` gets as far as creating the draft PR, but posting the durable init audit comment fails.
@@ -516,6 +560,13 @@ Fixture reviewer returns `PASS` but finalize routes to needs-review due to confi
 - [ ] The issue does not silently appear complete in terminal output
 - [ ] The failure is surfaced as an issue-status/finalize error
 
+**Needs-review handoff fails after PR-ready succeeds** — the PR is made ready for review, but reviewer assignment or issue-status mutation fails afterwards:
+
+- [ ] The tick exits with an error instead of returning `DONE`
+- [ ] The PR remains visible in its partially handed-off state
+- [ ] The issue does not silently transition to a terminal done state
+- [ ] A later recovery tick resumes or fails closed from the persisted finalize state rather than pretending the handoff completed
+
 **PR body final status update fails** — final audit comment may exist, but the PR body cannot be updated:
 
 - [ ] The tick exits with an error instead of returning `DONE`
@@ -536,6 +587,14 @@ Verification fails on the first `VERIFY` tick. A later round succeeds after `DEC
 - [ ] `DECIDE` records an `iterate` decision instead of finalizing
 - [ ] The next `DEVELOP` tick carries the prior checklist into the codex prompt
 - [ ] A later round succeeds through the normal `DEVELOP -> VERIFY -> REVIEW -> DECIDE` cadence
+
+### Scenario: Final-round verification failure goes directly to needs-review finalization
+
+Deterministic verification fails on the last allowed developer round.
+
+- [ ] The runtime does not schedule an additional `REVIEW` tick
+- [ ] The next decision is `finalize-needs-review`
+- [ ] The following finalize tick performs a human handoff instead of re-entering development
 
 ### Scenario: Invalid payload schema recovery
 
@@ -581,6 +640,14 @@ Process crashes after tick 2 (`DEVELOP` complete, state persisted in a PR commen
 - [ ] No duplicate PR created
 - [ ] Later ticks continue through `REVIEW`, `DECIDE`, and `FINALIZE`
 
+### Scenario: Corrupt persisted implementation state fails closed
+
+The latest durable PR audit-state block contains an unknown phase or an invalid `RESPOND` resume target.
+
+- [ ] The tick exits with an error instead of guessing a recovery path
+- [ ] No new phase work starts in the same tick
+- [ ] Terminal/log output identifies the unsupported persisted state
+
 ### Scenario: RESPOND preempts progress
 
 An unprocessed PR comment exists before a normal implementation phase starts.
@@ -589,14 +656,16 @@ An unprocessed PR comment exists before a normal implementation phase starts.
 - [ ] The comment is acknowledged and marked processed
 - [ ] The implementation phase does not advance in the same tick
 - [ ] The following tick resumes the interrupted target phase
+- [ ] A PR-backed recovered `INIT` state is also preemptible before any `DEVELOP` work begins
 
 ### Scenario: Tick-level conversation sweep
 
-The tick scans active in-progress conversations before normal queue selection.
+The tick scans active in-progress conversations before normal queue selection and before non-implementation planning advancement.
 
 - [ ] An in-progress task with an unprocessed PR comment is handled before any new ready task is selected
+- [ ] The same sweep can also preempt milestone-review creation or planning progression that would otherwise have happened later in the tick
 - [ ] Terminal output reports `Responded to comments on PR #<n>`
-- [ ] Normal implementation dispatch is deferred until a later tick
+- [ ] Normal implementation dispatch or planning progression is deferred until a later tick
 
 ### Scenario: Tick-level conversation sweep lookup failure
 
@@ -630,12 +699,13 @@ Process crashes after the DECIDE tick has posted an `iterate` audit comment, but
 
 An unprocessed non-audit PR comment exists while the issue is in-progress.
 
-- [ ] Bot detects unprocessed comment (no +1 reaction, not a bot comment)
+- [ ] Bot detects unprocessed issue-thread comments, review-summary comments, and inline review comments
+- [ ] Only a bot-authored processed marker counts as handled; pre-existing human `+1` or thumbs-up reactions do not suppress processing
 - [ ] Bot posts reply with agent attribution
 - [ ] The acknowledgement reply carries a `runoq:bot` marker so it is excluded from future RESPOND scans
 - [ ] Bot adds +1 reaction to original comment (marks as processed)
 - [ ] Bot-generated comments (with `runoq:bot` marker) are excluded from processing
-- [ ] `RESPOND` may preempt any PR-backed implementation tick (`DEVELOP`, `VERIFY`, `REVIEW`, `DECIDE`, `FINALIZE`) and the interrupted phase does not advance in that tick
+- [ ] `RESPOND` may preempt any PR-backed implementation tick (`INIT`, `DEVELOP`, `VERIFY`, `REVIEW`, `DECIDE`, `FINALIZE`) and the interrupted phase does not advance in that tick
 
 ### Scenario: Transient error path
 
@@ -646,6 +716,7 @@ Fixture codex returns a `turn.failed` event with capacity error.
 - [ ] Issue stays `runoq:in-progress` (not needs-review)
 - [ ] A PR already exists for the issue
 - [ ] The PR remains open
+- [ ] PR has a durable `develop-transient` diagnostic comment
 - [ ] Tick exits in a waiting/retryable state rather than escalating
 - [ ] Retry/backoff state is persisted for the next tick
 - [ ] Terminal output clearly reports a transient/retryable failure reason
@@ -694,6 +765,13 @@ Fixture reviewer returns malformed review output on the initial `REVIEW` invocat
 - [ ] Review state is forced to `FAIL` with score `0`
 - [ ] The next tick goes through `DECIDE` and routes to needs-review finalization unless another iteration path is available
 
+**No reviewer thread ID is available**
+
+- [ ] No same-thread repair attempt is issued
+- [ ] The posted review comment records the contract errors
+- [ ] Review state is forced to `FAIL` with score `0`
+- [ ] The runtime fails closed without inventing a resumable reviewer path
+
 ### Scenario: PR exists but no recoverable state comment
 
 An issue already has a linked PR, but the PR comments do not contain a structured `<!-- runoq:state:... -->` block.
@@ -729,6 +807,14 @@ GitHub audit comments are the recoverable state carrier for implementation ticks
 - [ ] The runtime does not report success for a phase whose state could not be durably persisted to GitHub
 - [ ] Durable needs-review handoff comments are treated the same way: a failed handoff comment is an error, not a warning
 
+### Scenario: Recovery after partial finalize failure
+
+The finalize audit comment succeeds, but a later PR-body, PR-finalization, merge, or issue-status step fails.
+
+- [ ] The failing tick exits with an error instead of reporting completion
+- [ ] The next tick resumes from `FINALIZE` and retries the missing finalize work
+- [ ] The next tick does not silently translate the stale persisted `FINALIZE` state into a terminal done result
+
 ### Scenario: All tasks blocked
 
 An epic has open child tasks, but none are dispatchable because dependencies or cycles block every candidate.
@@ -746,7 +832,7 @@ An epic has open child tasks, but none are dispatchable because dependencies or 
 - [ ] Exit code `2` from `tick` increments the wait-cycle counter and sleeps for the configured backoff duration
 - [ ] `--max-wait-cycles <n>` stops the loop after `n` consecutive waiting ticks with terminal output explaining why it stopped
 - [ ] Exit code `3` from `tick` stops the loop cleanly because all work is complete
-- [ ] In targeted-issue mode, the loop exits once that issue reports complete
+- [ ] In targeted-issue mode, the loop exits once that issue reports terminal `DONE`, including deterministic needs-review handoff as well as successful completion
 - [ ] Invalid `--issue`, `--backoff`, and `--max-wait-cycles` values are rejected before the loop starts
 
 ### Scenario: Fixture Smoke — Planning Flow
@@ -766,16 +852,21 @@ Minimum observable scenarios:
 - [ ] Approved top-level planning review materializes milestone issues, closes the review issue, and closes its parent `Project Planning` issue
 - [ ] Approved milestone-scoped task-planning review materializes task issues and closes the review issue without closing the milestone epic
 - [ ] Approved planning and adjustment reviews honor partial human item selection when materializing only a subset of proposed items
+- [ ] Approved planning and adjustment reviews fail closed when selection comments filter the approved batch down to zero items
 - [ ] Approved milestone-scoped task-planning fails closed if task creation or dependency linking fails
+- [ ] Approved planning/task-planning retries resume from durable apply-state instead of duplicating already-created issues or dependency links
 - [ ] Approved top-level planning review seeds a planning issue only for the first newly created milestone
 - [ ] Proposal posting for that seeded task-planning issue happens on a later planning-dispatch tick, not during the approval-application tick
 - [ ] Approved adjustment review applies accepted adjustments, closes the adjustment review issue, and closes its parent milestone epic
 - [ ] Approved adjustment review fails closed on unsupported adjustment types
 - [ ] Approved adjustment review also fails closed when a supported adjustment payload is malformed and cannot be applied
+- [ ] Approved adjustment retries resume from durable apply-state and do not repeat already-completed modifications
 - [ ] Approved adjustment review seeds the next planning issue only when the next open milestone does not already have a planning child
 - [ ] Approved adjustment terminal output reports that adjustments were applied, rather than always claiming new issues were created
 - [ ] When a milestone's child tasks drain, the tick runs milestone review and creates an adjustment review issue
+- [ ] If milestone-review assignment fails after creating the adjustment review issue, the tick errors without claiming the review completed
 - [ ] RESPOND acknowledgement comments are bot-marked and therefore excluded from later comment scans
+- [ ] Fresh non-selection human comments on an already-approved planning or adjustment review are answered before apply/close proceeds
 - [ ] A valid reviewer `FAIL` verdict routes through `DECIDE` into needs-review finalization
 - [ ] When all milestones are complete, the terminal output reports that all milestones are complete
 

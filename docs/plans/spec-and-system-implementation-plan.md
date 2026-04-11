@@ -26,6 +26,8 @@ Out of scope:
 - Completed:
   - Phase 1 comment and review correctness
   - Phase 2 dispatch and recovery safety
+  - Phase 3 planning and adjustment apply safety
+  - Phase 4 smoke spec alignment and coverage completion
   - per-comment planning comment handling
   - bot-marker-based processed detection for planning comments and PR RESPOND
   - approved-review precedence for fresh non-selection comments
@@ -35,10 +37,17 @@ Out of scope:
   - targeted issue validation now waits for loaded issue metadata
   - stale `FINALIZE` state now resumes finalization instead of short-circuiting
   - non-ready open tasks no longer report as dependency-blocked
+  - zero-selection approvals now fail closed
+  - issue creation now surfaces post-create hierarchy/dependency mutation failures
+  - adjustment `modify` now fails closed when the target cannot be resolved
+  - planning and adjustment apply paths persist resumable local apply-state to avoid replaying completed creates/edits after partial failure
+  - adjustment review and parent closure now happen after successful refresh/advancement
+  - smoke spec coverage now documents the corrected terminal-state, preemption, retry, and partial-failure contracts
+  - `docs/plans/issues.md` is now a closed ledger rather than an unresolved issue backlog
 - In progress:
-  - Phase 3 planning and adjustment apply safety
+  - none
 - Pending:
-  - Phase 4 smoke spec alignment and coverage completion
+  - none
 
 ## Guiding **Decisions**
 
@@ -132,6 +141,8 @@ Likely code areas:
 - `internal/orchestrator/phases.go`
 
 ### 3. Planning and Adjustment Materialization Safety
+
+Status: completed on 2026-04-11
 
 Purpose:
 
@@ -320,6 +331,10 @@ Deliverables:
 - missing-target `modify` failures
 - review and milestone closure moved to confirmed-success boundaries
 
+Status:
+
+- completed on 2026-04-11
+
 ### Phase 4. Smoke spec alignment and coverage completion
 
 Reason:
@@ -331,6 +346,10 @@ Deliverables:
 - updated `docs/plans/smoke-testing-spec.md`
 - fixture-smoke scenarios or deterministic integration coverage for every resolved issue class
 - removal or closure of entries in `docs/plans/issues.md`
+
+Status:
+
+- completed on 2026-04-11
 
 ## TDD Plan
 

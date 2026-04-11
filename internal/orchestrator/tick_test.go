@@ -993,15 +993,15 @@ func TestDispatchTaskReturnsWaitingForWaitingDevelopState(t *testing.T) {
 				case req.Name == "gh" && strings.Contains(args, "pr view 87") && strings.Contains(args, "comments"):
 					_, _ = io.WriteString(req.Stdout, `{"comments":[{"body":"<!-- runoq:bot:orchestrator:develop -->\n<!-- runoq:state:`+strings.ReplaceAll(waitingState, `"`, `\"`)+` -->\n> develop"}]}`)
 					return nil
-					case req.Name == "gh" && strings.Contains(args, "api repos/owner/repo/issues/87/comments"):
-						_, _ = io.WriteString(req.Stdout, `[]`)
-						return nil
-					case req.Name == "gh" && (strings.Contains(args, "api repos/owner/repo/pulls/87/comments") || strings.Contains(args, "api repos/owner/repo/pulls/87/reviews")):
-						_, _ = io.WriteString(req.Stdout, `[]`)
-						return nil
-					default:
-						t.Fatalf("unexpected command: %s %s", req.Name, args)
-						return nil
+				case req.Name == "gh" && strings.Contains(args, "api repos/owner/repo/issues/87/comments"):
+					_, _ = io.WriteString(req.Stdout, `[]`)
+					return nil
+				case req.Name == "gh" && (strings.Contains(args, "api repos/owner/repo/pulls/87/comments") || strings.Contains(args, "api repos/owner/repo/pulls/87/reviews")):
+					_, _ = io.WriteString(req.Stdout, `[]`)
+					return nil
+				default:
+					t.Fatalf("unexpected command: %s %s", req.Name, args)
+					return nil
 				}
 			},
 		},
@@ -1040,15 +1040,15 @@ func TestDispatchTaskIncludesWaitingReasonInOutput(t *testing.T) {
 				case req.Name == "gh" && strings.Contains(args, "pr view 87") && strings.Contains(args, "comments"):
 					_, _ = io.WriteString(req.Stdout, `{"comments":[{"body":"<!-- runoq:bot:orchestrator:develop -->\n<!-- runoq:state:`+strings.ReplaceAll(waitingState, `"`, `\"`)+` -->\n> develop"}]}`)
 					return nil
-					case req.Name == "gh" && strings.Contains(args, "api repos/owner/repo/issues/87/comments"):
-						_, _ = io.WriteString(req.Stdout, `[]`)
-						return nil
-					case req.Name == "gh" && (strings.Contains(args, "api repos/owner/repo/pulls/87/comments") || strings.Contains(args, "api repos/owner/repo/pulls/87/reviews")):
-						_, _ = io.WriteString(req.Stdout, `[]`)
-						return nil
-					default:
-						t.Fatalf("unexpected command: %s %s", req.Name, args)
-						return nil
+				case req.Name == "gh" && strings.Contains(args, "api repos/owner/repo/issues/87/comments"):
+					_, _ = io.WriteString(req.Stdout, `[]`)
+					return nil
+				case req.Name == "gh" && (strings.Contains(args, "api repos/owner/repo/pulls/87/comments") || strings.Contains(args, "api repos/owner/repo/pulls/87/reviews")):
+					_, _ = io.WriteString(req.Stdout, `[]`)
+					return nil
+				default:
+					t.Fatalf("unexpected command: %s %s", req.Name, args)
+					return nil
 				}
 			},
 		},
@@ -1256,6 +1256,233 @@ func TestHandleApprovedAdjustmentReportsAdjustmentOutcome(t *testing.T) {
 	}
 }
 
+func TestHandleApprovedPlanningRejectsZeroSelection(t *testing.T) {
+	t.Parallel()
+
+	reviewView := "{\"body\":\"<!-- runoq:payload:plan-proposal -->\\n```json\\n{\\\"items\\\":[{\\\"title\\\":\\\"Task A\\\",\\\"type\\\":\\\"implementation\\\",\\\"body\\\":\\\"A body\\\"}]}\\n```\"}"
+
+	var closed bool
+	runner := &tickRunner{
+		cfg: TickConfig{
+			Repo:   "owner/repo",
+			Stdout: io.Discard,
+			Stderr: io.Discard,
+		},
+		issues: []issue{{Number: 9, Title: "Milestone", State: "OPEN", IssueType: "epic"}},
+	}
+	runner.cfg.ExecCommand = func(_ context.Context, req shell.CommandRequest) error {
+		args := strings.Join(req.Args, " ")
+		if strings.Contains(args, "issue edit 88") || strings.Contains(args, "issue close 88") {
+			closed = true
+		}
+		if strings.Contains(args, "issue create") {
+			t.Fatalf("unexpected issue creation on zero-selection approval: %s", args)
+		}
+		return nil
+	}
+
+	result := runner.handleApprovedPlanning(t.Context(), reviewView, 88, "9", comments.ItemSelection{Approved: []int{99}})
+	if result != 1 {
+		t.Fatalf("handleApprovedPlanning = %d, want 1", result)
+	}
+	if closed {
+		t.Fatal("expected review to remain open on zero-selection approval")
+	}
+}
+
+func TestHandleApprovedAdjustmentRejectsZeroSelection(t *testing.T) {
+	t.Parallel()
+
+	reviewView := "{\"body\":\"## Adjustment Review\\n\\n```json\\n{\\\"proposed_adjustments\\\":[{\\\"type\\\":\\\"new_milestone\\\",\\\"description\\\":\\\"New work\\\"}]}\\n```\"}"
+
+	var closed bool
+	runner := &tickRunner{
+		cfg: TickConfig{
+			Repo:   "owner/repo",
+			Stdout: io.Discard,
+			Stderr: io.Discard,
+		},
+	}
+	runner.cfg.ExecCommand = func(_ context.Context, req shell.CommandRequest) error {
+		args := strings.Join(req.Args, " ")
+		if strings.Contains(args, "issue edit 88") || strings.Contains(args, "issue close 88") || strings.Contains(args, "issue edit 9") || strings.Contains(args, "issue close 9") {
+			closed = true
+		}
+		if strings.Contains(args, "issue create") {
+			t.Fatalf("unexpected issue creation on zero-selection approval: %s", args)
+		}
+		return nil
+	}
+
+	result := runner.handleApprovedAdjustment(t.Context(), reviewView, 88, "9", comments.ItemSelection{Approved: []int{99}})
+	if result != 1 {
+		t.Fatalf("handleApprovedAdjustment = %d, want 1", result)
+	}
+	if closed {
+		t.Fatal("expected review to remain open on zero-selection adjustment approval")
+	}
+}
+
+func TestHandleApprovedAdjustmentFailsWhenModifyTargetMissingFromIssueList(t *testing.T) {
+	t.Parallel()
+
+	reviewView := "{\"body\":\"## Adjustment Review\\n\\n```json\\n{\\\"proposed_adjustments\\\":[{\\\"type\\\":\\\"modify\\\",\\\"target_milestone_number\\\":42,\\\"description\\\":\\\"Tighten milestone scope\\\"}]}\\n```\"}"
+
+	var closed bool
+	runner := &tickRunner{
+		cfg: TickConfig{
+			Repo:   "owner/repo",
+			Stdout: io.Discard,
+			Stderr: io.Discard,
+		},
+		issues: []issue{{Number: 9, Title: "Current milestone", State: "OPEN", IssueType: "epic"}},
+	}
+	runner.cfg.ExecCommand = func(_ context.Context, req shell.CommandRequest) error {
+		args := strings.Join(req.Args, " ")
+		if strings.Contains(args, "issue edit 88") || strings.Contains(args, "issue close 88") || strings.Contains(args, "issue edit 9") || strings.Contains(args, "issue close 9") {
+			closed = true
+		}
+		return nil
+	}
+
+	result := runner.handleApprovedAdjustment(t.Context(), reviewView, 88, "9", comments.ItemSelection{})
+	if result != 1 {
+		t.Fatalf("handleApprovedAdjustment = %d, want 1", result)
+	}
+	if closed {
+		t.Fatal("expected review to remain open when modify target is missing")
+	}
+}
+
+func TestHandleApprovedAdjustmentKeepsReviewOpenWhenNextPlanningSeedFails(t *testing.T) {
+	t.Parallel()
+
+	reviewView := "{\"body\":\"## Adjustment Review\\n\\n```json\\n{\\\"milestone_number\\\":9,\\\"milestone_title\\\":\\\"Current milestone\\\",\\\"summary\\\":\\\"done\\\",\\\"recommended_verdict\\\":\\\"APPROVE\\\",\\\"proposed_adjustments\\\":[]}\\n```\"}"
+	refreshedIssues := `[
+		{"number":20,"title":"Next milestone","state":"OPEN","body":"","labels":[],"url":"u"},
+		{"number":42,"title":"Target","state":"OPEN","body":"Original body","labels":[],"url":"u"}
+	]`
+
+	var closed bool
+	runner := &tickRunner{
+		cfg: TickConfig{
+			Repo:             "owner/repo",
+			ReadyLabel:       "runoq:ready",
+			InProgressLabel:  "runoq:in-progress",
+			DoneLabel:        "runoq:done",
+			NeedsReviewLabel: "runoq:needs-human-review",
+			BlockedLabel:     "runoq:blocked",
+			Stdout:           io.Discard,
+			Stderr:           io.Discard,
+		},
+	}
+	runner.cfg.ExecCommand = func(_ context.Context, req shell.CommandRequest) error {
+		args := strings.Join(req.Args, " ")
+		switch {
+		case strings.Contains(args, "issue edit 88"), strings.Contains(args, "issue close 88"), strings.Contains(args, "issue edit 9"), strings.Contains(args, "issue close 9"):
+			closed = true
+			return nil
+		case strings.Contains(args, "issue list") && strings.Contains(args, "--state all"):
+			_, _ = io.WriteString(req.Stdout, refreshedIssues)
+			return nil
+		case strings.Contains(args, "api graphql"):
+			_, _ = io.WriteString(req.Stdout, `{"data":{"repository":{"issues":{"nodes":[{"number":20,"blockedBy":{"nodes":[]},"issueType":{"name":"Epic"}},{"number":42,"blockedBy":{"nodes":[]},"issueType":{"name":"Task"}}]}}}}`)
+			return nil
+		case strings.Contains(args, "sub_issues") && strings.Contains(args, "/issues/20/sub_issues"):
+			_, _ = io.WriteString(req.Stdout, "")
+			return nil
+		case strings.Contains(args, "issue create"):
+			return errors.New("seed failed")
+		default:
+			return nil
+		}
+	}
+
+	result := runner.handleApprovedAdjustment(t.Context(), reviewView, 88, "9", comments.ItemSelection{})
+	if result != 1 {
+		t.Fatalf("handleApprovedAdjustment = %d, want 1", result)
+	}
+	if closed {
+		t.Fatal("expected review and parent to remain open when next planning seed fails")
+	}
+}
+
+func TestHandleApprovedAdjustmentResumesWithoutRepeatingModify(t *testing.T) {
+	t.Parallel()
+
+	reviewView := "{\"body\":\"## Adjustment Review\\n\\n```json\\n{\\\"milestone_number\\\":9,\\\"milestone_title\\\":\\\"Current milestone\\\",\\\"summary\\\":\\\"done\\\",\\\"recommended_verdict\\\":\\\"APPROVE\\\",\\\"proposed_adjustments\\\":[{\\\"type\\\":\\\"modify\\\",\\\"target_milestone_number\\\":42,\\\"description\\\":\\\"Tighten milestone scope\\\"}]}\\n```\"}"
+	refreshedIssues := `[
+		{"number":20,"title":"Next milestone","state":"OPEN","body":"","labels":[],"url":"u"},
+		{"number":42,"title":"Target","state":"OPEN","body":"Original body","labels":[],"url":"u"}
+	]`
+
+	root := t.TempDir()
+	editCalls := 0
+	seedAttempts := 0
+	var stderr bytes.Buffer
+	runner := &tickRunner{
+		cfg: TickConfig{
+			Repo:             "owner/repo",
+			RunoqRoot:        root,
+			ReadyLabel:       "runoq:ready",
+			InProgressLabel:  "runoq:in-progress",
+			DoneLabel:        "runoq:done",
+			NeedsReviewLabel: "runoq:needs-human-review",
+			BlockedLabel:     "runoq:blocked",
+			Stdout:           io.Discard,
+			Stderr:           &stderr,
+		},
+		issues: []issue{
+			{Number: 9, Title: "Current milestone", State: "OPEN", IssueType: "epic"},
+			{Number: 42, Title: "Target", State: "OPEN", IssueType: "task", Body: "Original body"},
+		},
+	}
+	runner.cfg.ExecCommand = func(_ context.Context, req shell.CommandRequest) error {
+		args := strings.Join(req.Args, " ")
+		switch {
+		case strings.Contains(args, "issue view 88") && strings.Contains(args, "--json labels"):
+			_, _ = io.WriteString(req.Stdout, `{"labels":[{"name":"runoq:adjustment"}]}`)
+			return nil
+		case strings.Contains(args, "issue view 9") && strings.Contains(args, "--json labels"):
+			_, _ = io.WriteString(req.Stdout, `{"labels":[]}`)
+			return nil
+		case strings.Contains(args, "issue edit 42") && strings.Contains(args, "--body-file"):
+			editCalls++
+			return nil
+		case strings.Contains(args, "issue list") && strings.Contains(args, "--state all"):
+			_, _ = io.WriteString(req.Stdout, refreshedIssues)
+			return nil
+		case strings.Contains(args, "api graphql"):
+			_, _ = io.WriteString(req.Stdout, `{"data":{"repository":{"issues":{"nodes":[{"number":20,"blockedBy":{"nodes":[]},"issueType":{"name":"Epic"}},{"number":42,"blockedBy":{"nodes":[]},"issueType":{"name":"Task"}}]}}}}`)
+			return nil
+		case strings.Contains(args, "sub_issues") && strings.Contains(args, "/issues/20/sub_issues"):
+			_, _ = io.WriteString(req.Stdout, "")
+			return nil
+		case strings.Contains(args, "issue create"):
+			seedAttempts++
+			if seedAttempts == 1 {
+				return errors.New("seed failed")
+			}
+			_, _ = io.WriteString(req.Stdout, "https://example.test/issues/99")
+			return nil
+		case strings.Contains(args, "issue edit 88"), strings.Contains(args, "issue close 88"), strings.Contains(args, "issue edit 9"), strings.Contains(args, "issue close 9"):
+			return nil
+		default:
+			return nil
+		}
+	}
+
+	if result := runner.handleApprovedAdjustment(t.Context(), reviewView, 88, "9", comments.ItemSelection{}); result != 1 {
+		t.Fatalf("first handleApprovedAdjustment = %d, want 1; stderr=%q", result, stderr.String())
+	}
+	if result := runner.handleApprovedAdjustment(t.Context(), reviewView, 88, "9", comments.ItemSelection{}); result != 0 {
+		t.Fatalf("second handleApprovedAdjustment = %d, want 0; stderr=%q", result, stderr.String())
+	}
+	if editCalls != 1 {
+		t.Fatalf("expected modify adjustment to run once across recovery, got %d", editCalls)
+	}
+}
+
 func TestHandleApprovedPlanningFailsWhenTaskCreationFails(t *testing.T) {
 	t.Parallel()
 
@@ -1366,6 +1593,71 @@ func TestHandleApprovedPlanningLinksDependenciesCreatedLater(t *testing.T) {
 	}
 }
 
+func TestHandleApprovedPlanningResumesAfterPartialTaskCreationFailure(t *testing.T) {
+	t.Parallel()
+
+	reviewView := "{\"body\":\"<!-- runoq:payload:plan-proposal -->\\n```json\\n{\\\"items\\\":[{\\\"key\\\":\\\"a\\\",\\\"title\\\":\\\"Task A\\\",\\\"type\\\":\\\"implementation\\\",\\\"body\\\":\\\"A body\\\"},{\\\"key\\\":\\\"b\\\",\\\"title\\\":\\\"Task B\\\",\\\"type\\\":\\\"implementation\\\",\\\"body\\\":\\\"B body\\\"}]}\\n```\"}"
+
+	root := t.TempDir()
+	createAttempts := make(map[string]int)
+	runner := &tickRunner{
+		cfg: TickConfig{
+			Repo:             "owner/repo",
+			RunoqRoot:        root,
+			ReadyLabel:       "runoq:ready",
+			InProgressLabel:  "runoq:in-progress",
+			DoneLabel:        "runoq:done",
+			NeedsReviewLabel: "runoq:needs-human-review",
+			BlockedLabel:     "runoq:blocked",
+			Stdout:           io.Discard,
+			Stderr:           io.Discard,
+		},
+		issues: []issue{{Number: 9, Title: "Milestone", State: "OPEN", IssueType: "epic"}},
+	}
+	runner.cfg.ExecCommand = func(_ context.Context, req shell.CommandRequest) error {
+		args := strings.Join(req.Args, " ")
+		switch {
+		case strings.Contains(args, "issue view 9") && strings.Contains(args, "--json title"):
+			_, _ = io.WriteString(req.Stdout, `{"title":"Milestone"}`)
+			return nil
+		case strings.Contains(args, "issue view 88") && strings.Contains(args, "--json labels"):
+			_, _ = io.WriteString(req.Stdout, `{"labels":[{"name":"runoq:planning"}]}`)
+			return nil
+		case strings.Contains(args, "issue create") && strings.Contains(args, "Task A"):
+			createAttempts["Task A"]++
+			_, _ = io.WriteString(req.Stdout, "https://example.test/issues/101")
+			return nil
+		case strings.Contains(args, "issue create") && strings.Contains(args, "Task B"):
+			createAttempts["Task B"]++
+			if createAttempts["Task B"] == 1 {
+				return errors.New("create failed")
+			}
+			_, _ = io.WriteString(req.Stdout, "https://example.test/issues/102")
+			return nil
+		case strings.Contains(args, "api repos/owner/repo/issues/101") && strings.Contains(args, "node_id"):
+			_, _ = io.WriteString(req.Stdout, "NODE_A\n")
+			return nil
+		case strings.Contains(args, "api repos/owner/repo/issues/102") && strings.Contains(args, "node_id"):
+			_, _ = io.WriteString(req.Stdout, "NODE_B\n")
+			return nil
+		case strings.Contains(args, "issue edit 88"), strings.Contains(args, "issue close 88"):
+			return nil
+		default:
+			return nil
+		}
+	}
+
+	if result := runner.handleApprovedPlanning(t.Context(), reviewView, 88, "9", comments.ItemSelection{}); result != 1 {
+		t.Fatalf("first handleApprovedPlanning = %d, want 1", result)
+	}
+	if result := runner.handleApprovedPlanning(t.Context(), reviewView, 88, "9", comments.ItemSelection{}); result != 0 {
+		t.Fatalf("second handleApprovedPlanning = %d, want 0", result)
+	}
+	if createAttempts["Task A"] != 1 {
+		t.Fatalf("expected Task A to be created once across recovery, got %d", createAttempts["Task A"])
+	}
+}
+
 func TestHandlePendingReviewFailsWhenCommentHandlingFails(t *testing.T) {
 	t.Parallel()
 
@@ -1455,11 +1747,11 @@ func TestHandlePendingReviewHandlesFreshCommentsBeforeRedispatch(t *testing.T) {
 	var calls []string
 	runner := &tickRunner{
 		cfg: TickConfig{
-			Repo:   "owner/repo",
-			Env:    []string{"RUNOQ_CLAUDE_BIN=" + claudeBin},
+			Repo:      "owner/repo",
+			Env:       []string{"RUNOQ_CLAUDE_BIN=" + claudeBin},
 			RunoqRoot: t.TempDir(),
-			Stdout: io.Discard,
-			Stderr: io.Discard,
+			Stdout:    io.Discard,
+			Stderr:    io.Discard,
 		},
 	}
 	runner.cfg.ExecCommand = func(_ context.Context, req shell.CommandRequest) error {

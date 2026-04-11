@@ -830,6 +830,66 @@ func TestCreateExportedMethodSkipsArgParsing(t *testing.T) {
 	}
 }
 
+func TestCreateFailsWhenParentEpicLinkFails(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t, nil)
+	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
+		command := req.Name + " " + strings.Join(req.Args, " ")
+		switch {
+		case strings.Contains(command, "issue create"):
+			_, _ = req.Stdout.Write([]byte("https://github.com/owner/repo/issues/99"))
+			return nil
+		case strings.Contains(command, "api") && strings.Contains(command, "jq .id"):
+			_, _ = req.Stdout.Write([]byte("12345"))
+			return nil
+		case strings.Contains(command, "sub_issues"):
+			return errors.New("link failed")
+		default:
+			return nil
+		}
+	})
+
+	code := app.Create(t.Context(), "owner/repo", "Test issue", "## AC\n\n- [ ] Works.", []string{"--type", "task", "--parent-epic", "5"})
+	if code == 0 {
+		t.Fatal("expected create to fail when parent linking fails")
+	}
+}
+
+func TestCreateFailsWhenDependencyMutationFails(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	mustMkdirAll(t, filepath.Join(tmpDir, ".runoq"))
+	mustWriteFile(t, filepath.Join(tmpDir, ".runoq", "issue-types.json"), []byte(`{"task":"IT_task","epic":"IT_epic"}`))
+
+	app := newTestApp(t, nil)
+	app.AppendEnv("TARGET_ROOT=" + tmpDir)
+	app.SetCommandExecutor(func(_ context.Context, req shell.CommandRequest) error {
+		command := req.Name + " " + strings.Join(req.Args, " ")
+		switch {
+		case strings.Contains(command, "issue create"):
+			_, _ = req.Stdout.Write([]byte("https://github.com/owner/repo/issues/99"))
+			return nil
+		case strings.Contains(command, "--jq .node_id"):
+			_, _ = req.Stdout.Write([]byte("NODE99"))
+			return nil
+		case strings.Contains(command, "api graphql") && strings.Contains(command, "addBlockedBy"):
+			return errors.New("dependency mutation failed")
+		case strings.Contains(command, "api graphql"):
+			_, _ = req.Stdout.Write([]byte(`{"data":{"repository":{"label":{"id":"LA1"}}}}`))
+			return nil
+		default:
+			return nil
+		}
+	})
+
+	code := app.Create(t.Context(), "owner/repo", "Test issue", "## AC\n\n- [ ] Works.", []string{"--type", "task", "--depends-on", "12"})
+	if code == 0 {
+		t.Fatal("expected create to fail when dependency mutation fails")
+	}
+}
+
 func TestSetStatusExportedMethodSkipsArgParsing(t *testing.T) {
 	t.Parallel()
 

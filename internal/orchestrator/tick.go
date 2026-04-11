@@ -84,6 +84,15 @@ type tickRunner struct {
 	lastStepAt time.Time
 }
 
+type reviewApplyState struct {
+	Kind                 string            `json:"kind"`
+	CreatedItems         map[string]string `json:"created_items,omitzero"`
+	CreatedNodeIDs       map[string]string `json:"created_node_ids,omitzero"`
+	LinkedDependencies   map[string]bool   `json:"linked_dependencies,omitzero"`
+	CompletedAdjustments map[string]bool   `json:"completed_adjustments,omitzero"`
+	SeededPlanningIssue  bool              `json:"seeded_planning_issue,omitzero"`
+}
+
 func (t *tickRunner) run(ctx context.Context) int {
 	t.step("Starting tick")
 	t.detail("repo", t.cfg.Repo)
@@ -523,8 +532,15 @@ func (t *tickRunner) handleApprovedPlanning(ctx context.Context, reviewView stri
 	if err := json.Unmarshal([]byte(proposalJSON), &proposal); err != nil {
 		return t.fail("parse proposal: %v", err)
 	}
+	applyState, err := t.loadReviewApplyState(reviewNumber, "planning")
+	if err != nil {
+		return t.fail("load planning apply state: %v", err)
+	}
 
 	filtered := planning.SelectItemsFromProposal(proposal, selection)
+	if len(proposal.Items) > 0 && len(filtered.Items) == 0 {
+		return t.fail("approved selection resolved to zero proposal items")
+	}
 	parentTitle := t.titleForIssue(reviewParent)
 	t.detail("parent", "#"+reviewParent+" "+parentTitle)
 	t.detail("items to create", fmt.Sprintf("%d", len(filtered.Items)))
@@ -532,15 +548,23 @@ func (t *tickRunner) handleApprovedPlanning(ctx context.Context, reviewView stri
 	if parentTitle == "Project Planning" {
 		t.info("creating milestone epics")
 		var firstMilestone, firstMilestoneTitle string
-		for _, item := range filtered.Items {
+		for idx, item := range filtered.Items {
+			itemID := proposalItemID(idx, item.Key)
 			body := planning.FormatMilestoneBody(item)
 			priority := "1"
 			if item.Priority != nil {
 				priority = fmt.Sprintf("%d", *item.Priority)
 			}
-			num, err := t.issueCreate(ctx, t.cfg.Repo, item.Title, body, "--type", "epic", "--priority", priority, "--estimated-complexity", "low", "--milestone-type", item.Type)
-			if err != nil {
-				return t.fail("create epic: %v", err)
+			num := applyState.CreatedItems[itemID]
+			if num == "" {
+				num, err = t.issueCreate(ctx, t.cfg.Repo, item.Title, body, "--type", "epic", "--priority", priority, "--estimated-complexity", "low", "--milestone-type", item.Type)
+				if err != nil {
+					return t.fail("create epic: %v", err)
+				}
+				applyState.CreatedItems[itemID] = num
+				if err := t.saveReviewApplyState(reviewNumber, applyState); err != nil {
+					return t.fail("persist planning apply state: %v", err)
+				}
 			}
 			t.info(fmt.Sprintf("created epic #%s: %s", num, item.Title))
 			if firstMilestone == "" {
@@ -548,10 +572,14 @@ func (t *tickRunner) handleApprovedPlanning(ctx context.Context, reviewView stri
 				firstMilestoneTitle = item.Title
 			}
 		}
-		if firstMilestone != "" {
+		if firstMilestone != "" && !applyState.SeededPlanningIssue {
 			t.info("creating planning issue for first milestone #" + firstMilestone)
 			if _, err := t.issueCreate(ctx, t.cfg.Repo, "Break down "+firstMilestoneTitle+" into tasks", "## Acceptance Criteria\n\n- [ ] Tasks proposed.", "--type", "planning", "--priority", "1", "--estimated-complexity", "low", "--parent-epic", firstMilestone); err != nil {
 				return t.fail("create planning issue for epic #%s: %v", firstMilestone, err)
+			}
+			applyState.SeededPlanningIssue = true
+			if err := t.saveReviewApplyState(reviewNumber, applyState); err != nil {
+				return t.fail("persist planning apply state: %v", err)
 			}
 		}
 		t.info(fmt.Sprintf("closing review #%d and parent #%s", reviewNumber, reviewParent))
@@ -562,6 +590,9 @@ func (t *tickRunner) handleApprovedPlanning(ctx context.Context, reviewView stri
 			return t.fail("close parent #%s: %v", reviewParent, err)
 		}
 	} else {
+		if err := validateProposalDependencies(filtered); err != nil {
+			return t.fail("%v", err)
+		}
 		t.info("creating task issues under epic #" + reviewParent)
 		type createdTask struct {
 			title         string
@@ -574,14 +605,22 @@ func (t *tickRunner) handleApprovedPlanning(ctx context.Context, reviewView stri
 		keyToNumber := make(map[string]string)
 		keyToNodeID := make(map[string]string)
 		createdTasks := make([]createdTask, 0, len(filtered.Items))
-		for _, item := range filtered.Items {
+		for idx, item := range filtered.Items {
+			itemID := proposalItemID(idx, item.Key)
 			body := item.Body
 			complexity := cmp.Or(item.EstimatedComplexity, "medium")
 			createOpts := []string{"--type", "task", "--priority", "1", "--estimated-complexity", complexity, "--complexity-rationale", item.ComplexityRationale, "--parent-epic", reviewParent}
 
-			issueNum, err := t.issueCreate(ctx, t.cfg.Repo, item.Title, body, createOpts...)
-			if err != nil {
-				return t.fail("create task %q: %v", item.Title, err)
+			issueNum := applyState.CreatedItems[itemID]
+			if issueNum == "" {
+				issueNum, err = t.issueCreate(ctx, t.cfg.Repo, item.Title, body, createOpts...)
+				if err != nil {
+					return t.fail("create task %q: %v", item.Title, err)
+				}
+				applyState.CreatedItems[itemID] = issueNum
+				if err := t.saveReviewApplyState(reviewNumber, applyState); err != nil {
+					return t.fail("persist planning apply state: %v", err)
+				}
 			}
 
 			created := createdTask{
@@ -593,7 +632,16 @@ func (t *tickRunner) handleApprovedPlanning(ctx context.Context, reviewView stri
 			if item.Key != "" {
 				keyToNumber[item.Key] = issueNum
 			}
-			created.nodeID = t.issueNodeID(ctx, issueNum)
+			created.nodeID = applyState.CreatedNodeIDs[itemID]
+			if created.nodeID == "" {
+				created.nodeID = t.issueNodeID(ctx, issueNum)
+				if created.nodeID != "" {
+					applyState.CreatedNodeIDs[itemID] = created.nodeID
+					if err := t.saveReviewApplyState(reviewNumber, applyState); err != nil {
+						return t.fail("persist planning apply state: %v", err)
+					}
+				}
+			}
 			if item.Key != "" && created.nodeID != "" {
 				keyToNodeID[item.Key] = created.nodeID
 			}
@@ -614,8 +662,16 @@ func (t *tickRunner) handleApprovedPlanning(ctx context.Context, reviewView stri
 				if !ok || depNodeID == "" {
 					return t.fail("resolve dependency %q for task #%s", depKey, task.number)
 				}
+				linkID := task.key + "<-" + depKey
+				if applyState.LinkedDependencies[linkID] {
+					continue
+				}
 				if err := t.addBlockedBy(ctx, task.nodeID, depNodeID); err != nil {
 					return t.fail("link dependency %q for task #%s: %v", depKey, task.number, err)
+				}
+				applyState.LinkedDependencies[linkID] = true
+				if err := t.saveReviewApplyState(reviewNumber, applyState); err != nil {
+					return t.fail("persist planning apply state: %v", err)
 				}
 			}
 		}
@@ -624,6 +680,9 @@ func (t *tickRunner) handleApprovedPlanning(ctx context.Context, reviewView stri
 		if err := t.issueSetStatus(ctx, t.cfg.Repo, fmt.Sprintf("%d", reviewNumber), "done"); err != nil {
 			return t.fail("close review #%d: %v", reviewNumber, err)
 		}
+	}
+	if err := t.clearReviewApplyState(reviewNumber); err != nil {
+		return t.fail("clear planning apply state: %v", err)
 	}
 
 	t.success(fmt.Sprintf("Applied approvals from #%d, created issues", reviewNumber))
@@ -653,6 +712,10 @@ func (t *tickRunner) handleApprovedAdjustment(ctx context.Context, reviewView st
 	if err := json.Unmarshal([]byte(adjustmentJSON), &adjInput); err != nil {
 		return t.fail("parse adjustments: %v", err)
 	}
+	applyState, err := t.loadReviewApplyState(reviewNumber, "adjustment")
+	if err != nil {
+		return t.fail("load adjustment apply state: %v", err)
+	}
 
 	// Filter by selection
 	filtered := make([]planning.Adjustment, 0)
@@ -666,22 +729,27 @@ func (t *tickRunner) handleApprovedAdjustment(ctx context.Context, reviewView st
 		}
 		filtered = append(filtered, adj)
 	}
+	if len(adjInput.ProposedAdjustments) > 0 && len(filtered) == 0 {
+		return t.fail("approved selection resolved to zero adjustments")
+	}
 	t.detail("adjustments to apply", fmt.Sprintf("%d", len(filtered)))
+	if err := t.validateAdjustments(filtered); err != nil {
+		return t.fail("%v", err)
+	}
 
-	for _, adj := range filtered {
+	for idx, adj := range filtered {
+		adjustmentID := fmt.Sprintf("adjustment-%d", idx+1)
+		if applyState.CompletedAdjustments[adjustmentID] {
+			continue
+		}
 		switch adj.Type {
 		case "modify":
-			if adj.TargetMilestoneNumber == nil {
-				return t.fail("modify adjustment missing target milestone number")
-			}
 			t.info(fmt.Sprintf("modifying issue #%d", *adj.TargetMilestoneNumber))
 			target := fmt.Sprintf("%d", *adj.TargetMilestoneNumber)
 			targetIssue := t.findIssueByNumber(*adj.TargetMilestoneNumber)
-			if targetIssue != nil {
-				newBody := targetIssue.Body + "\n\n" + adj.Description
-				if err := t.ghEditBody(ctx, target, newBody); err != nil {
-					return t.fail("update issue #%s body: %v", target, err)
-				}
+			newBody := targetIssue.Body + "\n\n" + adj.Description
+			if err := t.ghEditBody(ctx, target, newBody); err != nil {
+				return t.fail("update issue #%s body: %v", target, err)
 			}
 		case "new_milestone":
 			title := cmp.Or(adj.Title, adj.Description)
@@ -693,14 +761,10 @@ func (t *tickRunner) handleApprovedAdjustment(ctx context.Context, reviewView st
 		default:
 			return t.fail("unsupported adjustment type %q", adj.Type)
 		}
-	}
-
-	t.info(fmt.Sprintf("closing review #%d and parent #%s", reviewNumber, reviewParent))
-	if err := t.issueSetStatus(ctx, t.cfg.Repo, fmt.Sprintf("%d", reviewNumber), "done"); err != nil {
-		return t.fail("close review #%d: %v", reviewNumber, err)
-	}
-	if err := t.issueSetStatus(ctx, t.cfg.Repo, reviewParent, "done"); err != nil {
-		return t.fail("close parent #%s: %v", reviewParent, err)
+		applyState.CompletedAdjustments[adjustmentID] = true
+		if err := t.saveReviewApplyState(reviewNumber, applyState); err != nil {
+			return t.fail("persist adjustment apply state: %v", err)
+		}
 	}
 
 	// Refresh and seed next planning issue
@@ -715,11 +779,26 @@ func (t *tickRunner) handleApprovedAdjustment(ctx context.Context, reviewView st
 		return t.fail("%v", err)
 	}
 	t.fetchParentEpics(ctx)
-	if next := t.firstOpenEpic(); next != nil && t.findPlanningChild(next.Number) == nil {
+	if next := t.firstOpenEpic(); next != nil && t.findPlanningChild(next.Number) == nil && !applyState.SeededPlanningIssue {
 		t.info(fmt.Sprintf("seeding planning issue for next epic #%d", next.Number))
 		if _, err := t.issueCreate(ctx, t.cfg.Repo, "Break down "+next.Title+" into tasks", "## Acceptance Criteria\n\n- [ ] Tasks proposed.", "--type", "planning", "--priority", "1", "--estimated-complexity", "low", "--parent-epic", fmt.Sprintf("%d", next.Number)); err != nil {
 			return t.fail("seed planning issue for epic #%d: %v", next.Number, err)
 		}
+		applyState.SeededPlanningIssue = true
+		if err := t.saveReviewApplyState(reviewNumber, applyState); err != nil {
+			return t.fail("persist adjustment apply state: %v", err)
+		}
+	}
+
+	t.info(fmt.Sprintf("closing review #%d and parent #%s", reviewNumber, reviewParent))
+	if err := t.issueSetStatus(ctx, t.cfg.Repo, fmt.Sprintf("%d", reviewNumber), "done"); err != nil {
+		return t.fail("close review #%d: %v", reviewNumber, err)
+	}
+	if err := t.issueSetStatus(ctx, t.cfg.Repo, reviewParent, "done"); err != nil {
+		return t.fail("close parent #%s: %v", reviewParent, err)
+	}
+	if err := t.clearReviewApplyState(reviewNumber); err != nil {
+		return t.fail("clear adjustment apply state: %v", err)
 	}
 
 	t.success(fmt.Sprintf("Applied adjustments from #%d", reviewNumber))
@@ -975,6 +1054,47 @@ func firstNonSelectionCommentID(pending []comments.PendingComment) (string, bool
 	return "", false
 }
 
+func validateProposalDependencies(proposal planning.Proposal) error {
+	if len(proposal.Items) == 0 {
+		return nil
+	}
+	keys := make(map[string]struct{}, len(proposal.Items))
+	for _, item := range proposal.Items {
+		if item.Key == "" {
+			continue
+		}
+		keys[item.Key] = struct{}{}
+	}
+	for _, item := range proposal.Items {
+		for _, depKey := range item.DependsOnKeys {
+			if _, ok := keys[depKey]; ok {
+				continue
+			}
+			return fmt.Errorf("proposal item %q depends on unknown key %q", item.Title, depKey)
+		}
+	}
+	return nil
+}
+
+func (t *tickRunner) validateAdjustments(adjustments []planning.Adjustment) error {
+	for _, adj := range adjustments {
+		switch adj.Type {
+		case "modify":
+			if adj.TargetMilestoneNumber == nil {
+				return fmt.Errorf("modify adjustment missing target milestone number")
+			}
+			if t.findIssueByNumber(*adj.TargetMilestoneNumber) == nil {
+				return fmt.Errorf("modify adjustment target #%d not found", *adj.TargetMilestoneNumber)
+			}
+		case "new_milestone":
+			// Valid as-is.
+		default:
+			return fmt.Errorf("unsupported adjustment type %q", adj.Type)
+		}
+	}
+	return nil
+}
+
 // --- Issue queries ---
 
 func (t *tickRunner) firstOpenEpic() *issue {
@@ -1134,6 +1254,93 @@ func (t *tickRunner) countNonReadyOpenTasks(epicNumber int) int {
 		count++
 	}
 	return count
+}
+
+func proposalItemID(index int, key string) string {
+	if strings.TrimSpace(key) != "" {
+		return key
+	}
+	return fmt.Sprintf("item-%d", index+1)
+}
+
+func (t *tickRunner) loadReviewApplyState(reviewNumber int, kind string) (reviewApplyState, error) {
+	if strings.TrimSpace(t.cfg.RunoqRoot) == "" {
+		return reviewApplyState{
+			Kind:                 kind,
+			CreatedItems:         make(map[string]string),
+			CreatedNodeIDs:       make(map[string]string),
+			LinkedDependencies:   make(map[string]bool),
+			CompletedAdjustments: make(map[string]bool),
+		}, nil
+	}
+	path := t.reviewApplyStatePath(reviewNumber)
+	state := reviewApplyState{
+		Kind:                 kind,
+		CreatedItems:         make(map[string]string),
+		CreatedNodeIDs:       make(map[string]string),
+		LinkedDependencies:   make(map[string]bool),
+		CompletedAdjustments: make(map[string]bool),
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return state, nil
+		}
+		return reviewApplyState{}, err
+	}
+	if err := json.Unmarshal(data, &state); err != nil {
+		return reviewApplyState{}, err
+	}
+	if state.Kind != kind {
+		return reviewApplyState{}, fmt.Errorf("unexpected apply state kind %q", state.Kind)
+	}
+	if state.CreatedItems == nil {
+		state.CreatedItems = make(map[string]string)
+	}
+	if state.CreatedNodeIDs == nil {
+		state.CreatedNodeIDs = make(map[string]string)
+	}
+	if state.LinkedDependencies == nil {
+		state.LinkedDependencies = make(map[string]bool)
+	}
+	if state.CompletedAdjustments == nil {
+		state.CompletedAdjustments = make(map[string]bool)
+	}
+	return state, nil
+}
+
+func (t *tickRunner) saveReviewApplyState(reviewNumber int, state reviewApplyState) error {
+	if strings.TrimSpace(t.cfg.RunoqRoot) == "" {
+		return nil
+	}
+	path := t.reviewApplyStatePath(reviewNumber)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+func (t *tickRunner) clearReviewApplyState(reviewNumber int) error {
+	if strings.TrimSpace(t.cfg.RunoqRoot) == "" {
+		return nil
+	}
+	path := t.reviewApplyStatePath(reviewNumber)
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func (t *tickRunner) reviewApplyStatePath(reviewNumber int) string {
+	root := t.cfg.RunoqRoot
+	if strings.TrimSpace(root) == "" {
+		root = "."
+	}
+	return filepath.Join(root, ".runoq", "state", fmt.Sprintf("review-apply-%d.json", reviewNumber))
 }
 
 func (t *tickRunner) planningMaxRounds() int {

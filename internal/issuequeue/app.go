@@ -438,18 +438,21 @@ func (a *App) Create(ctx context.Context, repo string, title string, body string
 
 	// Set issueType, workflow labels, and blockedBy via GraphQL mutations
 	if newIssueNumber != "" {
-		a.postCreateMutations(ctx, repo, newIssueNumber, opts)
+		if err := a.postCreateMutations(ctx, repo, newIssueNumber, opts); err != nil {
+			return shell.Failf(a.stderr, "Post-create mutations failed for issue #%s: %v", newIssueNumber, err)
+		}
 	}
 
 	// Link as sub-issue of parent epic
 	if opts.ParentEpic != "" && newIssueNumber != "" {
 		childID, err := a.ghClient.Output(ctx, "api", fmt.Sprintf("repos/%s/issues/%s", repo, newIssueNumber), "--jq", ".id")
-		if err == nil {
-			if err := a.ghClient.Run(ctx, []string{"api", fmt.Sprintf("repos/%s/issues/%s/sub_issues", repo, opts.ParentEpic), "--method", "POST", "-F", "sub_issue_id=" + strings.TrimSpace(childID)}, io.Discard, io.Discard); err != nil {
-				a.log("issue-queue", fmt.Sprintf("create: warning: failed to link issue #%s as sub-issue of epic #%s: %v", newIssueNumber, opts.ParentEpic, err))
-			}
-			a.log("issue-queue", fmt.Sprintf("create: linked issue #%s as sub-issue of epic #%s", newIssueNumber, opts.ParentEpic))
+		if err != nil {
+			return shell.Failf(a.stderr, "Failed to look up created issue id for #%s: %v", newIssueNumber, err)
 		}
+		if err := a.ghClient.Run(ctx, []string{"api", fmt.Sprintf("repos/%s/issues/%s/sub_issues", repo, opts.ParentEpic), "--method", "POST", "-F", "sub_issue_id=" + strings.TrimSpace(childID)}, io.Discard, io.Discard); err != nil {
+			return shell.Failf(a.stderr, "Failed to link issue #%s as sub-issue of epic #%s: %v", newIssueNumber, opts.ParentEpic, err)
+		}
+		a.log("issue-queue", fmt.Sprintf("create: linked issue #%s as sub-issue of epic #%s", newIssueNumber, opts.ParentEpic))
 	}
 
 	return a.writeJSON(createResult{Title: title, URL: url})
@@ -776,12 +779,11 @@ func (a *App) writeCreateBody(body string, opts createOptions) (string, error) {
 
 // postCreateMutations runs GraphQL mutations after issue creation:
 // sets issueType, adds workflow/milestone labels, sets blockedBy dependencies.
-func (a *App) postCreateMutations(ctx context.Context, repo string, issueNumber string, opts createOptions) {
+func (a *App) postCreateMutations(ctx context.Context, repo string, issueNumber string, opts createOptions) error {
 	// Get issue node ID
 	nodeID, err := a.ghClient.Output(ctx, "api", fmt.Sprintf("repos/%s/issues/%s", repo, issueNumber), "--jq", ".node_id")
 	if err != nil {
-		a.log("issue-queue", fmt.Sprintf("create: warning: failed to get node ID for #%s: %v", issueNumber, err))
-		return
+		return fmt.Errorf("get node ID for #%s: %w", issueNumber, err)
 	}
 	nodeID = strings.TrimSpace(nodeID)
 
@@ -795,7 +797,7 @@ func (a *App) postCreateMutations(ctx context.Context, repo string, issueNumber 
 		if typeID, ok := issueTypeIDs[ghType]; ok {
 			mutation := fmt.Sprintf(`mutation { updateIssueIssueType(input: {issueId: %q, issueTypeId: %q}) { issue { id } } }`, nodeID, typeID)
 			if err := a.ghClient.Run(ctx, []string{"api", "graphql", "-f", "query=" + mutation}, io.Discard, io.Discard); err != nil {
-				a.log("issue-queue", fmt.Sprintf("create: warning: failed to set issue type for #%s: %v", issueNumber, err))
+				return fmt.Errorf("set issue type for #%s: %w", issueNumber, err)
 			}
 		}
 	}
@@ -831,7 +833,7 @@ func (a *App) postCreateMutations(ctx context.Context, repo string, issueNumber 
 			if json.Unmarshal([]byte(labelIDRaw), &labelResp) == nil && labelResp.Data.Repository.Label.ID != "" {
 				mutation := fmt.Sprintf(`mutation { addLabelsToLabelable(input: {labelableId: %q, labelIds: [%q]}) { labelable { __typename } } }`, nodeID, labelResp.Data.Repository.Label.ID)
 				if err := a.ghClient.Run(ctx, []string{"api", "graphql", "-f", "query=" + mutation}, io.Discard, io.Discard); err != nil {
-					a.log("issue-queue", fmt.Sprintf("create: warning: failed to add label %q to #%s: %v", name, issueNumber, err))
+					return fmt.Errorf("add label %q to #%s: %w", name, issueNumber, err)
 				}
 			}
 		}
@@ -841,14 +843,15 @@ func (a *App) postCreateMutations(ctx context.Context, repo string, issueNumber 
 	for _, dep := range opts.DependsOn {
 		depNodeID, err := a.ghClient.Output(ctx, "api", fmt.Sprintf("repos/%s/issues/%d", repo, dep), "--jq", ".node_id")
 		if err != nil {
-			continue
+			return fmt.Errorf("look up dependency node ID for #%d: %w", dep, err)
 		}
 		depNodeID = strings.TrimSpace(depNodeID)
 		mutation := fmt.Sprintf(`mutation { addBlockedBy(input: {issueId: %q, blockingIssueId: %q}) { blockedIssue { number } } }`, nodeID, depNodeID)
 		if err := a.ghClient.Run(ctx, []string{"api", "graphql", "-f", "query=" + mutation}, io.Discard, io.Discard); err != nil {
-			a.log("issue-queue", fmt.Sprintf("create: warning: failed to add blockedBy dependency %d to #%s: %v", dep, issueNumber, err))
+			return fmt.Errorf("add blockedBy dependency %d to #%s: %w", dep, issueNumber, err)
 		}
 	}
+	return nil
 }
 
 func repoOwner(repo string) string {
